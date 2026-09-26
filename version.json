@@ -1,0 +1,10 @@
+{
+  "buildId": "SNS-2026-PERF-001",
+  "swVersion": "v62",
+  "deployedAt": "2025-07-18T00:00:00Z",
+  "project": "horr-a08f4",
+  "studioVersion": "3.0.1",
+  "cloudStreamVersion": "eternal-3.0",
+  "nexusVersion": "1.0.1",
+  "note": "PERF-001: Add SNXPerf global adaptive cinematic performance system. Auto quality levels ULTRA/HIGH/BALANCED/LITE/MINIMAL. Runtime FPS monitor with hysteresis-based downgrade. Background-tab pause, reduced-motion/save-data respects. Canvas particle counts and lightning/flame effects tied to quality level. Settings page performance control UI. Founder dashboard performance diagnostics. Live/camera mode auto-reduces effects. SW bumped to v62."
+}

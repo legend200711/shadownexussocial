@@ -1,0 +1,1176 @@
+/**
+ * nexus-glass.css
+ * Shadow Nexus Social — Nexus Cinematic Glass Visual Upgrade
+ *
+ * Design philosophy: DEPTH · LIGHT · CONTRAST · TYPOGRAPHY · COMPOSITION
+ * NOT constant animation. CSS-first. Performance-safe.
+ *
+ * Load order: AFTER snx-perf.css  (so glass overrides land last,
+ *             ABOVE the perf quality gates that still suppress
+ *             expensive effects on lite/minimal devices.)
+ *
+ * DO NOT reverse snx-perf.css optimizations.
+ */
+
+/* ═══════════════════════════════════════════════════════
+   NEXUS CINEMATIC GLASS — DESIGN TOKENS
+   Centralized variables used by every section below.
+   ═══════════════════════════════════════════════════════ */
+:root {
+  /* ── Core backgrounds ── */
+  --nexus-bg:            #03080f;        /* near-black with blue tinge  */
+  --nexus-bg-mid:        #060f1c;        /* deep midnight navy           */
+  --nexus-surface:       rgba(6,15,30,0.88);   /* translucent card surface    */
+  --nexus-surface-raised:rgba(8,20,42,0.94);   /* slightly elevated surface   */
+  --nexus-surface-deep:  rgba(3,8,18,0.97);    /* very dark surface           */
+
+  /* ── Brand palette ── */
+  --nexus-blue:          #00AEEF;        /* electric blue — primary accent */
+  --nexus-blue-dim:      #007daa;        /* dimmed blue for borders/muted   */
+  --nexus-blue-glow:     rgba(0,174,239,0.22);
+  --nexus-green:         #39FF14;        /* neon green — success/online     */
+  --nexus-green-dim:     rgba(57,255,20,0.65);
+  --nexus-green-glow:    rgba(57,255,20,0.18);
+
+  /* ── Glass borders — thin, luminous ── */
+  --nexus-border:        rgba(0,140,220,0.18);  /* default glass edge   */
+  --nexus-border-bright: rgba(0,174,239,0.35);  /* hover / focus edge   */
+  --nexus-border-glow:   rgba(0,174,239,0.55);  /* active / selected    */
+
+  /* ── Typography ── */
+  --nexus-text:          #e8f4ff;        /* primary — off-white, readable  */
+  --nexus-text-sub:      #9bbdd8;        /* secondary body text            */
+  --nexus-text-muted:    #4a7a9a;        /* meta / timestamps              */
+  --nexus-text-faint:    rgba(74,122,154,0.55);
+
+  /* ── Radii ── */
+  --nexus-radius-sm:     6px;
+  --nexus-radius:        12px;
+  --nexus-radius-lg:     16px;
+  --nexus-radius-xl:     22px;
+
+  /* ── Shadows — performance-conscious ── */
+  --nexus-shadow-sm:     0 2px 12px rgba(0,20,60,0.55);
+  --nexus-shadow:        0 4px 28px rgba(0,20,60,0.7),
+                         0 0 0 1px rgba(0,140,220,0.06);
+  --nexus-shadow-blue:   0 0 16px rgba(0,140,239,0.2);
+  --nexus-shadow-green:  0 0 12px rgba(57,255,20,0.2);
+
+  /* ── Micro-animation speeds ── */
+  --nexus-transition:    150ms ease;
+  --nexus-transition-md: 200ms ease;
+  --nexus-transition-lg: 280ms cubic-bezier(0.4,0,0.2,1);
+}
+
+/* ═══════════════════════════════════════════════════════
+   GLOBAL BODY — atmospheric dark gradient
+   Replace the flat #0B1F3A with layered depth.
+   ═══════════════════════════════════════════════════════ */
+body {
+  background:
+    radial-gradient(ellipse 130% 80% at 15% 0%,  rgba(0,50,120,0.28) 0%,  transparent 55%),
+    radial-gradient(ellipse 90%  60% at 85% 5%,  rgba(0,80,160,0.18) 0%,  transparent 50%),
+    radial-gradient(ellipse 100% 70% at 50% 100%,rgba(0,30,80,0.22)  0%,  transparent 60%),
+    #03080f !important;
+  background-attachment: fixed !important;
+}
+
+/* ── Vignette: subtler than before, no animation overhead ── */
+body::before {
+  background:
+    radial-gradient(ellipse at 50% 0%,   transparent 20%, rgba(0,0,0,0.35) 100%),
+    radial-gradient(ellipse at 0%   50%,  rgba(0,0,0,0.3) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 50%, rgba(0,0,0,0.3) 0%, transparent 50%),
+    radial-gradient(ellipse at 50%  100%,rgba(0,0,0,0.3) 0%, transparent 50%) !important;
+  z-index: 9998 !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SCROLLBAR — matches cinematic palette
+   ═══════════════════════════════════════════════════════ */
+* {
+  scrollbar-color: rgba(0,174,239,0.28) rgba(3,8,18,0.4) !important;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0,174,239,0.28) !important;
+  border-radius: 4px !important;
+}
+::-webkit-scrollbar-track {
+  background: rgba(3,8,18,0.35) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PAGES — refined fade + micro lift transition
+   ═══════════════════════════════════════════════════════ */
+@keyframes nexusPageIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page.active {
+  animation: nexusPageIn var(--nexus-transition-lg) both !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SIDEBAR / NAVIGATION — Nexus Command Bar
+   ═══════════════════════════════════════════════════════ */
+.sidebar {
+  background:
+    linear-gradient(180deg,
+      rgba(3,8,18,0.98) 0%,
+      rgba(5,12,26,0.97) 50%,
+      rgba(3,7,15,0.99) 100%) !important;
+  border-right: 1px solid var(--nexus-border) !important;
+  box-shadow: 4px 0 32px rgba(0,60,160,0.2),
+              inset -1px 0 0 rgba(0,140,220,0.08) !important;
+}
+
+/* Brand header: subtle blue gradient background */
+.sidebar-brand {
+  background: linear-gradient(135deg,
+    rgba(0,40,100,0.3) 0%,
+    rgba(0,20,60,0.1)  60%,
+    transparent 100%) !important;
+  border-bottom: 1px solid var(--nexus-border) !important;
+  padding: 20px 18px 16px !important;
+}
+
+.sidebar-brand-icon {
+  background: radial-gradient(circle at 40% 35%,
+    rgba(0,80,180,0.9) 0%, rgba(3,8,18,1) 100%) !important;
+  border: 1.5px solid var(--nexus-border-bright) !important;
+  box-shadow: 0 0 14px rgba(0,140,239,0.35),
+              inset 0 0 8px rgba(0,100,200,0.2) !important;
+  /* Remove continuous animation — replaced with hover only */
+  animation: none !important;
+  transition: box-shadow var(--nexus-transition-md),
+              border-color var(--nexus-transition-md) !important;
+}
+.sidebar-brand-icon:hover {
+  box-shadow: 0 0 22px rgba(0,174,239,0.5),
+              inset 0 0 12px rgba(0,120,230,0.3) !important;
+  border-color: var(--nexus-border-glow) !important;
+}
+
+.sidebar-brand-name {
+  font-size: 11px !important;
+  font-weight: 800 !important;
+  color: #c8eeff !important;
+  letter-spacing: 2.5px !important;
+  text-shadow: none !important; /* remove excessive glow */
+}
+
+.sidebar-brand-sub {
+  color: rgba(57,255,20,0.55) !important;
+  letter-spacing: 1px !important;
+}
+
+/* Nav items */
+.nav-item {
+  color: var(--nexus-text-muted) !important;
+  font-size: 13.5px !important;
+  border-radius: var(--nexus-radius-sm) !important;
+  padding: 10px 13px !important;
+  transition: background var(--nexus-transition),
+              color var(--nexus-transition) !important;
+}
+.nav-item:hover {
+  background: rgba(0,100,200,0.1) !important;
+  color: var(--nexus-text) !important;
+  box-shadow: inset 2px 0 0 rgba(0,174,239,0.4) !important;
+}
+.nav-item.active-nav {
+  background: rgba(0,100,200,0.12) !important;
+  color: #c8eeff !important;
+  box-shadow: inset 3px 0 0 var(--nexus-green) !important;
+}
+
+/* Sidebar divider */
+.sidebar-divider {
+  background: linear-gradient(90deg,
+    transparent, rgba(0,140,220,0.15), transparent) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SECTION CARDS — cinematic floating panels
+   ═══════════════════════════════════════════════════════ */
+.section-card {
+  background: var(--nexus-surface) !important;
+  border: 1px solid var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+  box-shadow: var(--nexus-shadow) !important;
+  transition: border-color var(--nexus-transition-md),
+              box-shadow    var(--nexus-transition-md) !important;
+}
+.section-card:hover {
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: var(--nexus-shadow),
+              0 0 28px rgba(0,140,239,0.1) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   GLOBAL BUTTON SYSTEM — one consistent style
+   Base → then specific overrides below.
+   ═══════════════════════════════════════════════════════ */
+button {
+  border-radius: var(--nexus-radius-sm) !important;
+  font-weight: 600 !important;
+  background: rgba(6,15,30,0.75) !important;
+  border: 1px solid var(--nexus-border-bright) !important;
+  color: var(--nexus-blue) !important;
+  transition: background    var(--nexus-transition),
+              border-color  var(--nexus-transition),
+              color         var(--nexus-transition),
+              box-shadow    var(--nexus-transition),
+              transform     0.1s ease !important;
+  touch-action: manipulation !important;
+}
+button:hover {
+  background: rgba(0,80,180,0.15) !important;
+  border-color: var(--nexus-border-glow) !important;
+  color: var(--nexus-text) !important;
+  box-shadow: none !important;
+}
+button:active {
+  transform: scale(0.96) !important;
+}
+
+/* ── PRIMARY — electric blue ── */
+.btn-primary,
+.edit-modal-save,
+.storm-btn,
+.inbox-empty-start-btn {
+  background: linear-gradient(135deg, #004aaa 0%, #0070dd 100%) !important;
+  border: 1px solid rgba(0,174,239,0.55) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+.btn-primary:hover,
+.edit-modal-save:hover,
+.storm-btn:hover {
+  background: linear-gradient(135deg, #005acc 0%, #0088ff 100%) !important;
+  border-color: rgba(0,174,239,0.85) !important;
+  box-shadow: 0 0 16px rgba(0,140,239,0.35) !important;
+}
+
+/* ── SUCCESS / ACTIVE — neon green ── */
+.btn-accept,
+#btnFollowAction.following {
+  background: rgba(0,40,15,0.6) !important;
+  border-color: rgba(57,255,20,0.5) !important;
+  color: var(--nexus-green) !important;
+}
+.btn-accept:hover {
+  background: rgba(0,60,20,0.7) !important;
+  border-color: rgba(57,255,20,0.85) !important;
+  box-shadow: 0 0 14px rgba(57,255,20,0.2) !important;
+}
+
+/* ── DANGER — reserved red ── */
+.btn-delete-account,
+.btn-del-post,
+.btn-decline,
+.btn-confirm-delete {
+  border-color: rgba(255,50,80,0.45) !important;
+  color: #ff5577 !important;
+  background: rgba(80,5,15,0.5) !important;
+}
+.btn-delete-account:hover,
+.btn-del-post:hover,
+.btn-decline:hover,
+.btn-confirm-delete:hover {
+  border-color: rgba(255,50,80,0.85) !important;
+  background: rgba(120,10,25,0.65) !important;
+  box-shadow: 0 0 14px rgba(255,40,70,0.2) !important;
+}
+
+/* ── React / action buttons ── */
+.react-btn {
+  background: rgba(6,15,30,0.65) !important;
+  border-color: rgba(0,100,180,0.22) !important;
+  color: var(--nexus-text-muted) !important;
+  border-radius: 20px !important;
+  font-size: 13px !important;
+  padding: 5px 13px !important;
+  transition: border-color var(--nexus-transition),
+              color         var(--nexus-transition),
+              background    var(--nexus-transition) !important;
+}
+.react-btn:hover {
+  border-color: rgba(57,255,20,0.4) !important;
+  color: var(--nexus-green) !important;
+  background: rgba(0,50,120,0.2) !important;
+  box-shadow: none !important;
+}
+.react-btn:active { transform: scale(0.94) !important; }
+.liked {
+  border-color: rgba(255,51,102,0.5) !important;
+  color: #ff4470 !important;
+  background: rgba(100,10,30,0.2) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   POSTS — Cinematic floating panels
+   ═══════════════════════════════════════════════════════ */
+.postBox {
+  background: var(--nexus-surface) !important;
+  border: 1px solid var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+  padding: 16px 18px !important;
+  box-shadow: var(--nexus-shadow-sm) !important;
+  transition: border-color var(--nexus-transition-md),
+              box-shadow    var(--nexus-transition-md) !important;
+}
+.postBox:hover {
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: var(--nexus-shadow-blue) !important;
+}
+
+/* Post author row */
+.post-author-avatar {
+  border: 1.5px solid var(--nexus-border-bright) !important;
+  transition: border-color var(--nexus-transition) !important;
+}
+.post-author-avatar:hover {
+  border-color: var(--nexus-border-glow) !important;
+}
+
+.post-author-link {
+  color: #c0dcf5 !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  text-shadow: none !important;
+}
+.post-author-link:hover {
+  color: var(--nexus-blue) !important;
+  text-decoration: none !important;
+}
+
+/* Post media — visual focus */
+.post-media-preview,
+.post-media-video {
+  border-radius: var(--nexus-radius) !important;
+  border: 1px solid rgba(0,80,160,0.2) !important;
+  margin-top: 10px !important;
+}
+.post-media-preview:hover {
+  box-shadow: 0 0 20px rgba(0,100,200,0.2) !important;
+  opacity: 1 !important;
+}
+
+/* Post action row — reduce visual clutter */
+.action-row {
+  gap: 6px !important;
+  margin: 10px 0 2px !important;
+}
+
+/* Comment section */
+.commentBox {
+  border-top: 1px solid rgba(0,60,120,0.22) !important;
+  margin-top: 12px !important;
+  padding-top: 10px !important;
+}
+.comment-row {
+  border-bottom-color: rgba(0,40,90,0.15) !important;
+}
+.comment-author {
+  color: var(--nexus-blue) !important;
+  text-shadow: none !important;
+}
+.comment-text {
+  color: var(--nexus-text-sub) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PROFILE — Cinematic hero page
+   ═══════════════════════════════════════════════════════ */
+.profile-header {
+  background: var(--nexus-surface-deep) !important;
+  border: 1px solid var(--nexus-border) !important;
+  border-radius: var(--nexus-radius-lg) !important;
+  box-shadow: var(--nexus-shadow) !important;
+  overflow: hidden !important;
+}
+
+/* Cover image blends naturally into the dark page */
+.cover-banner {
+  background: linear-gradient(135deg,
+    rgba(3,8,18,1) 0%, rgba(6,18,40,1) 100%) !important;
+}
+.cover-banner::after {
+  background: linear-gradient(180deg,
+    transparent 25%,
+    rgba(3,8,18,0.5) 65%,
+    rgba(3,8,18,0.85) 100%) !important;
+}
+
+/* Avatar — elevated with subtle ring */
+.p-avatar {
+  border: 2.5px solid rgba(0,174,239,0.55) !important;
+  box-shadow: 0 0 0 4px rgba(3,8,18,0.9),
+              0 0 20px rgba(0,140,239,0.3) !important;
+  /* No continuous animation */
+  animation: none !important;
+  transition: box-shadow var(--nexus-transition-md),
+              border-color var(--nexus-transition-md) !important;
+}
+.p-avatar:hover {
+  border-color: rgba(0,174,239,0.85) !important;
+  box-shadow: 0 0 0 4px rgba(3,8,18,0.9),
+              0 0 30px rgba(0,174,239,0.45) !important;
+}
+
+/* Profile name hierarchy */
+.profile-display-name {
+  font-size: 21px !important;
+  font-weight: 800 !important;
+  color: var(--nexus-text) !important;
+  text-shadow: none !important;
+  letter-spacing: -0.2px !important;
+}
+.profile-handle-text {
+  color: var(--nexus-text-muted) !important;
+  font-size: 13px !important;
+}
+.profile-bio-text {
+  color: var(--nexus-text-sub) !important;
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+}
+.profile-mood-text {
+  color: var(--nexus-green) !important;
+  text-shadow: none !important;
+  font-size: 13px !important;
+}
+.profile-joined-text {
+  color: var(--nexus-text-faint) !important;
+  font-size: 11px !important;
+}
+
+/* Stats row */
+.stat-num {
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  color: var(--nexus-text) !important;
+  transition: color var(--nexus-transition) !important;
+}
+.profile-stat:hover .stat-num {
+  color: var(--nexus-blue) !important;
+  text-shadow: none !important;
+}
+.stat-label {
+  color: var(--nexus-text-muted) !important;
+  font-size: 11px !important;
+}
+
+/* Profile actions */
+.profile-actions-row button {
+  border-radius: 20px !important;
+  font-size: 13px !important;
+  padding: 7px 18px !important;
+}
+
+/* Profile tabs */
+.tab-btn {
+  color: var(--nexus-text-muted) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  transition: color var(--nexus-transition) !important;
+}
+.tab-btn:hover { color: var(--nexus-text-sub) !important; }
+.tab-btn.active {
+  color: var(--nexus-green) !important;
+  border-bottom-color: var(--nexus-green) !important;
+  text-shadow: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MESSAGES / INBOX — darker, calmer
+   ═══════════════════════════════════════════════════════ */
+.inbox-split {
+  background: transparent !important;
+  border: 1px solid var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+  box-shadow: var(--nexus-shadow) !important;
+}
+
+.inbox-list-pane {
+  background: var(--nexus-surface-deep) !important;
+  border-right-color: rgba(0,50,100,0.2) !important;
+}
+
+.inbox-chat-pane {
+  background: linear-gradient(180deg,
+    rgba(5,12,25,1) 0%,
+    rgba(3,8,16,1)  100%) !important;
+}
+
+.inbox-chat-header {
+  background: var(--nexus-surface-deep) !important;
+  border-bottom-color: var(--nexus-border) !important;
+}
+
+.inbox-conv-item {
+  transition: background var(--nexus-transition) !important;
+  border-bottom-color: rgba(0,40,80,0.12) !important;
+}
+.inbox-conv-item:hover {
+  background: rgba(0,80,160,0.07) !important;
+}
+.inbox-conv-item.active-conv {
+  background: rgba(0,80,180,0.1) !important;
+  border-left-color: var(--nexus-blue) !important;
+}
+
+/* Message bubbles */
+.ipc-modal-bwrap.me .ipc-modal-bubble {
+  background: linear-gradient(135deg,
+    rgba(0,30,90,0.9)  0%,
+    rgba(0,55,140,0.9) 100%) !important;
+  border-color: rgba(0,140,220,0.35) !important;
+  color: var(--nexus-text) !important;
+}
+.ipc-modal-bwrap.them .ipc-modal-bubble {
+  background: rgba(5,12,25,0.95) !important;
+  border-color: rgba(0,80,150,0.22) !important;
+  color: var(--nexus-text-sub) !important;
+}
+
+/* Inbox message bubbles (full inbox page) */
+.inbox-chat-pane .ipc-modal-bwrap.me .ipc-modal-bubble {
+  background: linear-gradient(135deg,
+    rgba(0,30,90,0.9)  0%,
+    rgba(0,55,140,0.9) 100%) !important;
+}
+
+/* Message input */
+.ipc-modal-input-wrap,
+.inbox-chat-input-wrap,
+.storm-footer-input-wrap {
+  background: rgba(5,12,28,0.9) !important;
+  border-color: rgba(0,100,180,0.35) !important;
+}
+.ipc-modal-input-wrap:focus-within,
+.inbox-chat-input-wrap:focus-within,
+.storm-footer-input-wrap:focus-within {
+  border-color: rgba(0,174,239,0.55) !important;
+  box-shadow: 0 0 8px rgba(0,120,220,0.15) !important;
+}
+#ipcModalInput,
+#inboxChatInput,
+#stormMsgInput {
+  color: var(--nexus-text) !important;
+}
+#ipcModalInput::placeholder,
+#inboxChatInput::placeholder,
+#stormMsgInput::placeholder {
+  color: rgba(74,122,154,0.45) !important;
+}
+
+/* Send button */
+.ipc-modal-send,
+.inbox-chat-send {
+  background: linear-gradient(135deg, #004aaa 0%, #0070dd 100%) !important;
+  border-color: rgba(0,174,239,0.5) !important;
+  box-shadow: 0 0 10px rgba(0,120,220,0.3) !important;
+  transition: background var(--nexus-transition),
+              box-shadow  var(--nexus-transition),
+              transform   0.1s ease !important;
+}
+.ipc-modal-send:hover,
+.inbox-chat-send:hover {
+  background: linear-gradient(135deg, #005acc 0%, #0088ff 100%) !important;
+  border-color: rgba(0,174,239,0.85) !important;
+  box-shadow: 0 0 18px rgba(0,140,220,0.4) !important;
+  transform: scale(1.06) !important;
+}
+
+/* DM Chat footer */
+.ipc-modal-footer,
+.inbox-chat-footer {
+  background: var(--nexus-surface-deep) !important;
+  border-top-color: var(--nexus-border) !important;
+}
+
+/* ── Online indicator ── */
+.online-dot,
+.profile-online-dot,
+.inbox-conv-online-dot.online,
+.ipc-modal-status-dot.online,
+.inbox-chat-hdr-status.online {
+  background: var(--nexus-green) !important;
+  box-shadow: 0 0 6px rgba(57,255,20,0.6) !important;
+  /* Breath animation stays, but only for online indicators — it's meaningful */
+}
+
+/* ═══════════════════════════════════════════════════════
+   NOTIFICATIONS
+   ═══════════════════════════════════════════════════════ */
+.notif-item {
+  border-bottom-color: rgba(0,40,80,0.15) !important;
+  border-radius: var(--nexus-radius-sm) !important;
+  transition: background var(--nexus-transition) !important;
+}
+.notif-item:hover {
+  background: rgba(0,80,160,0.06) !important;
+}
+.notif-item.unread {
+  background: rgba(0,60,160,0.07) !important;
+  border-left: 2px solid rgba(57,255,20,0.35) !important;
+}
+.notif-text {
+  color: var(--nexus-text-sub) !important;
+  font-size: 13px !important;
+}
+.notif-time {
+  color: var(--nexus-text-faint) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SEARCH PAGE
+   ═══════════════════════════════════════════════════════ */
+.user-card {
+  background: var(--nexus-surface) !important;
+  border: 1px solid var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+  transition: border-color var(--nexus-transition-md),
+              box-shadow    var(--nexus-transition-md) !important;
+}
+.user-card:hover {
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: var(--nexus-shadow-blue) !important;
+}
+.user-card-name {
+  color: var(--nexus-text) !important;
+  font-weight: 700 !important;
+}
+.user-card-handle { color: var(--nexus-text-muted) !important; }
+.user-card-bio    { color: var(--nexus-text-sub) !important; }
+
+/* ═══════════════════════════════════════════════════════
+   SETTINGS PAGE
+   ═══════════════════════════════════════════════════════ */
+.settings-section h4 {
+  color: var(--nexus-blue) !important;
+  font-size: 11px !important;
+  letter-spacing: 2px !important;
+  text-transform: uppercase !important;
+  text-shadow: none !important;
+  border-bottom-color: rgba(0,100,200,0.15) !important;
+  margin-bottom: 10px !important;
+}
+.settings-label { color: var(--nexus-text-sub) !important; }
+.settings-label small { color: var(--nexus-text-muted) !important; }
+.settings-row {
+  border-bottom-color: rgba(0,40,80,0.15) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODALS — consistent cinematic treatment
+   ═══════════════════════════════════════════════════════ */
+.edit-profile-inner,
+.social-list-inner,
+.badge-tooltip-inner,
+.fam-req-inner,
+.delete-modal-inner,
+.inbox-nm-card,
+.inbox-del-card {
+  background: var(--nexus-surface-deep) !important;
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: 0 16px 60px rgba(0,0,0,0.85),
+              0 0 0 1px rgba(0,140,220,0.08) !important;
+  border-radius: var(--nexus-radius-lg) !important;
+}
+
+/* Modal backdrop */
+#ipcModal,
+.edit-profile-modal,
+.social-list-modal,
+.badge-tooltip-modal,
+#familyReqModal,
+#deleteAccountModal,
+#inboxNewMsgModal,
+#inboxDelConvModal {
+  background: rgba(2,5,14,0.88) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
+}
+
+/* Edit profile modal specifics */
+.edit-profile-inner h3 {
+  color: var(--nexus-blue) !important;
+  text-shadow: none !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+}
+.edit-profile-inner label {
+  color: var(--nexus-text-muted) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.3px !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   FORMS — inputs, textareas, selects
+   ═══════════════════════════════════════════════════════ */
+input, textarea, select {
+  background: rgba(3,8,18,0.92) !important;
+  border-color: rgba(0,120,200,0.28) !important;
+  color: var(--nexus-text) !important;
+  border-radius: var(--nexus-radius-sm) !important;
+  transition: border-color var(--nexus-transition),
+              box-shadow    var(--nexus-transition) !important;
+}
+input::placeholder, textarea::placeholder {
+  color: rgba(74,122,154,0.4) !important;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: rgba(0,174,239,0.5) !important;
+  box-shadow: 0 0 8px rgba(0,120,220,0.18) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   STORM / SUPPORT ROOMS
+   ═══════════════════════════════════════════════════════ */
+.storm-card, .support-card {
+  background: var(--nexus-surface) !important;
+  border-color: var(--nexus-border) !important;
+  box-shadow: var(--nexus-shadow-sm) !important;
+}
+.storm-room-header {
+  background: var(--nexus-surface-deep) !important;
+  border-color: var(--nexus-border) !important;
+}
+.storm-messages {
+  background: rgba(3,7,15,0.75) !important;
+}
+.storm-msg.mine .storm-bubble {
+  background: linear-gradient(135deg,
+    rgba(0,30,90,0.9) 0%, rgba(0,55,140,0.9) 100%) !important;
+  border-color: rgba(0,140,220,0.3) !important;
+}
+.storm-msg.theirs .storm-bubble {
+  background: rgba(5,12,25,0.9) !important;
+  border-color: rgba(0,70,130,0.2) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LIVE FEED CARDS
+   ═══════════════════════════════════════════════════════ */
+.feed-live-card {
+  background: rgba(6,12,26,0.95) !important;
+  border-color: rgba(255,40,70,0.3) !important;
+  border-radius: var(--nexus-radius) !important;
+  box-shadow: 0 2px 14px rgba(255,20,50,0.08) !important;
+  transition: border-color var(--nexus-transition-md),
+              box-shadow    var(--nexus-transition-md),
+              transform     0.15s ease !important;
+}
+.feed-live-card:hover {
+  border-color: rgba(255,40,70,0.65) !important;
+  box-shadow: 0 4px 24px rgba(255,20,50,0.2) !important;
+  transform: translateY(-2px) !important;
+}
+
+/* V2 neon border: remove continuous animation on balanced/lower;
+   snx-perf.css already handles lite/minimal, but let's calm it for balanced too */
+.feed-live-card-v2 {
+  border: 1.5px solid rgba(0,174,239,0.4) !important;
+  box-shadow: 0 2px 10px rgba(0,100,200,0.1) !important;
+  /* Disable the border animation — replace with hover only */
+  animation: feedCardIn 0.25s ease-out both !important;
+}
+.feed-live-card-v2:hover {
+  border-color: rgba(57,255,20,0.6) !important;
+  box-shadow: 0 4px 20px rgba(57,255,20,0.18) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MUSIC CARD IN POSTS
+   ═══════════════════════════════════════════════════════ */
+.post-music-card {
+  background: var(--nexus-surface) !important;
+  border-color: var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+}
+.post-music-title { color: var(--nexus-text) !important; }
+
+/* ═══════════════════════════════════════════════════════
+   BADGES — keep their unique color identities
+   ═══════════════════════════════════════════════════════ */
+.badge-rarity-epic     { animation: none !important; }  /* controlled by snx-perf.css on ultra/high */
+.badge-rarity-legendary{ animation: none !important; }
+
+/* ── Allow epic/legendary back on ultra+high ── */
+.snx-quality-ultra .badge-rarity-epic,
+.snx-quality-high  .badge-rarity-epic {
+  animation: epicBadgePulse 2.5s ease-in-out infinite !important;
+}
+.snx-quality-ultra .badge-rarity-legendary,
+.snx-quality-high  .badge-rarity-legendary {
+  animation: legendaryBadgePulse 2s ease-in-out infinite !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   NOTIFICATIONS TOAST
+   ═══════════════════════════════════════════════════════ */
+#notification-toast {
+  background: var(--nexus-surface-deep) !important;
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: 0 4px 24px rgba(0,80,200,0.3) !important;
+  color: var(--nexus-text-sub) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   TYPOGRAPHY — global hierarchy improvements
+   ═══════════════════════════════════════════════════════ */
+
+/* Page section headings */
+.section-card h2,
+.section-card h3 {
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  color: var(--nexus-text) !important;
+  letter-spacing: -0.1px !important;
+  margin-bottom: 12px !important;
+}
+
+/* Small meta labels — uppercase tracking */
+.settings-section h4,
+.snx-perf-settings-title,
+.snx-perf-dash-title {
+  letter-spacing: 2px !important;
+  font-size: 11px !important;
+}
+
+/* Inbox page title animation → simpler */
+.inbox-page-title {
+  animation: none !important;
+  color: var(--nexus-text) !important;
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  text-shadow: none !important;
+  letter-spacing: -0.2px !important;
+}
+
+/* Eclipse / nexus glow title — keep it only where dramatic */
+.eclipse-title {
+  animation: nexusGlow 4s ease-in-out infinite alternate !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PERFORMANCE SETTINGS UI — keep cinematic style
+   ═══════════════════════════════════════════════════════ */
+.snx-perf-settings-title { color: var(--nexus-blue) !important; }
+.snx-perf-settings-sub   { color: var(--nexus-text-muted) !important; }
+.snx-perf-btn {
+  background: var(--nexus-surface) !important;
+  border-color: var(--nexus-border) !important;
+  color: var(--nexus-text-muted) !important;
+  border-radius: var(--nexus-radius-sm) !important;
+}
+.snx-perf-btn:hover {
+  background: rgba(0,60,140,0.2) !important;
+  border-color: var(--nexus-border-bright) !important;
+  color: var(--nexus-text) !important;
+}
+.snx-perf-btn.active {
+  background: rgba(0,80,180,0.2) !important;
+  border-color: var(--nexus-border-glow) !important;
+  color: var(--nexus-blue) !important;
+  box-shadow: 0 0 10px rgba(0,174,239,0.2) !important;
+}
+.snx-perf-toggle-row {
+  background: var(--nexus-surface) !important;
+  border-color: var(--nexus-border) !important;
+  border-radius: var(--nexus-radius-sm) !important;
+}
+.snx-perf-dashboard {
+  background: var(--nexus-surface-deep) !important;
+  border-color: var(--nexus-border) !important;
+}
+.snx-perf-dash-item {
+  background: rgba(3,8,20,0.7) !important;
+  border-color: var(--nexus-border) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   FOUNDER CONTROL CENTER — Nexus command center aesthetic
+   ═══════════════════════════════════════════════════════ */
+#adminPage .section-card {
+  background: var(--nexus-surface-deep) !important;
+  border-color: rgba(0,120,200,0.2) !important;
+}
+#adminPage .settings-section h4,
+#adminPage h3,
+#adminPage h4 {
+  color: var(--nexus-blue) !important;
+  text-shadow: none !important;
+  font-size: 11px !important;
+  letter-spacing: 2px !important;
+  text-transform: uppercase !important;
+  border-bottom: 1px solid rgba(0,100,180,0.15) !important;
+  padding-bottom: 6px !important;
+}
+
+/* Admin user rows */
+.admin-user-row {
+  border-bottom-color: rgba(0,40,80,0.2) !important;
+  padding: 12px 0 !important;
+}
+.admin-user-name   { color: var(--nexus-text) !important; }
+.admin-user-handle { color: var(--nexus-text-muted) !important; }
+
+/* ── Maintenance status badges ── */
+.maint-status-badge { border-radius: 20px !important; }
+
+/* ═══════════════════════════════════════════════════════
+   PWA INSTALL BANNER — cinematic glass
+   ═══════════════════════════════════════════════════════ */
+#pwa-install-banner {
+  background: var(--nexus-surface-deep) !important;
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: 0 8px 36px rgba(0,80,200,0.3),
+              0 0 0 1px rgba(0,174,239,0.06) !important;
+}
+#pwa-install-banner .banner-title  { color: var(--nexus-text) !important; }
+#pwa-install-banner .banner-sub    { color: var(--nexus-text-muted) !important; }
+
+/* ═══════════════════════════════════════════════════════
+   MEDIA VIEWER — fullscreen cinematic
+   ═══════════════════════════════════════════════════════ */
+#snxMediaViewer {
+  background: rgba(0,0,0,0.97) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SKELETON LOADERS — calm loading state
+   ═══════════════════════════════════════════════════════ */
+.snx-skeleton-post {
+  background: var(--nexus-surface) !important;
+  border-color: var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+}
+.snx-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(0,30,70,0.25)  0%,
+    rgba(0,70,150,0.12) 40%,
+    rgba(0,30,70,0.25)  80%
+  ) !important;
+  background-size: 200% 100% !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CONTEXT MENUS
+   ═══════════════════════════════════════════════════════ */
+.msg-ctx-menu,
+.inbox-conv-ctx-menu {
+  background: var(--nexus-surface-deep) !important;
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.85),
+              0 0 0 1px rgba(0,140,220,0.08) !important;
+  border-radius: var(--nexus-radius) !important;
+}
+.msg-ctx-item,
+.inbox-conv-ctx-item {
+  color: var(--nexus-text-sub) !important;
+  transition: background var(--nexus-transition) !important;
+}
+.msg-ctx-item:hover,
+.inbox-conv-ctx-item:hover {
+  background: rgba(0,80,160,0.1) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LIVE FEED CARDS — cinematic framing only
+   (No background animations — keep video performance first)
+   ═══════════════════════════════════════════════════════ */
+.snx-feed-live-card {
+  background: linear-gradient(135deg,
+    rgba(80,0,20,0.12),
+    rgba(5,10,22,0.97)) !important;
+  border-color: rgba(255,40,70,0.35) !important;
+  border-radius: var(--nexus-radius) !important;
+  box-shadow: 0 2px 16px rgba(255,20,50,0.1) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SOCIAL LIST MODALS (followers/following)
+   ═══════════════════════════════════════════════════════ */
+.social-list-item:hover {
+  background: rgba(0,80,160,0.08) !important;
+}
+.social-list-name    { color: var(--nexus-text) !important; }
+.social-list-handle  { color: var(--nexus-text-muted) !important; }
+
+/* ═══════════════════════════════════════════════════════
+   COMMUNITY / STORM / SUPPORT SECTION CARDS
+   ═══════════════════════════════════════════════════════ */
+.support-room-btn {
+  background: rgba(5,12,28,0.7) !important;
+  border-color: var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+  transition: background    var(--nexus-transition-md),
+              border-color  var(--nexus-transition-md),
+              box-shadow    var(--nexus-transition-md) !important;
+}
+.support-room-btn:hover {
+  background: rgba(0,40,90,0.5) !important;
+  border-color: var(--nexus-border-bright) !important;
+  box-shadow: var(--nexus-shadow-blue) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   FRIENDS & FAMILY CARDS
+   ═══════════════════════════════════════════════════════ */
+.friend-card {
+  border-bottom-color: rgba(0,40,80,0.2) !important;
+}
+.friend-name { color: var(--nexus-text) !important; }
+.friend-name:hover { color: var(--nexus-blue) !important; }
+
+.profile-family-section,
+.profile-friends-section {
+  background: var(--nexus-surface) !important;
+  border-color: var(--nexus-border) !important;
+  border-radius: var(--nexus-radius) !important;
+}
+.profile-family-title { color: #ff88aa !important; }
+.profile-friends-title { color: var(--nexus-text-sub) !important; }
+
+/* ═══════════════════════════════════════════════════════
+   SPOTLIGHT / PINNED MESSAGE
+   ═══════════════════════════════════════════════════════ */
+.profile-spotlight {
+  background: rgba(3,8,20,0.6) !important;
+  border-radius: var(--nexus-radius-sm) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   UPLOAD UI
+   ═══════════════════════════════════════════════════════ */
+.snx-upload-btn {
+  border-color: var(--nexus-border-bright) !important;
+  color: var(--nexus-blue) !important;
+  background: rgba(0,140,239,0.07) !important;
+  transition: background    var(--nexus-transition),
+              border-color  var(--nexus-transition) !important;
+}
+.snx-upload-btn:hover {
+  background: rgba(0,140,239,0.15) !important;
+  border-color: var(--nexus-border-glow) !important;
+}
+.snx-dropzone {
+  border-color: rgba(0,140,239,0.28) !important;
+  border-radius: var(--nexus-radius) !important;
+}
+.snx-dropzone.drag-over {
+  border-color: var(--nexus-border-glow) !important;
+  background: rgba(0,140,239,0.06) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LITE / MINIMAL FALLBACKS
+   On weak devices use opaque dark instead of glass blur.
+   ═══════════════════════════════════════════════════════ */
+.snx-quality-lite .postBox,
+.snx-quality-minimal .postBox {
+  background: #040a18 !important;
+  box-shadow: none !important;
+}
+.snx-quality-lite .section-card,
+.snx-quality-minimal .section-card {
+  background: #040a18 !important;
+  box-shadow: none !important;
+}
+.snx-quality-lite .sidebar,
+.snx-quality-minimal .sidebar {
+  background: #020610 !important;
+}
+.snx-quality-lite body,
+.snx-quality-minimal body {
+  background: #03080f !important;
+}
+/* No background radial gradients on minimal */
+.snx-quality-minimal body::before,
+.snx-quality-minimal body::after {
+  display: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LIVE ACTIVE — strip decorative effects (perf priority)
+   ═══════════════════════════════════════════════════════ */
+.snx-live-active .postBox,
+.snx-camera-active .postBox {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+.snx-live-active body,
+.snx-camera-active body {
+  background: #03080f !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   REDUCED MOTION — respect system preference
+   ═══════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .p-avatar,
+  .sidebar-brand-icon,
+  .profile-live-badge,
+  .eclipse-title,
+  .inbox-page-title {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .postBox,
+  .section-card,
+  .feed-live-card,
+  .user-card {
+    transition: none !important;
+  }
+
+  .page.active {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   MOBILE REFINEMENTS (≤640px)
+   ═══════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .postBox {
+    border-radius: var(--nexus-radius-sm) !important;
+    padding: 13px 14px !important;
+  }
+  .section-card {
+    border-radius: var(--nexus-radius-sm) !important;
+    padding: 14px !important;
+  }
+  .profile-display-name {
+    font-size: 18px !important;
+  }
+  .inbox-split {
+    border-radius: 0 !important;
+  }
+  /* Simpler backdrop on mobile — performance */
+  .ipc-modal-input-wrap,
+  .inbox-chat-input-wrap {
+    background: #050d1e !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   LARGE DESKTOP (≥1440px) — slight breathing room
+   ═══════════════════════════════════════════════════════ */
+@media (min-width: 1440px) {
+  .postBox {
+    padding: 20px 22px !important;
+  }
+  .section-card {
+    padding: 22px !important;
+  }
+}

@@ -1,0 +1,967 @@
+/*
+ * Shadow Nexus Social — theme-engine.css
+ * NEXUS GLOBAL THEME ENGINE
+ *
+ * Architecture:
+ *   1. CSS Theme Variables — the single source of truth for every color/style
+ *   2. Default (Shadow Nexus Default) token values
+ *   3. Theme transition helpers
+ *   4. Effects layer (particles, snow, lightning, etc.)
+ *   5. Founder Theme Control Center UI
+ *   6. Event Banner / Countdown
+ *   7. Background overlay layer
+ */
+
+/* ═══════════════════════════════════════════════════════════════════
+   §1  GLOBAL THEME TOKENS
+   Every component references these variables. Theme changes update
+   only this block — the entire UI follows automatically.
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  /* Core palette */
+  --theme-primary:      #00AEEF;
+  --theme-secondary:    #39FF14;
+  --theme-accent:       #0066FF;
+  --theme-background:   #0B1F3A;
+  --theme-surface:      #0d2444;
+  --theme-card:         #0d2444;
+  --theme-navbar:       #071428;
+  --theme-menu:         #050f1e;
+  --theme-input:        #0a1c35;
+
+  /* Text */
+  --theme-text:         #ffffff;
+  --theme-muted-text:   #6a90b8;
+
+  /* Interactive */
+  --theme-button:       #00AEEF;
+  --theme-button-text:  #ffffff;
+  --theme-link:         #00AEEF;
+  --theme-border:       #1a3a5c;
+
+  /* Feedback */
+  --theme-danger:       #ff4455;
+  --theme-success:      #39FF14;
+  --theme-warning:      #ffaa00;
+
+  /* Effects */
+  --theme-glow:         rgba(0,174,239,0.40);
+  --theme-shadow:       rgba(0,0,0,0.80);
+
+  /* Shape */
+  --theme-radius:       10px;
+
+  /* Background extras */
+  --theme-bg-image:     none;
+  --theme-bg-opacity:   1;
+  --theme-bg-blur:      0px;
+  --theme-bg-brightness: 1;
+  --theme-bg-overlay:   rgba(0,0,0,0);
+  --theme-bg-size:      cover;
+  --theme-bg-position:  center center;
+  --theme-bg-attachment: scroll;
+
+  /* Font */
+  --theme-font:         'Segoe UI', Arial, sans-serif;
+
+  /* Transition speed for theme changes */
+  --theme-transition:   400ms ease;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   §2  GLOBAL THEME APPLICATION
+   Apply tokens to the existing Shadow Nexus CSS variable set so all
+   existing components automatically pick up theme changes.
+   ═══════════════════════════════════════════════════════════════════ */
+body {
+  background-color: var(--theme-background) !important;
+  color: var(--theme-text) !important;
+  font-family: var(--theme-font) !important;
+  transition: background-color var(--theme-transition), color var(--theme-transition);
+}
+
+/* Map theme tokens to existing design-token names */
+:root {
+  --bg-main:        var(--theme-background);
+  --bg-card:        var(--theme-card);
+  --bg-input:       var(--theme-input);
+  --bg-deep:        var(--theme-surface);
+  --neon-blue:      var(--theme-primary);
+  --neon-green:     var(--theme-secondary);
+  --text-primary:   var(--theme-text);
+  --text-muted:     var(--theme-muted-text);
+  --border-color:   var(--theme-border);
+  --accent-glow:    var(--theme-glow);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   §3  THEME BACKGROUND LAYER
+   Sits below all content. Handles image/gradient/solid backgrounds.
+   ═══════════════════════════════════════════════════════════════════ */
+#snx-theme-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-image: var(--theme-bg-image);
+  background-size: var(--theme-bg-size);
+  background-position: var(--theme-bg-position);
+  background-attachment: var(--theme-bg-attachment);
+  background-color: var(--theme-background);
+  opacity: var(--theme-bg-opacity);
+  filter: blur(var(--theme-bg-blur)) brightness(var(--theme-bg-brightness));
+  transition: opacity var(--theme-transition), filter var(--theme-transition);
+  will-change: opacity, filter;
+}
+
+#snx-theme-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--theme-bg-overlay);
+  transition: background var(--theme-transition);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   §4  SMOOTH THEME TRANSITION VEIL
+   A brief full-screen fade used when switching themes live.
+   ═══════════════════════════════════════════════════════════════════ */
+#snx-theme-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 99990;
+  pointer-events: none;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  will-change: opacity;
+}
+#snx-theme-veil.fade-in  { opacity: 0.35; }
+#snx-theme-veil.fade-out { opacity: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   §5  EFFECTS LAYER
+   All particle / weather effects render here.
+   pointer-events:none ensures they never block UI interaction.
+   ═══════════════════════════════════════════════════════════════════ */
+#snx-effects-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9995;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Reduced-motion: disable all theme effects */
+@media (prefers-reduced-motion: reduce) {
+  #snx-effects-layer { display: none !important; }
+  #snx-theme-bg { filter: none !important; }
+}
+
+/* ── Snow / Winter ── */
+.snx-snowflake {
+  position: absolute;
+  top: -10px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.88);
+  pointer-events: none;
+  animation: snxSnowFall linear infinite;
+  will-change: transform, opacity;
+}
+@keyframes snxSnowFall {
+  0%   { transform: translateX(0) translateY(0) rotate(0deg);   opacity: 0.9; }
+  100% { transform: translateX(var(--sx, 20px)) translateY(110vh) rotate(360deg); opacity: 0.2; }
+}
+
+/* ── Rain ── */
+.snx-raindrop {
+  position: absolute;
+  top: -20px;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(174,214,241,0) 0%, rgba(174,214,241,0.75) 100%);
+  pointer-events: none;
+  animation: snxRainFall linear infinite;
+  will-change: transform;
+}
+@keyframes snxRainFall {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(110vh); }
+}
+
+/* ── Falling Leaves ── */
+.snx-leaf {
+  position: absolute;
+  top: -30px;
+  pointer-events: none;
+  font-size: 16px;
+  opacity: 0.85;
+  animation: snxLeafFall linear infinite;
+  will-change: transform, opacity;
+}
+@keyframes snxLeafFall {
+  0%   { transform: translateX(0) translateY(0)   rotate(0deg);   opacity: 0.9; }
+  50%  { transform: translateX(var(--lsx,30px)) translateY(50vh) rotate(180deg); opacity: 0.8; }
+  100% { transform: translateX(var(--lex,-10px)) translateY(110vh) rotate(360deg); opacity: 0.1; }
+}
+
+/* ── Hearts ── */
+.snx-heart {
+  position: absolute;
+  bottom: -30px;
+  pointer-events: none;
+  animation: snxHeartRise linear infinite;
+  will-change: transform, opacity;
+  color: #ff4488;
+  font-size: 14px;
+}
+@keyframes snxHeartRise {
+  0%   { transform: translateY(0) translateX(0) scale(0.8);   opacity: 0; }
+  10%  { opacity: 0.9; }
+  80%  { opacity: 0.6; }
+  100% { transform: translateY(-110vh) translateX(var(--hx, 20px)) scale(1.2); opacity: 0; }
+}
+
+/* ── Stars / Sparkles ── */
+.snx-star {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.9);
+  pointer-events: none;
+  animation: snxStarTwinkle ease-in-out infinite;
+  will-change: opacity, transform;
+}
+@keyframes snxStarTwinkle {
+  0%,100% { opacity: 0.2; transform: scale(0.8); }
+  50%     { opacity: 1;   transform: scale(1.2); }
+}
+
+/* ── Confetti ── */
+.snx-confetti {
+  position: absolute;
+  top: -20px;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+  animation: snxConfettiFall linear infinite;
+  will-change: transform, opacity;
+  border-radius: 1px;
+}
+@keyframes snxConfettiFall {
+  0%   { transform: translateY(0) translateX(0) rotate(0deg);   opacity: 1; }
+  100% { transform: translateY(110vh) translateX(var(--cx, 40px)) rotate(var(--cr, 720deg)); opacity: 0.1; }
+}
+
+/* ── Embers / Fire ── */
+.snx-ember {
+  position: absolute;
+  bottom: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffcc00, #ff4400 60%, transparent 100%);
+  pointer-events: none;
+  animation: snxEmberRise ease-out infinite;
+  will-change: transform, opacity;
+}
+@keyframes snxEmberRise {
+  0%   { transform: translateY(0) translateX(0) scale(1);   opacity: 0.9; }
+  60%  { opacity: 0.7; }
+  100% { transform: translateY(-70vh) translateX(var(--ex, 30px)) scale(0.3); opacity: 0; }
+}
+
+/* ── Lightning ── */
+.snx-lightning-flash {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(0,180,255,0.08);
+  opacity: 0;
+  animation: snxLightningStrike 0.15s ease-out forwards;
+}
+@keyframes snxLightningStrike {
+  0%   { opacity: 1; }
+  60%  { opacity: 0.5; }
+  100% { opacity: 0; }
+}
+
+/* ── Fog / Mist ── */
+.snx-fog-band {
+  position: absolute;
+  left: -20%;
+  width: 140%;
+  pointer-events: none;
+  background: radial-gradient(ellipse 90% 50% at 50% 50%, rgba(var(--fog-rgb,30,30,80), 0.20) 0%, transparent 100%);
+  border-radius: 50%;
+  animation: snxFogDrift ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+@keyframes snxFogDrift {
+  0%   { transform: translateX(-5%) translateY(0);   opacity: 0.6; }
+  100% { transform: translateX(5%)  translateY(-3%); opacity: 1;   }
+}
+
+/* ── Cyber / Neon Particles ── */
+.snx-cyber-particle {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: snxCyberFloat linear infinite;
+  will-change: transform, opacity;
+}
+@keyframes snxCyberFloat {
+  0%   { transform: translateY(0) translateX(0);       opacity: 0;   }
+  8%   { opacity: 1; }
+  90%  { opacity: 0.7; }
+  100% { transform: translateY(-100vh) translateX(var(--cpx,20px)); opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   §6  EVENT BANNER + COUNTDOWN
+   ═══════════════════════════════════════════════════════════════════ */
+#snx-event-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9980;
+  background: var(--theme-surface);
+  border-bottom: 1px solid var(--theme-border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--theme-text);
+  box-shadow: 0 2px 16px var(--theme-shadow);
+  transform: translateY(0);
+  transition: transform 0.3s ease;
+}
+#snx-event-banner.hidden { transform: translateY(-100%); }
+#snx-event-banner .banner-text {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 10px var(--theme-glow);
+}
+#snx-event-banner .banner-countdown {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--theme-muted-text);
+}
+.banner-count-unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--theme-border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  min-width: 42px;
+}
+.banner-count-value {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--theme-primary);
+  line-height: 1;
+}
+.banner-count-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--theme-muted-text);
+  margin-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   §7  FOUNDER THEME PREVIEW BANNER
+   Shown only when the Founder is in private preview mode.
+   ═══════════════════════════════════════════════════════════════════ */
+#snx-preview-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 99970;
+  background: linear-gradient(135deg, rgba(20,0,60,0.97), rgba(40,10,80,0.97));
+  border-top: 2px solid rgba(160,80,255,0.7);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 -4px 24px rgba(120,0,255,0.30);
+}
+#snx-preview-bar .preview-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #cc88ff;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+#snx-preview-bar .preview-theme-name {
+  font-size: 13px;
+  color: #fff;
+  font-weight: 700;
+}
+#snx-preview-bar .preview-actions {
+  display: flex;
+  gap: 8px;
+}
+.snx-preview-btn {
+  padding: 7px 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.snx-preview-btn.publish  { background: linear-gradient(135deg,#6600cc,#aa44ff); color:#fff; }
+.snx-preview-btn.publish:hover { background: linear-gradient(135deg,#7700ee,#bb55ff); }
+.snx-preview-btn.edit     { background: rgba(255,255,255,0.10); color:#ddd; border:1px solid rgba(255,255,255,0.20); }
+.snx-preview-btn.exit     { background: rgba(255,50,50,0.15); color:#ff8888; border:1px solid rgba(255,50,50,0.30); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   §8  FOUNDER THEME CONTROL CENTER
+   Full-page panel inside the existing adminPage tab system.
+   The TCC is structurally a child of #adminPage (.page).
+   #adminPage is hidden with display:none when not active, so all TCC
+   content is automatically invisible until the Founder navigates there.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Guard: reinforce that #adminPage only exists within the Founder Panel.
+   When .page is display:none the page is fully hidden; this rule is an
+   explicit belt-and-braces to make sure nothing leaks onto the feed. */
+#adminPage:not(.active) {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* On mobile, ensure #adminPage scrolls properly and doesn't bleed */
+@media (max-width: 1024px) {
+  #adminPage.active {
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+
+#adminTab-themes {
+  display: none;
+}
+#adminTab-themes.active {
+  display: block;
+}
+
+.tcc-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  min-height: 600px;
+}
+@media (max-width: 900px) {
+  .tcc-layout { grid-template-columns: 1fr; }
+}
+
+/* Left sidebar */
+.tcc-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tcc-sidebar-section {
+  background: rgba(5,10,25,0.85);
+  border: 1px solid rgba(0,174,239,0.18);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.tcc-sidebar-section h4 {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #6a90b8;
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+  background: rgba(0,174,239,0.05);
+}
+.tcc-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: #b8d4f0;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
+  border-bottom: 1px solid rgba(0,174,239,0.06);
+}
+.tcc-nav-btn:last-child { border-bottom: none; }
+.tcc-nav-btn:hover   { background: rgba(0,174,239,0.10); color: #fff; }
+.tcc-nav-btn.active  { background: rgba(0,174,239,0.14); color: var(--neon-blue,#00AEEF); box-shadow: inset 3px 0 0 var(--neon-blue,#00AEEF); }
+.tcc-nav-btn .tcc-nav-icon { font-size: 16px; flex-shrink: 0; width: 20px; text-align: center; }
+
+/* Theme library cards */
+.tcc-theme-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid rgba(0,174,239,0.06);
+  position: relative;
+}
+.tcc-theme-card:hover     { background: rgba(0,174,239,0.08); }
+.tcc-theme-card.active-th { background: rgba(0,174,239,0.14); }
+.tcc-theme-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 2px solid rgba(255,255,255,0.12);
+}
+.tcc-theme-info { flex: 1; min-width: 0; }
+.tcc-theme-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tcc-theme-status {
+  font-size: 10px;
+  color: #6a90b8;
+  margin-top: 2px;
+}
+.tcc-live-badge {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(57,255,20,0.15);
+  border: 1px solid rgba(57,255,20,0.40);
+  color: #39FF14;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.tcc-draft-badge {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(255,170,0,0.15);
+  border: 1px solid rgba(255,170,0,0.40);
+  color: #ffaa00;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.tcc-sched-badge {
+  font-size: 9px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(0,174,239,0.15);
+  border: 1px solid rgba(0,174,239,0.40);
+  color: #00AEEF;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Main editor area */
+.tcc-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Editor panels */
+.tcc-panel {
+  background: rgba(5,10,25,0.85);
+  border: 1px solid rgba(0,174,239,0.18);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.tcc-panel-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+  background: rgba(0,174,239,0.05);
+}
+.tcc-panel-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #00d4ff;
+  margin: 0;
+}
+.tcc-panel-body { padding: 16px; }
+
+/* Color grid */
+.tcc-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.tcc-color-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tcc-color-label {
+  font-size: 11px;
+  color: #6a90b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tcc-color-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tcc-color-swatch-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+  padding: 0;
+  overflow: hidden;
+}
+.tcc-color-swatch-btn:hover { transform: scale(1.1); }
+.tcc-color-swatch-btn input[type=color] {
+  width: 100%;
+  height: 100%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0;
+  position: absolute;
+}
+.tcc-hex-input {
+  flex: 1;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,174,239,0.22);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: 'Courier New', monospace;
+  color: #c8e8ff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.tcc-hex-input:focus { border-color: rgba(0,174,239,0.55); }
+
+/* Action bar */
+.tcc-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(0,0,0,0.25);
+  border-top: 1px solid rgba(0,174,239,0.12);
+}
+.tcc-btn {
+  padding: 9px 18px;
+  border-radius: 9px;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.18s;
+  letter-spacing: 0.3px;
+}
+.tcc-btn-save    { background: rgba(0,174,239,0.15); color:#00AEEF; border:1px solid rgba(0,174,239,0.35); }
+.tcc-btn-save:hover    { background: rgba(0,174,239,0.28); }
+.tcc-btn-preview { background: rgba(160,80,255,0.15); color:#bb88ff; border:1px solid rgba(160,80,255,0.35); }
+.tcc-btn-preview:hover { background: rgba(160,80,255,0.28); }
+.tcc-btn-publish { background: linear-gradient(135deg,#004488,#0077cc); color:#fff; border:1px solid rgba(0,120,220,0.6); box-shadow:0 0 14px rgba(0,120,220,0.25); }
+.tcc-btn-publish:hover { background: linear-gradient(135deg,#0055aa,#0099ee); box-shadow:0 0 20px rgba(0,150,240,0.35); }
+.tcc-btn-danger  { background: rgba(220,50,50,0.14); color:#ff7788; border:1px solid rgba(220,50,50,0.30); }
+.tcc-btn-danger:hover  { background: rgba(220,50,50,0.26); }
+.tcc-btn-dupe    { background: rgba(255,185,0,0.12); color:#ffcc44; border:1px solid rgba(255,185,0,0.30); }
+.tcc-btn-sched   { background: rgba(57,255,20,0.10); color:#39FF14; border:1px solid rgba(57,255,20,0.30); }
+.tcc-btn-reset   { background: rgba(255,80,80,0.12); color:#ff6677; border:1px solid rgba(255,80,80,0.35); font-size:13px; padding:10px 20px; }
+
+/* Effects toggles grid */
+.tcc-effects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.tcc-effect-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0,174,239,0.16);
+  background: rgba(0,0,0,0.22);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: center;
+}
+.tcc-effect-card:hover { background: rgba(0,174,239,0.08); border-color: rgba(0,174,239,0.35); }
+.tcc-effect-card.on    { border-color: rgba(0,174,239,0.55); background: rgba(0,174,239,0.12); }
+.tcc-effect-icon { font-size: 22px; }
+.tcc-effect-name { font-size: 11px; font-weight: 700; color: #b8d4f0; }
+.tcc-effect-cb   { display: none; }
+
+/* Schedule section */
+.tcc-sched-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+@media (max-width: 600px) { .tcc-sched-row { grid-template-columns: 1fr; } }
+.tcc-sched-field { display: flex; flex-direction: column; gap: 6px; }
+.tcc-sched-label { font-size: 11px; color: #6a90b8; text-transform: uppercase; letter-spacing: 0.5px; }
+.tcc-sched-input {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,174,239,0.22);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #c8e8ff;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.tcc-sched-input:focus { border-color: rgba(0,174,239,0.55); }
+
+/* History table */
+.tcc-history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.tcc-history-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #6a90b8;
+  border-bottom: 1px solid rgba(0,174,239,0.15);
+}
+.tcc-history-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0,174,239,0.06);
+  color: #b8d4f0;
+  vertical-align: middle;
+}
+.tcc-history-table tr:hover td { background: rgba(0,174,239,0.05); }
+.tcc-restore-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(0,174,239,0.30);
+  background: rgba(0,174,239,0.10);
+  color: #66ccff;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tcc-restore-btn:hover { background: rgba(0,174,239,0.22); }
+
+/* Emergency Reset button */
+.tcc-emergency-box {
+  border: 2px solid rgba(255,60,60,0.45);
+  background: rgba(80,0,0,0.22);
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.tcc-emergency-icon { font-size: 32px; flex-shrink: 0; }
+.tcc-emergency-text { flex: 1; }
+.tcc-emergency-text strong { color: #ff6677; font-size: 14px; display: block; margin-bottom: 4px; }
+.tcc-emergency-text p { font-size: 12px; color: #9bbdd8; margin: 0; line-height: 1.6; }
+
+/* Current theme header */
+.tcc-current-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: rgba(0,174,239,0.06);
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+}
+.tcc-current-swatch {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  border: 2px solid rgba(0,174,239,0.35);
+}
+.tcc-current-info { flex: 1; }
+.tcc-current-name { font-size: 16px; font-weight: 800; color: #fff; }
+.tcc-current-meta { font-size: 11px; color: #6a90b8; margin-top: 3px; }
+
+/* Banner editor */
+.tcc-banner-preview {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--theme-surface);
+  border: 1px solid var(--theme-border);
+  text-align: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--theme-text);
+  margin-bottom: 12px;
+  text-shadow: 0 0 10px var(--theme-glow);
+}
+
+/* Accessibility warning */
+.tcc-a11y-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255,170,0,0.10);
+  border: 1px solid rgba(255,170,0,0.30);
+  color: #ffcc66;
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+/* Conflict warning */
+.tcc-conflict-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255,80,80,0.10);
+  border: 1px solid rgba(255,80,80,0.30);
+  color: #ff9999;
+  font-size: 12px;
+  margin-top: 10px;
+}
+
+/* General text inputs and selects in TCC */
+.tcc-input {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,174,239,0.22);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #c8e8ff;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.tcc-input:focus { border-color: rgba(0,174,239,0.55); }
+
+.tcc-select {
+  background: rgba(0,0,0,0.40);
+  border: 1px solid rgba(0,174,239,0.22);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #c8e8ff;
+  outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+  cursor: pointer;
+}
+.tcc-select:focus { border-color: rgba(0,174,239,0.55); }
+
+/* Range slider */
+.tcc-range {
+  width: 100%;
+  accent-color: var(--theme-primary);
+}
+
+/* Tab sub-navigation inside TCC */
+.tcc-subtabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+  background: rgba(0,0,0,0.15);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tcc-subtabs::-webkit-scrollbar { display: none; }
+.tcc-subtab {
+  padding: 6px 14px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: #6a90b8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.tcc-subtab:hover  { background: rgba(0,174,239,0.10); color: #c8e8ff; }
+.tcc-subtab.active { background: rgba(0,174,239,0.18); color: #00AEEF; }
+
+/* Prebuilt theme grid */
+.tcc-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+.tcc-preset-card {
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.06);
+  transition: border-color 0.15s, transform 0.15s;
+  position: relative;
+}
+.tcc-preset-card:hover { border-color: rgba(0,174,239,0.50); transform: translateY(-2px); }
+.tcc-preset-card.active { border-color: var(--neon-green,#39FF14); }
+.tcc-preset-bg {
+  height: 72px;
+  position: relative;
+}
+.tcc-preset-footer {
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.55);
+}
+.tcc-preset-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-align: center;
+}
+
+/* Upload zone */
+.tcc-upload-zone {
+  border: 2px dashed rgba(0,174,239,0.30);
+  border-radius: 10px;
+  padding: 24px;
+  text-align: center;
+  color: #6a90b8;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tcc-upload-zone:hover { border-color: rgba(0,174,239,0.60); background: rgba(0,174,239,0.05); }
+.tcc-upload-zone input[type=file] { display: none; }
+
+/* Mobile TCC tweaks */
+@media (max-width: 600px) {
+  .tcc-action-bar { gap: 6px; }
+  .tcc-btn { padding: 8px 12px; font-size: 11px; }
+  .tcc-color-grid { grid-template-columns: 1fr 1fr; }
+}

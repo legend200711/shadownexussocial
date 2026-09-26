@@ -1,0 +1,498 @@
+/**
+ * snx-perf.css
+ * Shadow Nexus Social — Adaptive Cinematic Performance CSS
+ *
+ * Quality classes on <html>:
+ *   .snx-quality-ultra
+ *   .snx-quality-high
+ *   .snx-quality-balanced
+ *   .snx-quality-lite
+ *   .snx-quality-minimal
+ *
+ * Context classes:
+ *   .snx-live-active
+ *   .snx-camera-active
+ *   .snx-no-body-fog
+ */
+
+/* ══════════════════════════════════════════════════
+   CSS CUSTOM PROPERTIES — defaults (overridden by JS)
+══════════════════════════════════════════════════ */
+:root {
+  --snx-transition-ms: 220ms;
+  --snx-blur-px: 6px;
+}
+
+/* ══════════════════════════════════════════════════
+   BODY FOG — disable when requested
+══════════════════════════════════════════════════ */
+.snx-no-body-fog body::after {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
+/* ══════════════════════════════════════════════════
+   PAGE TRANSITIONS — respect quality level
+══════════════════════════════════════════════════ */
+.snx-quality-minimal .page.active,
+.snx-quality-lite .page.active {
+  animation-duration: var(--snx-transition-ms, 150ms) !important;
+  animation-name: none !important; /* No slide-in animation in lite/minimal */
+  opacity: 1 !important;
+  transform: none !important;
+}
+
+.snx-quality-balanced .page.active {
+  animation-duration: var(--snx-transition-ms, 180ms) !important;
+}
+
+.snx-quality-high .page.active,
+.snx-quality-ultra .page.active {
+  animation-duration: var(--snx-transition-ms, 240ms) !important;
+}
+
+/* ══════════════════════════════════════════════════
+   SIDEBAR BLUR — scale to quality
+══════════════════════════════════════════════════ */
+.snx-quality-minimal .sidebar,
+.snx-quality-lite .sidebar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.snx-quality-balanced .sidebar {
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+.snx-quality-high .sidebar,
+.snx-quality-ultra .sidebar {
+  backdrop-filter: blur(var(--snx-blur-px, 6px)) !important;
+  -webkit-backdrop-filter: blur(var(--snx-blur-px, 6px)) !important;
+}
+
+/* ══════════════════════════════════════════════════
+   SHADOW DEPTH — disable on lite/minimal
+══════════════════════════════════════════════════ */
+.snx-quality-minimal .postBox,
+.snx-quality-minimal .section-card,
+.snx-quality-lite .postBox,
+.snx-quality-lite .section-card {
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+/* ══════════════════════════════════════════════════
+   EXPENSIVE ANIMATIONS — disable on lite/minimal
+══════════════════════════════════════════════════ */
+.snx-quality-minimal .sidebar-brand-icon,
+.snx-quality-minimal .p-avatar,
+.snx-quality-lite .sidebar-brand-icon,
+.snx-quality-lite .p-avatar {
+  animation: none !important;
+}
+
+/* Disable heavy badge animations on minimal */
+.snx-quality-minimal .badge-rarity-epic,
+.snx-quality-minimal .badge-rarity-legendary {
+  animation: none !important;
+}
+
+/* Disable feed live card neon border animation on lite/minimal */
+.snx-quality-minimal .feed-live-card-v2,
+.snx-quality-lite .feed-live-card-v2 {
+  animation: none !important;
+}
+
+/* Disable pulse animations on minimal */
+.snx-quality-minimal .feed-live-dot-pulse,
+.snx-quality-minimal .snx-live-dot-anim,
+.snx-quality-minimal .nx-viewers-dot,
+.snx-quality-minimal .profile-live-badge {
+  animation: none !important;
+}
+
+/* ══════════════════════════════════════════════════
+   LIVE & CAMERA MODE — reduce decorative effects
+══════════════════════════════════════════════════ */
+.snx-live-active body::after,
+.snx-camera-active body::after {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
+.snx-live-active #bg-canvas,
+.snx-camera-active #bg-canvas {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.snx-live-active .ash-particle,
+.snx-camera-active .ash-particle {
+  display: none !important;
+}
+
+/* ══════════════════════════════════════════════════
+   REDUCED MOTION (system preference)
+══════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  body::after,
+  body::before,
+  #bg-canvas,
+  .ash-particle {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+
+  .page.active {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .sidebar {
+    transition: none !important;
+  }
+
+  /* Keep essential structural transitions very short */
+  button, input, a {
+    transition-duration: 0.05s !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   PERFORMANCE SETTINGS — User Control UI
+   Injected into Settings page
+══════════════════════════════════════════════════ */
+.snx-perf-settings {
+  margin-top: 18px;
+}
+
+.snx-perf-settings-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #00AEEF;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snx-perf-settings-sub {
+  font-size: 12px;
+  color: #6a90b8;
+  margin-bottom: 14px;
+  line-height: 1.5;
+}
+
+.snx-perf-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.snx-perf-btn {
+  padding: 9px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  border: 1px solid rgba(0,174,239,0.3);
+  background: rgba(0,15,40,0.7);
+  color: #6a90b8;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  text-align: center;
+  font-family: inherit;
+}
+
+.snx-perf-btn:hover {
+  background: rgba(0,80,180,0.2);
+  border-color: rgba(0,174,239,0.6);
+  color: #c8eeff;
+}
+
+.snx-perf-btn.active {
+  background: rgba(0,100,220,0.2);
+  border-color: rgba(0,174,239,0.75);
+  color: #00AEEF;
+  box-shadow: 0 0 12px rgba(0,174,239,0.25);
+}
+
+.snx-perf-btn.active-auto {
+  background: rgba(57,255,20,0.08);
+  border-color: rgba(57,255,20,0.5);
+  color: #39FF14;
+  box-shadow: 0 0 10px rgba(57,255,20,0.2);
+}
+
+.snx-perf-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.snx-perf-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0,15,40,0.5);
+  border: 1px solid rgba(0,80,160,0.2);
+  border-radius: 10px;
+}
+
+.snx-perf-toggle-label {
+  font-size: 13px;
+  color: #a0bcd0;
+}
+
+.snx-perf-toggle-sub {
+  font-size: 11px;
+  color: #4a7a9a;
+  margin-top: 2px;
+}
+
+.snx-perf-current-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  border: 1px solid rgba(0,174,239,0.4);
+  background: rgba(0,40,100,0.3);
+  color: #00AEEF;
+}
+
+/* ══════════════════════════════════════════════════
+   FOUNDER PERFORMANCE DASHBOARD
+══════════════════════════════════════════════════ */
+.snx-perf-dashboard {
+  background: rgba(0,10,30,0.7);
+  border: 1px solid rgba(0,100,200,0.3);
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 18px;
+}
+
+.snx-perf-dash-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #00AEEF;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snx-perf-dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.snx-perf-dash-item {
+  background: rgba(0,20,55,0.7);
+  border: 1px solid rgba(0,80,160,0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.snx-perf-dash-key {
+  font-size: 10px;
+  color: #4a7a9a;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.snx-perf-dash-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c8e8ff;
+}
+
+.snx-perf-dash-val.good { color: #39FF14; }
+.snx-perf-dash-val.warn { color: #ffaa44; }
+.snx-perf-dash-val.err  { color: #ff5566; }
+
+.snx-perf-reset-btn {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(0,60,140,0.25);
+  border: 1px solid rgba(0,174,239,0.4);
+  color: #00AEEF;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+
+.snx-perf-reset-btn:hover {
+  background: rgba(0,80,180,0.35);
+  box-shadow: 0 0 14px rgba(0,174,239,0.3);
+}
+
+/* ══════════════════════════════════════════════════
+   NEXUS LOADING COMPONENTS
+   Lightweight skeleton & spinner replacements
+══════════════════════════════════════════════════ */
+
+/* Nexus spinner ring */
+.snx-nexus-ring {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(0,174,239,0.15);
+  border-top-color: #00AEEF;
+  border-radius: 50%;
+  animation: snxRingSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.snx-nexus-ring.green {
+  border-top-color: #39FF14;
+  border-color: rgba(57,255,20,0.15);
+  border-top-color: #39FF14;
+}
+
+.snx-nexus-ring.sm {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+@keyframes snxRingSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Nexus loading state — full container */
+.snx-loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 14px;
+  text-align: center;
+}
+
+.snx-loading-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #00AEEF;
+  text-shadow: 0 0 10px rgba(0,174,239,0.4);
+}
+
+/* Skeleton loading — placeholder shimmer */
+.snx-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(0,40,100,0.3) 0%,
+    rgba(0,80,180,0.18) 40%,
+    rgba(0,40,100,0.3) 80%
+  );
+  background-size: 200% 100%;
+  animation: snxSkeletonShimmer 1.5s infinite linear;
+  border-radius: 6px;
+}
+
+@keyframes snxSkeletonShimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+.snx-skeleton-post {
+  background: rgba(11,31,58,0.9);
+  border: 1px solid rgba(0,80,160,0.2);
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 14px;
+  animation: none; /* container is static; inner elements shimmer */
+}
+
+.snx-skeleton-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.snx-skeleton-line {
+  height: 12px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+}
+
+.snx-skeleton-line.short { max-width: 40%; }
+.snx-skeleton-line.med   { max-width: 65%; }
+.snx-skeleton-line.long  { max-width: 90%; }
+
+/* Reduced motion: no shimmer */
+@media (prefers-reduced-motion: reduce) {
+  .snx-skeleton {
+    animation: none;
+    background: rgba(0,40,100,0.2);
+  }
+  .snx-nexus-ring {
+    animation: none;
+    border-top-color: rgba(0,174,239,0.5);
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   VIDEO & IMAGE LAZY LOADING — prevent layout shift
+══════════════════════════════════════════════════ */
+img[loading="lazy"],
+video[loading="lazy"] {
+  /* Prevent CLS by reserving space */
+  min-height: 40px;
+}
+
+/* Off-screen video paused indicator (not visible to user) */
+video.snx-paused-offscreen {
+  /* Purely a class marker; no visual change needed */
+}
+
+/* ══════════════════════════════════════════════════
+   QUALITY INDICATOR BADGE (debug, Founder only)
+══════════════════════════════════════════════════ */
+#snxPerfBadge {
+  display: none;
+  position: fixed;
+  bottom: 80px;
+  right: 12px;
+  z-index: 9990;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(0,174,239,0.4);
+  background: rgba(0,10,30,0.85);
+  color: #6a90b8;
+  pointer-events: none;
+}
+
+html[data-snx-debug="1"] #snxPerfBadge {
+  display: block;
+}

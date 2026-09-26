@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Eternal Stream — Shadow Nexus</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0602">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SNX Eternal Stream">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<meta name="description" content="Shadow Nexus Eternal Stream — 24-Hour Ancient Temple Broadcast Channel">
+
+<!-- Firebase -->
+<script type="importmap">
+{
+  "imports": {
+    "firebase/app":       "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js",
+    "firebase/auth":      "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js",
+    "firebase/storage":   "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js",
+    "firebase/database":  "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js"
+  }
+}
+</script>
+
+<link rel="stylesheet" href="cloud-stream.css">
+<link rel="preconnect" href="https://www.gstatic.com">
+<link rel="preconnect" href="https://firestore.googleapis.com">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════
+     LOADING — OPENING THE NEXUS
+═════════════════════════════════════════════════════ -->
+<div id="csrLoading" class="csr-loading" role="status" aria-label="Opening The Nexus">
+  <div class="csr-nexus-loader" aria-hidden="true">
+    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" class="csr-loader-svg">
+      <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(197,164,29,0.15)" stroke-width="1"/>
+      <circle cx="60" cy="60" r="40" fill="none" stroke="rgba(197,164,29,0.25)" stroke-width="0.75" class="csr-ring-1"/>
+      <circle cx="60" cy="60" r="30" fill="none" stroke="rgba(0,174,239,0.3)" stroke-width="1" class="csr-ring-2"/>
+      <circle cx="60" cy="60" r="20" fill="none" stroke="rgba(0,174,239,0.5)" stroke-width="1.5" class="csr-ring-3"/>
+      <!-- Eye of Ra -->
+      <ellipse cx="60" cy="60" rx="12" ry="7" fill="none" stroke="rgba(197,164,29,0.8)" stroke-width="1.2"/>
+      <circle cx="60" cy="60" r="4" fill="rgba(0,174,239,0.9)"/>
+      <circle cx="60" cy="60" r="2" fill="#c5a41d"/>
+      <!-- Decorative rays -->
+      <line x1="60" y1="10" x2="60" y2="25" stroke="rgba(197,164,29,0.4)" stroke-width="1"/>
+      <line x1="60" y1="95" x2="60" y2="110" stroke="rgba(197,164,29,0.4)" stroke-width="1"/>
+      <line x1="10" y1="60" x2="25" y2="60" stroke="rgba(197,164,29,0.4)" stroke-width="1"/>
+      <line x1="95" y1="60" x2="110" y2="60" stroke="rgba(197,164,29,0.4)" stroke-width="1"/>
+    </svg>
+  </div>
+  <div class="csr-loading-glyph" aria-hidden="true">𓂀</div>
+  <div class="csr-loading-title">OPENING THE NEXUS...</div>
+  <div class="csr-loading-text" id="csrLoadingText">Connecting to the Eternal Stream</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     AUTH GATE
+═════════════════════════════════════════════════════ -->
+<div id="csrAuthGate" class="csr-auth-gate" style="display:none;" role="main">
+  <div class="csr-auth-temple">
+    <div class="csr-auth-glyph" aria-hidden="true">𓂀</div>
+    <div class="csr-auth-title">THE ETERNAL STREAM</div>
+    <p class="csr-auth-desc">Entry to the Shadow Nexus Temple requires identification.<br>Sign in to access the Eternal Broadcast.</p>
+    <a class="csr-temple-btn csr-temple-btn-gold" href="/?snxPage=studioPage">&#8592; Return to Shadow Nexus</a>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════
+     MAIN APP
+═════════════════════════════════════════════════════ -->
+<main id="csrApp" style="display:none;" role="main">
+
+  <!-- ══════════════════════════════════════════════
+       TEMPLE ENTRANCE HEADER
+  ═══════════════════════════════════════════════════ -->
+  <header class="csr-temple-header" role="banner">
+    <!-- Hieroglyphic border top -->
+    <div class="csr-hiero-border" aria-hidden="true">
+      <div class="csr-hiero-strip">
+        <span>𓂀</span><span>𓃭</span><span>𓆣</span><span>𓇳</span><span>𓈖</span><span>𓉐</span><span>𓊪</span><span>𓋴</span><span>𓌀</span><span>𓍿</span><span>𓎛</span><span>𓏞</span><span>𓐍</span><span>𓂀</span>
+      </div>
+    </div>
+
+    <!-- Main header content -->
+    <div class="csr-header-inner">
+      <a class="csr-back-link" href="/?snxPage=studioPage" aria-label="Return to Shadow Nexus">
+        <span aria-hidden="true">◂</span> NEXUS
+      </a>
+
+      <div class="csr-header-center">
+        <div class="csr-header-glyphs" aria-hidden="true">𓂀</div>
+        <div class="csr-header-text">
+          <div class="csr-header-title">SHADOW NEXUS</div>
+          <div class="csr-header-subtitle">THE ETERNAL STREAM</div>
+          <div class="csr-header-tagline">24-HOUR CLOUD TRANSMISSION &nbsp;●&nbsp; ALWAYS ON</div>
+        </div>
+        <div class="csr-header-glyphs" aria-hidden="true">𓂀</div>
+      </div>
+
+      <div class="csr-header-right">
+        <div class="csr-live-pulse" aria-hidden="true">
+          <span class="csr-pulse-dot"></span>
+          <span class="csr-pulse-ring"></span>
+        </div>
+        <div class="csr-header-viewer-pill" id="csrHeaderViewerPill" aria-live="polite" aria-label="Viewers watching">
+          <span class="csr-eye-icon" aria-hidden="true">👁</span>
+          <span id="csrHeaderViewerCount">0</span>
+          <span class="csr-watching-label">WATCHING</span>
+        </div>
+        <div id="csrAuthBadge" class="csr-auth-badge" aria-live="polite">…</div>
+      </div>
+    </div>
+
+    <!-- Energy line -->
+    <div class="csr-energy-line" aria-hidden="true"></div>
+  </header>
+
+  <!-- ── ACTIVE BANNER (admin) ── -->
+  <div id="csrActiveBanner" class="csr-active-banner" style="display:none;" role="alert">
+    <span class="csr-pulse-dot-sm" aria-hidden="true"></span>
+    <span id="csrActiveBannerText">Your cloud broadcast is LIVE</span>
+    <button class="csr-temple-btn csr-temple-btn-sm" onclick="csrScrollToAdmin()" aria-label="Manage broadcast">Manage ↓</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       VIEWER SECTION — THE ETERNAL PORTAL
+  ═══════════════════════════════════════════════════ -->
+  <section id="csrViewerSection" class="csr-viewer-section" style="display:none;" aria-label="The Eternal Stream">
+
+    <!-- ── MAIN LAYOUT ── -->
+    <div class="csr-eternal-layout">
+
+      <!-- ══ LEFT / CENTER: THE ETERNAL PORTAL ══ -->
+      <div class="csr-portal-column">
+
+        <!-- ── ETERNAL PORTAL STAGE ── -->
+        <div class="csr-portal-wrap" id="csrPortalWrap">
+
+          <!-- Temple frame decorations -->
+          <div class="csr-portal-frame" aria-hidden="true">
+            <!-- Top arch -->
+            <div class="csr-frame-top">
+              <div class="csr-frame-arch">
+                <svg viewBox="0 0 600 80" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="arch-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                      <stop offset="0%" stop-color="transparent"/>
+                      <stop offset="20%" stop-color="rgba(197,164,29,0.6)"/>
+                      <stop offset="50%" stop-color="rgba(197,164,29,0.9)"/>
+                      <stop offset="80%" stop-color="rgba(197,164,29,0.6)"/>
+                      <stop offset="100%" stop-color="transparent"/>
+                    </linearGradient>
+                  </defs>
+                  <!-- Main arch line -->
+                  <path d="M0,75 L100,75 Q300,5 500,75 L600,75" fill="none" stroke="url(#arch-grad)" stroke-width="1.5"/>
+                  <!-- Inner arch line -->
+                  <path d="M30,75 L120,75 Q300,20 480,75 L570,75" fill="none" stroke="rgba(197,164,29,0.3)" stroke-width="0.75"/>
+                  <!-- Corner decorations -->
+                  <rect x="0" y="65" width="80" height="2" fill="rgba(197,164,29,0.5)"/>
+                  <rect x="520" y="65" width="80" height="2" fill="rgba(197,164,29,0.5)"/>
+                  <!-- Ankh symbol at apex -->
+                  <line x1="300" y1="8" x2="300" y2="25" stroke="rgba(197,164,29,0.9)" stroke-width="1.5"/>
+                  <line x1="292" y1="14" x2="308" y2="14" stroke="rgba(197,164,29,0.9)" stroke-width="1.5"/>
+                  <ellipse cx="300" cy="10" rx="5" ry="4" fill="none" stroke="rgba(197,164,29,0.9)" stroke-width="1.5"/>
+                  <!-- Energy dots -->
+                  <circle cx="100" cy="70" r="2.5" fill="rgba(0,174,239,0.8)"/>
+                  <circle cx="300" cy="60" r="3" fill="rgba(0,174,239,0.9)"/>
+                  <circle cx="500" cy="70" r="2.5" fill="rgba(0,174,239,0.8)"/>
+                </svg>
+              </div>
+              <!-- Hieroglyphic strip -->
+              <div class="csr-frame-hiero-row">
+                <span>𓂀</span><span>𓇳</span><span>𓊪</span><span>𓋴</span><span>𓌀</span><span>𓅓</span><span>𓆙</span><span>𓇯</span><span>𓌀</span><span>𓋴</span><span>𓊪</span><span>𓇳</span><span>𓂀</span>
+              </div>
+            </div>
+
+            <!-- Side columns (left) -->
+            <div class="csr-frame-col csr-frame-col-left">
+              <div class="csr-col-energy-line"></div>
+              <div class="csr-col-glyph">𓂀</div>
+              <div class="csr-col-glyph">𓇳</div>
+              <div class="csr-col-glyph">𓊪</div>
+              <div class="csr-col-glyph">𓋴</div>
+              <div class="csr-col-energy-line"></div>
+            </div>
+
+            <!-- Side columns (right) -->
+            <div class="csr-frame-col csr-frame-col-right">
+              <div class="csr-col-energy-line"></div>
+              <div class="csr-col-glyph">𓂀</div>
+              <div class="csr-col-glyph">𓇳</div>
+              <div class="csr-col-glyph">𓊪</div>
+              <div class="csr-col-glyph">𓋴</div>
+              <div class="csr-col-energy-line"></div>
+            </div>
+
+            <!-- Bottom sill -->
+            <div class="csr-frame-bottom">
+              <svg viewBox="0 0 600 20" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="sill-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stop-color="transparent"/>
+                    <stop offset="15%" stop-color="rgba(197,164,29,0.6)"/>
+                    <stop offset="50%" stop-color="rgba(197,164,29,1)"/>
+                    <stop offset="85%" stop-color="rgba(197,164,29,0.6)"/>
+                    <stop offset="100%" stop-color="transparent"/>
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="4" width="600" height="1.5" fill="url(#sill-grad)"/>
+                <rect x="0" y="9" width="600" height="0.75" fill="rgba(197,164,29,0.2)"/>
+                <!-- Corner ankhs -->
+                <line x1="10" y1="2" x2="10" y2="14" stroke="rgba(197,164,29,0.7)" stroke-width="1"/>
+                <line x1="5" y1="6" x2="15" y2="6" stroke="rgba(197,164,29,0.7)" stroke-width="1"/>
+                <ellipse cx="10" cy="3" rx="3" ry="2.5" fill="none" stroke="rgba(197,164,29,0.7)" stroke-width="1"/>
+                <line x1="590" y1="2" x2="590" y2="14" stroke="rgba(197,164,29,0.7)" stroke-width="1"/>
+                <line x1="585" y1="6" x2="595" y2="6" stroke="rgba(197,164,29,0.7)" stroke-width="1"/>
+                <ellipse cx="590" cy="3" rx="3" ry="2.5" fill="none" stroke="rgba(197,164,29,0.7)" stroke-width="1"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- ── THE STAGE ── -->
+          <div class="csr-stage" id="csrStage" role="region" aria-label="Eternal Portal Media Player">
+
+            <!-- Background layer -->
+            <div class="csr-stage-bg" id="csrStageBg" aria-hidden="true"></div>
+
+            <!-- Music scene canvas overlay -->
+            <canvas class="csr-scene-canvas" id="csrSceneCanvas" aria-hidden="true"></canvas>
+
+            <!-- === MUSIC MODE — TOMB OF SOUND === -->
+            <div class="csr-mode-music" id="csrModeMusic" aria-hidden="true">
+
+              <!-- Scene name badge -->
+              <div class="csr-scene-badge" id="csrSceneBadge" aria-hidden="true"></div>
+
+              <!-- Main artwork area -->
+              <div class="csr-tomb-center">
+                <!-- Sun disk behind artwork -->
+                <div class="csr-sun-disk" id="csrSunDisk" aria-hidden="true">
+                  <svg viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg" class="csr-sun-svg">
+                    <defs>
+                      <radialGradient id="sun-glow" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="rgba(197,164,29,0.3)"/>
+                        <stop offset="60%" stop-color="rgba(197,164,29,0.1)"/>
+                        <stop offset="100%" stop-color="transparent"/>
+                      </radialGradient>
+                    </defs>
+                    <circle cx="150" cy="150" r="140" fill="url(#sun-glow)"/>
+                    <circle cx="150" cy="150" r="110" fill="none" stroke="rgba(197,164,29,0.15)" stroke-width="0.75" stroke-dasharray="4,8"/>
+                    <circle cx="150" cy="150" r="90" fill="none" stroke="rgba(197,164,29,0.2)" stroke-width="1" stroke-dasharray="2,5"/>
+                    <circle cx="150" cy="150" r="70" fill="none" stroke="rgba(197,164,29,0.3)" stroke-width="1.5"/>
+                    <circle cx="150" cy="150" r="50" fill="none" stroke="rgba(0,174,239,0.2)" stroke-width="1"/>
+                  </svg>
+                </div>
+
+                <!-- Rotating rings -->
+                <div class="csr-orbit-ring csr-orbit-1" id="csrOrbit1" aria-hidden="true">
+                  <svg viewBox="0 0 280 280" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="140" cy="140" r="130" fill="none" stroke="rgba(197,164,29,0.25)" stroke-width="1" stroke-dasharray="3,9"/>
+                    <!-- Decorative nodes -->
+                    <circle cx="140" cy="10" r="3" fill="rgba(197,164,29,0.6)"/>
+                    <circle cx="270" cy="140" r="3" fill="rgba(197,164,29,0.6)"/>
+                    <circle cx="140" cy="270" r="3" fill="rgba(197,164,29,0.6)"/>
+                    <circle cx="10" cy="140" r="3" fill="rgba(197,164,29,0.6)"/>
+                  </svg>
+                </div>
+                <div class="csr-orbit-ring csr-orbit-2" id="csrOrbit2" aria-hidden="true">
+                  <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="120" cy="120" r="110" fill="none" stroke="rgba(0,174,239,0.2)" stroke-width="0.75" stroke-dasharray="1,7"/>
+                    <circle cx="120" cy="10" r="2" fill="rgba(0,174,239,0.5)"/>
+                    <circle cx="230" cy="120" r="2" fill="rgba(0,174,239,0.5)"/>
+                    <circle cx="120" cy="230" r="2" fill="rgba(0,174,239,0.5)"/>
+                    <circle cx="10" cy="120" r="2" fill="rgba(0,174,239,0.5)"/>
+                  </svg>
+                </div>
+
+                <!-- Album artwork -->
+                <div class="csr-artwork-wrap" id="csrMusicArtworkWrap">
+                  <img class="csr-music-artwork" id="csrMusicArtwork" src="" alt="Album artwork" loading="lazy">
+                  <!-- Default SNX artwork -->
+                  <div class="csr-artwork-default" id="csrMusicArtworkDefault" aria-hidden="true">
+                    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <defs>
+                        <radialGradient id="snx-bg" cx="50%" cy="50%" r="50%">
+                          <stop offset="0%" stop-color="#1a0e05"/>
+                          <stop offset="100%" stop-color="#060301"/>
+                        </radialGradient>
+                        <filter id="snx-glow">
+                          <feGaussianBlur stdDeviation="3" result="blur"/>
+                          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                        </filter>
+                      </defs>
+                      <rect width="200" height="200" fill="url(#snx-bg)"/>
+                      <!-- Eye of Ra -->
+                      <ellipse cx="100" cy="90" rx="35" ry="20" fill="none" stroke="rgba(197,164,29,0.6)" stroke-width="1.5"/>
+                      <circle cx="100" cy="90" r="10" fill="rgba(0,174,239,0.8)" filter="url(#snx-glow)"/>
+                      <circle cx="100" cy="90" r="4" fill="#c5a41d"/>
+                      <!-- Decorative lines below eye -->
+                      <line x1="100" y1="110" x2="100" y2="130" stroke="rgba(197,164,29,0.5)" stroke-width="1"/>
+                      <line x1="80" y1="120" x2="120" y2="120" stroke="rgba(197,164,29,0.3)" stroke-width="0.75"/>
+                      <!-- Pyramid outline -->
+                      <polygon points="100,140 60,180 140,180" fill="none" stroke="rgba(197,164,29,0.4)" stroke-width="1"/>
+                      <text x="100" y="196" font-size="7" fill="rgba(197,164,29,0.5)" font-family="monospace" font-weight="700" letter-spacing="2" text-anchor="middle">SHADOW NEXUS</text>
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Music info overlay -->
+              <div class="csr-tomb-info" id="csrMusicInfo">
+                <div class="csr-tomb-label">𓂀 NOW TRANSMITTING</div>
+                <div class="csr-tomb-title" id="csrMusicTitle">—</div>
+                <div class="csr-tomb-artist" id="csrMusicArtist"></div>
+              </div>
+
+              <!-- Audio Visualizer -->
+              <div class="csr-visualizer-wrap" aria-hidden="true">
+                <canvas class="csr-visualizer-canvas" id="csrVisualizerCanvas" role="presentation"></canvas>
+              </div>
+            </div>
+
+            <!-- === VIDEO MODE — PHARAOH'S SCREEN === -->
+            <div class="csr-mode-video" id="csrModeVideo" aria-hidden="true">
+              <!-- Brazier effects (corners) -->
+              <div class="csr-brazier csr-brazier-tl" aria-hidden="true"></div>
+              <div class="csr-brazier csr-brazier-tr" aria-hidden="true"></div>
+              <video
+                id="csrVideoEl"
+                class="csr-video-el"
+                playsinline
+                webkit-playsinline
+                x-webkit-airplay="allow"
+                preload="auto"
+                aria-label="Pharaoh's Screen — Stream Video"
+              ></video>
+            </div>
+
+            <!-- === PICTURE MODE — HALL OF VISIONS === -->
+            <div class="csr-mode-picture" id="csrModePicture" aria-hidden="true">
+              <div class="csr-vision-bg" id="csrPictureBg" aria-hidden="true"></div>
+              <!-- Gallery frame overlay -->
+              <div class="csr-vision-frame" aria-hidden="true"></div>
+              <img class="csr-picture-img" id="csrPictureImg" src="" alt="Hall of Visions" loading="lazy">
+              <!-- Hall of Visions label -->
+              <div class="csr-vision-label" aria-hidden="true">
+                <span>𓂀</span> HALL OF VISIONS
+              </div>
+            </div>
+
+            <!-- === OFFLINE / CONNECTING === -->
+            <div class="csr-mode-offline" id="csrModeOffline">
+              <div class="csr-offline-eye" aria-hidden="true">
+                <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+                  <defs>
+                    <filter id="eye-glow">
+                      <feGaussianBlur stdDeviation="4" result="blur"/>
+                      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                    </filter>
+                  </defs>
+                  <circle cx="60" cy="60" r="55" fill="none" stroke="rgba(197,164,29,0.1)" stroke-width="1"/>
+                  <circle cx="60" cy="60" r="45" fill="none" stroke="rgba(197,164,29,0.15)" stroke-width="0.75" stroke-dasharray="3,6"/>
+                  <circle cx="60" cy="60" r="35" fill="none" stroke="rgba(197,164,29,0.2)" stroke-width="1"/>
+                  <ellipse cx="60" cy="60" rx="28" ry="16" fill="none" stroke="rgba(197,164,29,0.7)" stroke-width="1.5"/>
+                  <circle cx="60" cy="60" r="8" fill="rgba(0,174,239,0.7)" filter="url(#eye-glow)"/>
+                  <circle cx="60" cy="60" r="3" fill="#c5a41d"/>
+                  <line x1="60" y1="5" x2="60" y2="20" stroke="rgba(197,164,29,0.5)" stroke-width="1.5"/>
+                  <line x1="60" y1="100" x2="60" y2="115" stroke="rgba(197,164,29,0.5)" stroke-width="1.5"/>
+                  <line x1="5" y1="60" x2="20" y2="60" stroke="rgba(197,164,29,0.5)" stroke-width="1.5"/>
+                  <line x1="100" y1="60" x2="115" y2="60" stroke="rgba(197,164,29,0.5)" stroke-width="1.5"/>
+                </svg>
+              </div>
+              <div class="csr-offline-title">THE ETERNAL STREAM</div>
+              <div class="csr-offline-sub" id="csrOfflineMsg">Connecting to the Nexus…</div>
+              <button class="csr-temple-btn csr-temple-btn-gold" style="margin-top:20px;width:auto;padding:12px 30px;" onclick="csrRetryConnect()">↺ Reconnect</button>
+            </div>
+
+            <!-- iOS Tap-to-Play overlay -->
+            <div id="csrTapOverlay" class="csr-tap-overlay" style="display:none;" role="dialog" aria-modal="true" aria-label="Tap to begin transmission">
+              <div class="csr-tap-inner">
+                <div class="csr-tap-glyph" aria-hidden="true">𓂀</div>
+                <button class="csr-tap-btn" id="csrTapBtn" onclick="csrStartListening()" aria-label="Tap to enter the stream">
+                  <span class="csr-tap-icon" aria-hidden="true">▶</span>
+                  <span>ENTER THE STREAM</span>
+                </button>
+                <div class="csr-tap-hint">Tap to begin transmission</div>
+              </div>
+            </div>
+
+            <!-- Fade transition overlay -->
+            <div class="csr-fade-overlay" id="csrFadeOverlay" aria-hidden="true"></div>
+
+            <!-- Fullscreen button -->
+            <button class="csr-fullscreen-btn" id="csrFullscreenBtn" onclick="csrToggleFullscreen()" aria-label="Temple Mode — Fullscreen">
+              <span id="csrFullscreenIcon" aria-hidden="true">⛶</span>
+            </button>
+
+            <!-- Buffering indicator -->
+            <div class="csr-buffering" id="csrBuffering" style="display:none;" aria-hidden="true">
+              <span>THE NEXUS IS RECONNECTING...</span>
+            </div>
+          </div><!-- end .csr-stage -->
+
+        </div><!-- end .csr-portal-wrap -->
+
+        <!-- ── PLAYER CONTROLS BAR ── -->
+        <div class="csr-controls-bar" role="group" aria-label="Transmission Controls">
+          <button class="csr-play-btn" id="csrPlayerPlayBtn" onclick="csrTogglePlay()" aria-label="Play/Pause">
+            <span id="csrPlayBtnIcon" aria-hidden="true">▶</span>
+          </button>
+          <div class="csr-progress-section" role="group" aria-label="Transmission progress">
+            <span class="csr-time" id="csrCurrentTime" aria-label="Current time">0:00</span>
+            <div class="csr-progress-bar" role="progressbar" aria-label="Track progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" id="csrProgressBar">
+              <div class="csr-progress-fill" id="csrProgressFill"></div>
+              <div class="csr-progress-glow" id="csrProgressGlow"></div>
+            </div>
+            <span class="csr-time" id="csrTotalTime" aria-label="Duration">—</span>
+          </div>
+          <div class="csr-vol-group" aria-label="Volume control">
+            <span class="csr-vol-icon" aria-hidden="true">🔈</span>
+            <input type="range" min="0" max="100" value="80" id="csrVolSlider" oninput="csrSetVolume(this.value)" class="csr-vol-slider" aria-label="Volume">
+            <span class="csr-vol-icon" aria-hidden="true">🔊</span>
+          </div>
+        </div>
+
+        <!-- ── CHANNEL TIMELINE — THE PROPHECY LINE ── -->
+        <div class="csr-timeline" id="csrTimeline" aria-hidden="true">
+          <div class="csr-timeline-inner">
+            <div class="csr-timeline-now">
+              <span class="csr-timeline-dot csr-timeline-now-dot"></span>
+              <span class="csr-timeline-now-label">NOW</span>
+            </div>
+            <div class="csr-timeline-track" id="csrTimelineTrack">
+              <div class="csr-timeline-line"></div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- end .csr-portal-column -->
+
+      <!-- ══ RIGHT: ARTIFACT PLAQUE + PROPHECY QUEUE ══ -->
+      <div class="csr-ritual-side">
+
+        <!-- ── NOW PLAYING — ARTIFACT PLAQUE ── -->
+        <div class="csr-plaque" id="csrNowPlayingPanel" role="region" aria-label="Now Playing" aria-live="polite">
+          <!-- Plaque header -->
+          <div class="csr-plaque-header">
+            <span class="csr-plaque-glyph" aria-hidden="true">𓂀</span>
+            <span class="csr-plaque-label">NOW TRANSMITTING</span>
+            <span class="csr-plaque-glyph" aria-hidden="true">𓂀</span>
+          </div>
+
+          <!-- Content -->
+          <div class="csr-plaque-content">
+            <div class="csr-plaque-thumb-wrap" aria-hidden="true">
+              <img class="csr-plaque-thumb" id="csrNpThumb" src="" alt="" loading="lazy">
+              <div class="csr-plaque-thumb-default" id="csrNpThumbDefault" aria-hidden="true">
+                <svg viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="80" height="80" fill="rgba(10,6,2,0.8)"/>
+                  <ellipse cx="40" cy="38" rx="18" ry="10" fill="none" stroke="rgba(197,164,29,0.6)" stroke-width="1"/>
+                  <circle cx="40" cy="38" r="5" fill="rgba(0,174,239,0.7)"/>
+                  <circle cx="40" cy="38" r="2" fill="#c5a41d"/>
+                </svg>
+              </div>
+            </div>
+            <div class="csr-plaque-info">
+              <div class="csr-plaque-title" id="csrNpTitle">—</div>
+              <div class="csr-plaque-artist" id="csrNpArtist"></div>
+              <div class="csr-plaque-meta">
+                <span class="csr-type-rune" id="csrNpTypeBadge">𓆣 Music</span>
+                <span class="csr-plaque-uploader" id="csrNpUploader"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stats: Likes + Viewers (only social interactions on public stream) -->
+          <div class="csr-plaque-stats">
+            <button class="csr-like-btn" id="csrLikeBtn" onclick="csrToggleLike()" aria-label="Like this transmission" aria-pressed="false">
+              <span class="csr-like-heart" id="csrLikeHeart" aria-hidden="true">♡</span>
+              <span class="csr-like-count" id="csrLikeCount">0</span>
+            </button>
+            <div class="csr-viewer-rune" id="csrViewerBadge" aria-label="Active watchers">
+              <span aria-hidden="true">👁</span>
+              <span id="csrViewerCount">0</span>
+              <span class="csr-watching-rune-label">WATCHING NOW</span>
+            </div>
+          </div>
+
+          <!-- Plaque bottom engraving -->
+          <div class="csr-plaque-engraving" aria-hidden="true">
+            <span>𓂀</span><span>𓇳</span><span>𓊪</span><span>𓋴</span><span>𓌀</span><span>𓋴</span><span>𓊪</span><span>𓇳</span><span>𓂀</span>
+          </div>
+        </div>
+
+        <!-- ── UP NEXT — THE PROPHECY QUEUE ── -->
+        <div class="csr-prophecy-queue" id="csrUpNext" role="region" aria-label="The Prophecy Queue">
+          <div class="csr-prophecy-header">
+            <span class="csr-prophecy-label">THE PROPHECY QUEUE</span>
+            <span class="csr-prophecy-sub">UP NEXT</span>
+          </div>
+          <div class="csr-prophecy-list" id="csrUpNextList" role="list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+      </div><!-- end .csr-ritual-side -->
+
+    </div><!-- end .csr-eternal-layout -->
+
+  </section><!-- end csrViewerSection -->
+
+  <!-- ══════════════════════════════════════════════
+       CHANNEL MANAGEMENT (stream owner)
+  ═══════════════════════════════════════════════════ -->
+  <div id="csrAdminDivider" class="csr-admin-divider" style="display:none;" aria-hidden="true">
+    <span class="csr-admin-divider-label">⚡ CHANNEL MANAGEMENT</span>
+  </div>
+
+  <section id="csrAdminSection" class="csr-admin-section" style="display:none;" aria-label="Channel Management">
+
+    <!-- Stream Status (when active) -->
+    <div id="csrStatusPanel" class="csr-admin-card csr-card-live" style="display:none;">
+      <div class="csr-live-header">
+        <span id="csrStatusBadge" class="csr-status-badge csr-status-offline">OFFLINE</span>
+        <span id="csrStreamId" class="csr-stream-id-label"></span>
+      </div>
+      <div class="csr-info-grid" id="csrInfoGrid">
+        <div class="csr-info-row"><span class="csr-info-label">Title</span><span class="csr-info-val" id="csrInfoTitle">—</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Host</span><span class="csr-info-val" id="csrInfoHost">—</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Category</span><span class="csr-info-val" id="csrInfoCategory">—</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Started</span><span class="csr-info-val" id="csrInfoStarted">—</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Expires</span><span class="csr-info-val" id="csrInfoExpires">—</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Remaining</span><span class="csr-info-val csr-info-remaining" id="csrInfoRemaining">—</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Viewers</span><span class="csr-info-val" id="csrInfoListeners">0</span></div>
+        <div class="csr-info-row"><span class="csr-info-label">Worker</span><span class="csr-info-val" id="csrInfoWorker">—</span></div>
+      </div>
+      <div class="csr-now-playing-strip" id="csrNowPlayingStrip">
+        <div class="csr-np-label">♫ NOW PLAYING</div>
+        <div class="csr-np-title" id="csrAdminNpTitle">—</div>
+        <div class="csr-np-artist" id="csrAdminNpArtist"></div>
+        <div class="csr-np-next" id="csrAdminNpNext"></div>
+      </div>
+      <div class="csr-controls-row">
+        <button class="csr-btn csr-btn-music" onclick="csrScrollToPlaylist()">♫ Manage Playlist</button>
+        <button class="csr-btn csr-btn-next" id="csrNextBtn" onclick="csrSkipTrack()">⏭ Skip Track</button>
+        <button class="csr-btn csr-btn-danger" onclick="csrConfirmStop()" id="csrStopBtn">🚫 END BROADCAST</button>
+      </div>
+    </div>
+
+    <!-- Create Broadcast Form -->
+    <div id="csrCreatePanel" class="csr-admin-card" style="display:none;">
+      <div class="csr-card-title">♫ CREATE 24-HOUR BROADCAST</div>
+      <div id="csrDuplicateWarn" class="csr-warn" style="display:none;">
+        ⚠ You already have an active broadcast.
+        <button class="csr-btn csr-btn-sm" onclick="csrOpenExistingStream()" style="margin-left:8px;">View it →</button>
+      </div>
+      <div class="csr-form-group">
+        <label class="csr-label">♫ Playlist / Audio Queue</label>
+        <div id="csrPlaylistSelector" class="csr-playlist-selector">
+          <div class="csr-playlist-loading">Loading your playlists…</div>
+        </div>
+        <div id="csrPlaylistHint" class="csr-hint">
+          Select a playlist from your library. Add tracks in <a href="/?snxPage=studioPage" class="csr-link">24-Hour Studio</a> first.
+        </div>
+      </div>
+      <div id="csrQueuePreview" class="csr-queue-preview" style="display:none;"></div>
+      <div class="csr-form-row">
+        <div class="csr-form-group">
+          <label class="csr-label">Broadcast Title</label>
+          <input class="csr-input" id="csrFormTitle" placeholder="My Cloud Stream" maxlength="100">
+        </div>
+        <div class="csr-form-group">
+          <label class="csr-label">Category</label>
+          <select class="csr-input csr-select" id="csrFormCategory">
+            <option value="Music">♫ Music</option>
+            <option value="Talk">🎙 Talk / Podcast</option>
+            <option value="Gaming">🎮 Gaming</option>
+            <option value="Art">🎨 Art</option>
+            <option value="News">📰 News</option>
+            <option value="Education">📚 Education</option>
+            <option value="Entertainment">🎬 Entertainment</option>
+            <option value="General">🌐 General</option>
+          </select>
+        </div>
+      </div>
+      <div class="csr-form-group">
+        <label class="csr-label">Description <span class="csr-optional">optional</span></label>
+        <input class="csr-input" id="csrFormDesc" placeholder="What are you broadcasting?" maxlength="300">
+      </div>
+      <div class="csr-form-row">
+        <div class="csr-form-group">
+          <label class="csr-label">Maximum Duration</label>
+          <select class="csr-input csr-select" id="csrFormDuration">
+            <option value="5">5 minutes (Test Mode)</option>
+            <option value="60">1 Hour</option>
+            <option value="360">6 Hours</option>
+            <option value="720">12 Hours</option>
+            <option value="1440" selected>24 Hours (max)</option>
+          </select>
+          <div class="csr-hint" id="csrTestModeHint" style="display:none;">⚠ Test mode — 5 minutes</div>
+        </div>
+        <div class="csr-form-group">
+          <label class="csr-label">Cover Artwork <span class="csr-optional">optional</span></label>
+          <div id="csrArtworkPreview" class="csr-artwork-preview" style="display:none;">
+            <img id="csrArtworkImg" src="" alt="Cover">
+            <button class="csr-artwork-remove" onclick="csrRemoveArtwork()" aria-label="Remove artwork">✕</button>
+          </div>
+          <button class="csr-btn csr-btn-outline" onclick="document.getElementById('csrArtworkInput').click()" id="csrArtworkBtn">🖼 Choose Image</button>
+          <input type="file" id="csrArtworkInput" accept="image/jpeg,image/jpg,image/png,image/webp" onchange="csrLoadArtwork(event)" style="display:none;" aria-label="Upload cover artwork">
+        </div>
+      </div>
+      <div class="csr-form-group">
+        <label class="csr-label">Shuffle &amp; Repeat</label>
+        <div class="csr-toggle-row">
+          <label class="csr-toggle-label"><input type="checkbox" id="csrFormShuffle"> Shuffle playlist</label>
+          <label class="csr-toggle-label"><input type="checkbox" id="csrFormRepeat" checked> Repeat (loop)</label>
+        </div>
+      </div>
+      <div id="csrValidationError" class="csr-error" style="display:none;"></div>
+      <button class="csr-btn csr-btn-start" id="csrStartBtn" onclick="csrStartBroadcast()">
+        🔴 GO LIVE FOR 24 HOURS
+      </button>
+      <div id="csrStartingProgress" style="display:none;">
+        <div class="csr-handoff-steps" id="csrHandoffSteps"></div>
+      </div>
+    </div>
+
+    <!-- Broadcast History -->
+    <div id="csrHistoryPanel" class="csr-admin-card" style="display:none;">
+      <div class="csr-card-title">📋 Broadcast History</div>
+      <div id="csrHistoryList" class="csr-history-list">
+        <div class="csr-loading-text">Loading history…</div>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<!-- Toast -->
+<div id="csrToast" class="csr-toast" style="display:none;" role="status" aria-live="polite"></div>
+
+<!-- Confirm dialog -->
+<div id="csrConfirmOverlay" class="csr-confirm-overlay" style="display:none;" role="dialog" aria-modal="true">
+  <div class="csr-confirm-dialog">
+    <div class="csr-confirm-title" id="csrConfirmTitle">Confirm</div>
+    <div class="csr-confirm-body" id="csrConfirmBody"></div>
+    <div class="csr-confirm-actions">
+      <button class="csr-btn csr-btn-outline" onclick="csrConfirmCancel()">Cancel</button>
+      <button class="csr-btn csr-btn-danger" id="csrConfirmOk" onclick="csrConfirmProceed()">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="cloud-stream.js"></script>
+</body>
+</html>
