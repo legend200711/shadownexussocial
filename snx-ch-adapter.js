@@ -71,6 +71,7 @@ let _viewerReloadingId = null;
 let _onerrorRetries    = 0;
 let _fsHideTimer       = null;
 let _tvActive          = false;   // true while tvPage is visible
+let _visibilityListenerAdded = false;
 
 /* ════════════════════════════════════════════════════
    PUBLIC ENTRY POINTS (called by SNS index.html)
@@ -87,9 +88,9 @@ window.snxTvInit = function () {
   const snxUser = window._snxCurrentUser || null;
 
   if (!snxUser) {
-    // SNS session not resolved yet — show a gentle "loading" state
-    // and wait for SNS auth to resolve (max 8s)
-    _renderLoading();
+    // SNS session not resolved yet — show a minimal inline connecting indicator
+    // and wait for SNS auth to resolve (max 8s). Do NOT show a full-screen gate.
+    _renderConnectingInPlayer();
     let waited = 0;
     const poll = setInterval(() => {
       waited += 200;
@@ -109,13 +110,13 @@ window.snxTvInit = function () {
 
 /**
  * Called by SNS when user navigates away from tvPage.
- * Stops media playback; keeps Firestore listeners alive so
- * re-entering the page is instant.
+ * Pauses local playback only — the broadcast channel continues on the server.
+ * Keeps _gateOpen = true so re-entry is instant (no Watch Now again).
  */
 window.snxTvTeardown = function () {
-  console.log('[24TV] Teardown — pausing media, stopping tick');
+  console.log('[24TV] Teardown — pausing media, keeping gate open for re-entry');
   _tvActive = false;
-  _gateOpen = false;
+  // Do NOT reset _gateOpen — viewer already consented; re-entry should be instant.
   _stopMedia();
   _stopTick();
 };
@@ -128,18 +129,27 @@ function _startWithUser(user) {
   _user      = user;
   _isFounder = !!(user && user.email?.trim().toLowerCase() === FOUNDER_EMAIL.toLowerCase());
 
-  // Re-enter if already initialised (user re-opened tvPage)
+  // ── RE-ENTRY: network already initialised, viewer returning to tvPage ────────
+  // Do NOT show a loading screen or recreate the entire shell.
+  // Just rebuild the player DOM, reattach Firestore state, and resume playback
+  // at the CURRENT broadcast position.
   if (_networkReady) {
     _rebuildTvShell();
     if (_isFounder) _renderFounderBar();
     _buildChannelList();
     _buildEPGChannelTabs();
-    // Re-apply active channel state to the freshly rebuilt DOM so
-    // "Connecting to broadcast…" is replaced by the actual now-playing info.
+    _setLiveStatus('connecting');
+    // Open the gate immediately — viewer already agreed to watch on first entry.
+    _gateOpen = true;
+    _hideTvGate();
     if (_activeChannel) {
       const st = _channelStates[_activeChannel.id];
-      if (st) _onActiveChannelUpdate(st);
-      else _setNowPlaying(_activeChannel.name || _activeChannel.label || '', '', '');
+      if (st?.current_item) {
+        _onActiveChannelUpdate(st);
+      } else {
+        _setNowPlaying(_activeChannel.name || _activeChannel.label || '', '', '');
+        _setLiveStatus('connecting');
+      }
     } else if (_channels[0]) {
       _setActiveChannel(_channels[0].id);
     }
@@ -147,11 +157,19 @@ function _startWithUser(user) {
     return;
   }
 
-  _renderLoading();
+  // ── FIRST ENTRY: render the player shell immediately (no full-screen gate) ──
+  // Show the shell with ● CONNECTING status, then subscribe to Firestore.
+  // The gate is hidden and _gateOpen is set true so that when the first
+  // Firestore snapshot arrives the media loads and plays automatically.
+  _rebuildTvShell();
+  if (_isFounder) _renderFounderBar();
+  _setLiveStatus('connecting');
+  _gateOpen = true;
+  _hideTvGate();
+
   _subscribeChannels();
 
   // React to SNS auth changes (user signs out → clear TV)
-  // Guard against duplicate listeners on re-entry
   if (!_authSignOutListenerAdded) {
     _authSignOutListenerAdded = true;
     window.addEventListener('snxAuthSignOut', () => {
@@ -163,19 +181,40 @@ function _startWithUser(user) {
       if (_tvActive) _renderNotLoggedIn();
     }, { once: false });
   }
+
+  // ── PAGE VISIBILITY: resync when viewer returns from background / bfcache ──
+  if (!_visibilityListenerAdded) {
+    _visibilityListenerAdded = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && _tvActive && _gateOpen) {
+        _viewerReconnect('visibilitychange');
+      }
+    });
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted && _tvActive && _gateOpen) {
+        _viewerReconnect('bfcache');
+      }
+    });
+  }
 }
 
 /* ════════════════════════════════════════════════════
    LOADING / NOT-LOGGED-IN STATES
 ════════════════════════════════════════════════════ */
-function _renderLoading() {
+
+// Shown only while waiting for SNS auth to resolve — minimal inline indicator,
+// NOT a full-screen replacement for the player.
+function _renderConnectingInPlayer() {
   const app = document.getElementById('snxTvApp');
   if (!app) return;
   app.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:120px;gap:14px;padding:40px 20px;text-align:center;">
-      <div style="font-size:36px;">📺</div>
-      <div style="font-size:15px;font-weight:800;color:#00AEEF;letter-spacing:2px;">24-HOUR TV</div>
-      <div style="font-size:12px;color:#5a80a8;">Connecting to broadcast…</div>
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:180px;gap:10px;padding:32px 20px;text-align:center;">
+      <div style="font-size:40px;line-height:1;">📺</div>
+      <div style="font-size:15px;font-weight:900;color:#00AEEF;letter-spacing:3px;">24-HOUR TV</div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#5a80a8;letter-spacing:1.5px;text-transform:uppercase;">
+        <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#5a80a8;animation:snxTvDot 1.4s ease-in-out infinite;"></span>
+        CONNECTING
+      </div>
     </div>`;
 }
 
@@ -209,9 +248,15 @@ function _subscribeChannels() {
 
     if (!_networkReady) {
       _networkReady = true;
-      _rebuildTvShell();
-      if (_isFounder) _renderFounderBar();
+      // Shell was already built by _startWithUser before subscribeChannels was called.
+      // Only build it here if somehow it wasn't (shouldn't happen in normal flow).
+      if (!document.getElementById('ax-media-area')) {
+        _rebuildTvShell();
+        if (_isFounder) _renderFounderBar();
+      }
       _channels.forEach(ch => _subscribeChannelState(ch.id));
+      _buildChannelList();
+      _buildEPGChannelTabs();
       if (_channels[0]) _setActiveChannel(_channels[0].id);
       _startTick();
     } else {
@@ -224,8 +269,10 @@ function _subscribeChannels() {
     console.error('[24TV ERROR] Failed to load channels from Firestore:', err?.code, err?.message);
     if (!_networkReady) {
       _networkReady = true;
-      _rebuildTvShell();
-      if (_isFounder) _renderFounderBar();
+      if (!document.getElementById('ax-media-area')) {
+        _rebuildTvShell();
+        if (_isFounder) _renderFounderBar();
+      }
       if (_channels[0]) _setActiveChannel(_channels[0].id);
       _startTick();
     }
@@ -247,7 +294,10 @@ function _rebuildTvShell() {
     <div class="snx-tv-header">
       <div class="snx-tv-title-wrap">
         <div class="snx-tv-title">📺 24-HOUR TV</div>
-        <div class="snx-tv-onair"><span class="snx-tv-dot"></span> ON AIR</div>
+        <div class="snx-tv-status" id="snx-tv-status">
+          <span class="snx-tv-status-dot" id="snx-tv-status-dot"></span>
+          <span id="snx-tv-status-text">CONNECTING</span>
+        </div>
       </div>
       <div id="snx-tv-tab-bar" class="snx-tv-tabs">
         <button class="snx-tv-tab active" id="snxTvTabWatch" onclick="snxTvSwitchTab('watch')">▶ Watch</button>
@@ -286,8 +336,14 @@ function _rebuildTvShell() {
               </div>
               <div id="ax-one-viewer-live" style="display:none;position:absolute;top:10px;left:10px;z-index:10;background:rgba(255,45,85,0.92);color:#fff;font-size:10px;font-weight:900;letter-spacing:2px;padding:3px 8px;border-radius:4px;">● LIVE</div>
               <div id="ax-one-viewer-comm" style="display:none;position:absolute;top:10px;right:10px;z-index:10;background:rgba(0,160,255,0.92);color:#fff;font-size:10px;font-weight:900;letter-spacing:1.5px;padding:3px 8px;border-radius:4px;">📢 BREAK</div>
-              <!-- Autoplay gate -->
-              <div class="ax-autoplay-gate" id="ax-gate">
+              <!-- Tap-for-sound overlay (shown only when muted autoplay is active) -->
+              <div id="ax-tap-sound" style="display:none;position:absolute;bottom:54px;left:50%;transform:translateX(-50%);z-index:15;cursor:pointer;">
+                <button id="ax-tap-sound-btn" style="display:flex;align-items:center;gap:8px;padding:10px 20px;background:rgba(2,4,10,0.82);border:1px solid rgba(0,174,239,0.45);border-radius:40px;color:#fff;font-size:13px;font-weight:800;letter-spacing:1.5px;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
+                  🔊 TAP FOR SOUND
+                </button>
+              </div>
+              <!-- Legacy gate (hidden immediately; kept for fallback safety) -->
+              <div class="ax-autoplay-gate" id="ax-gate" style="display:none;">
                 <div class="ax-gate-logo">📺</div>
                 <div class="ax-gate-title">24-HOUR TV</div>
                 <div class="ax-gate-sub">Tap to start watching</div>
@@ -728,6 +784,7 @@ function _onActiveChannelUpdate(st) {
   console.log('[24TV] Channel update — channel:', _activeChannel?.id, 'item:', st?.current_item?.title || 'none', 'gateOpen:', _gateOpen);
   if (!st || !st.current_item) {
     _setNowPlaying('Standby…', '', '');
+    _setLiveStatus('offair');
     _renderUpNext_from(null);
     _stopMedia();
     return;
@@ -779,12 +836,26 @@ async function _loadMedia(item, elapsed) {
   const thumb = document.getElementById('ax-thumbnail');
   if (!video || !audio || !thumb) return;
 
-  const isVideo = item.type === 'video' || item.type === 'music_video' ||
-                  item.type === 'show'  || item.type === 'broadcast_clip' ||
-                  item.type === 'archive' || item.type === 'trailer' ||
-                  item.type === 'funny_clip' || item.type === 'short_film';
-  const isImage = item.type === 'thumbnail' ||
-                  (item.url && /\.(jpg|jpeg|png|gif|webp|svg|avif)(\?|$)/i.test(item.url));
+  // Detect media type — check type field, MIME type, and URL extension.
+  const isImage = (
+    item.type === 'thumbnail' ||
+    /\.(jpe?g|png|gif|webp|svg|avif)(\?|$)/i.test(item.url) ||
+    (item.mime_type || '').startsWith('image/')
+  );
+  const isVideo = !isImage && (
+    item.type === 'video' || item.type === 'music_video' ||
+    item.type === 'show'  || item.type === 'broadcast_clip' ||
+    item.type === 'archive' || item.type === 'trailer' ||
+    item.type === 'funny_clip' || item.type === 'short_film' ||
+    /\.(mp4|webm|mov|avi|wmv|mpeg)(\?|$)/i.test(item.url) ||
+    (item.mime_type || '').startsWith('video/')
+  );
+
+  console.log(
+    `[24TV] Media type: ${isVideo ? 'VIDEO' : isImage ? 'IMAGE' : 'AUDIO'}\n` +
+    `  url: ${item.url?.slice(0, 80)}\n` +
+    `  type field: ${item.type}  mime: ${item.mime_type || '—'}`
+  );
 
   // stop previous
   video.pause(); audio.pause();
@@ -797,6 +868,7 @@ async function _loadMedia(item, elapsed) {
     thumb.innerHTML = `<img src="${_esc(item.url)}" alt="${_esc(item.title)}" style="width:100%;height:100%;object-fit:contain;">`;
     thumb.style.display = '';
     _mediaType = 'image';
+    console.log('[24TV] Rendering: IMAGE');
     const dur = item.duration_sec || 30;
     setTimeout(() => {
       if (_currentMediaId === item.id) _viewerRequestAdvance(_activeChannel?.id, item.id);
@@ -809,17 +881,21 @@ async function _loadMedia(item, elapsed) {
   if (isVideo) {
     _mediaEl = video;
     _mediaType = 'video';
-    video.style.display = '';
+    // Must use 'block', not '' — CSS rule .ax-media-area video { display: none; }
+    // would re-apply if we clear the inline style with an empty string.
+    video.style.display = 'block';
+    console.log('[24TV] Rendering: VIDEO — display set to block');
   } else {
     _mediaEl = audio;
     _mediaType = 'audio';
     video.style.display = 'none';
+    console.log('[24TV] Rendering: AUDIO');
   }
 
   _mediaEl.volume = parseFloat(document.getElementById('ax-vol-slider')?.value || '0.8');
   _mediaEl.muted  = false;
   _mediaEl.src    = item.url;
-  console.log('[24TV] Player created — type:', isVideo ? 'video' : 'audio');
+  console.log('[24TV] Player created — type:', isVideo ? 'video' : 'audio', '— src assigned:', item.url?.slice(0, 80));
 
   // PiP button visibility
   const pip = document.getElementById('ax-pip-btn');
@@ -828,23 +904,71 @@ async function _loadMedia(item, elapsed) {
   _mediaEl.addEventListener('ended', _onMediaEnded, { once: true });
   _mediaEl.addEventListener('error', _onMediaError, { once: true });
   _mediaEl.addEventListener('loadedmetadata', () => {
+    if (isVideo) {
+      const v = document.getElementById('ax-video');
+      console.log(
+        `[24TV VIDEO] metadata loaded — videoWidth=${v?.videoWidth}  videoHeight=${v?.videoHeight}` +
+        `  display=${v?.style.display}  rect=${JSON.stringify(v?.getBoundingClientRect?.())}`
+      );
+    }
     if (_mediaEl && elapsed > 1) {
       try { _mediaEl.currentTime = Math.min(elapsed, (_mediaEl.duration || elapsed) - 0.5); } catch (_) {}
     }
   }, { once: true });
+  if (isVideo) {
+    _mediaEl.addEventListener('canplay', () => {
+      const v = document.getElementById('ax-video');
+      console.log(`[24TV VIDEO] can play — display=${v?.style.display}  rect=${JSON.stringify(v?.getBoundingClientRect?.())}`);
+    }, { once: true });
+    _mediaEl.addEventListener('playing', () => {
+      const v = document.getElementById('ax-video');
+      console.log(`[24TV VIDEO] playing — videoWidth=${v?.videoWidth}  videoHeight=${v?.videoHeight}  display=${v?.style.display}  rect=${JSON.stringify(v?.getBoundingClientRect?.())}`);
+      _setLiveStatus('live');
+    }, { once: true });
+    _mediaEl.addEventListener('error', (e) => {
+      console.error(`[24TV VIDEO ERROR]`, _mediaEl.error?.code, _mediaEl.error?.message, e);
+    }, { once: true });
+  } else {
+    // Audio: set live once playing
+    _mediaEl.addEventListener('playing', () => { _setLiveStatus('live'); }, { once: true });
+  }
 
   _updatePlayBtn();
-  console.log('[24TV] Playback requested');
+  console.log('[24TV] Playback requested — attempting autoplay with sound');
+
+  // ── AUTOPLAY STRATEGY ────────────────────────────────────────────────────────
+  // 1. Try normal (audible) autoplay.
+  // 2. If blocked, try muted autoplay — video continues playing, show Tap for Sound.
+  // 3. If even muted is blocked, show a minimal play button on the player face.
+  // Never show a full-screen gate or Watch Now screen.
+  // ─────────────────────────────────────────────────────────────────────────────
   try {
     await _mediaEl.play();
-    console.log('[24TV] Playback started ✓');
-  } catch (playErr) {
-    console.log('[24TV] Autoplay blocked — showing tap-to-play gate:', playErr?.name);
-    const gate = document.getElementById('ax-gate');
-    if (gate) {
-      gate.style.display = 'flex';
-      const sub = gate.querySelector('.ax-gate-sub');
-      if (sub) sub.textContent = 'Tap to start watching';
+    console.log('[24TV] Autoplay with sound ✓');
+    const ts = document.getElementById('ax-tap-sound');
+    if (ts) ts.style.display = 'none';
+    _hideTvGate();
+  } catch (audibleErr) {
+    console.log('[24TV] Audible autoplay blocked (' + audibleErr?.name + ') — trying muted');
+    try {
+      _mediaEl.muted = true;
+      await _mediaEl.play();
+      console.log('[24TV] Muted autoplay ✓ — showing Tap for Sound');
+      _updateMuteBtn();
+      _hideTvGate();
+      // Show a small "Tap for Sound" pill on the player — NOT a full-screen overlay.
+      const ts = document.getElementById('ax-tap-sound');
+      if (ts) ts.style.display = 'block';
+    } catch (mutedErr) {
+      console.log('[24TV] Muted autoplay also blocked (' + mutedErr?.name + ') — viewer interaction needed');
+      // Even muted is blocked (unusual). Show the legacy gate as last resort.
+      const gate = document.getElementById('ax-gate');
+      if (gate) {
+        gate.style.display = 'flex';
+        const sub = gate.querySelector('.ax-gate-sub');
+        if (sub) sub.textContent = 'Tap to start watching';
+        // Gate button will call _enterBroadcast which re-calls _onActiveChannelUpdate → _loadMedia.
+      }
     }
   }
 }
@@ -1012,14 +1136,76 @@ function _tickProgress() {
 /* ════════════════════════════════════════════════════
    PLAYER CONTROLS
 ════════════════════════════════════════════════════ */
-function _enterBroadcast() {
-  console.log('[24TV] Gate entered — starting playback');
-  _gateOpen = true;
+// Hide the legacy gate element (it now starts hidden anyway).
+function _hideTvGate() {
   const gate = document.getElementById('ax-gate');
   if (gate) gate.style.display = 'none';
+}
+
+function _enterBroadcast() {
+  // Legacy handler — kept for the hidden gate button's onclick.
+  console.log('[24TV] Gate entered — starting playback');
+  _gateOpen = true;
+  _hideTvGate();
   const st = _channelStates[_activeChannel?.id];
   if (st?.current_item) _onActiveChannelUpdate(st);
   _startTick();
+}
+
+// Update the ● status indicator in the header.
+function _setLiveStatus(status) {
+  // status: 'connecting' | 'live' | 'offair' | 'reconnecting'
+  const dot  = document.getElementById('snx-tv-status-dot');
+  const text = document.getElementById('snx-tv-status-text');
+  if (!dot || !text) return;
+  const cfg = {
+    connecting:   { color: '#5a80a8', anim: true,  label: 'CONNECTING'   },
+    live:         { color: '#39FF14', anim: true,  label: 'LIVE'         },
+    offair:       { color: '#5a80a8', anim: false, label: 'OFF AIR'      },
+    reconnecting: { color: '#b8860b', anim: true,  label: 'RECONNECTING' },
+  };
+  const c = cfg[status] || cfg.connecting;
+  dot.style.background  = c.color;
+  dot.style.animation   = c.anim ? 'snxTvDot 1.4s ease-in-out infinite' : 'none';
+  dot.style.boxShadow   = c.anim ? `0 0 7px ${c.color}` : 'none';
+  text.textContent      = c.label;
+  text.style.color      = c.color;
+}
+
+// Reconnect after background return / bfcache — resync to current broadcast position.
+function _viewerReconnect(reason) {
+  if (!_tvActive || !_gateOpen || !_activeChannel) return;
+  const st = _channelStates[_activeChannel.id];
+  if (!st?.current_item?.url) {
+    _setLiveStatus('reconnecting');
+    return;
+  }
+  const item = st.current_item;
+  const raw  = st.started_at;
+  const startMs = raw?.toMillis?.() || (typeof raw === 'number' ? (raw < 1e10 ? raw * 1000 : raw) : Date.now());
+  const elapsed = Math.max(0, (Date.now() - startMs) / 1000);
+  const dur     = item.duration_sec || 0;
+
+  console.log(`[24TV] Reconnect (${reason}) — channel:${_activeChannel.id}  item:${item.id}  elapsed:${elapsed.toFixed(1)}s`);
+
+  _setLiveStatus('reconnecting');
+
+  // If the player is already on the right item and alive, just seek forward.
+  if (_currentMediaId === item.id && _mediaEl && !_mediaEl.error &&
+      _mediaEl.src && _mediaEl.src !== window.location.href && !_mediaEl.ended) {
+    const drift = Math.abs(_mediaEl.currentTime - elapsed);
+    if (drift > 5) {
+      try { _mediaEl.currentTime = Math.min(elapsed, (_mediaEl.duration || elapsed) - 0.5); } catch (_) {}
+    }
+    if (_mediaEl.paused) _mediaEl.play().catch(() => {});
+    _setLiveStatus('live');
+    return;
+  }
+
+  // Player is stale — reload the current item at the correct position.
+  _currentMediaId = null;
+  _transitioning  = false;
+  _loadMedia(item, elapsed).then(() => _setLiveStatus('live')).catch(() => _setLiveStatus('reconnecting'));
 }
 
 function _togglePlayPause() {
@@ -1067,9 +1253,23 @@ function _showFsOverlay() {
 
 function _bindPlayerControls() {
   document.getElementById('ax-gate-btn')?.addEventListener('click', _enterBroadcast);
+
+  // Tap-for-sound: unmute the running player in-place (no restart, no reload).
+  document.getElementById('ax-tap-sound-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_mediaEl) {
+      _mediaEl.muted  = false;
+      _mediaEl.volume = parseFloat(document.getElementById('ax-vol-slider')?.value || '0.8');
+    }
+    const ts = document.getElementById('ax-tap-sound');
+    if (ts) ts.style.display = 'none';
+    _updateMuteBtn();
+  });
+
   document.getElementById('ax-media-area')?.addEventListener('click', (e) => {
-    if (!_gateOpen) return;
+    if (e.target.closest('#ax-tap-sound')) return;
     if (e.target.closest('#ax-gate') || e.target.closest('.ax-fs-overlay')) return;
+    if (!_gateOpen) { _enterBroadcast(); return; }
     if (document.fullscreenElement) { _showFsOverlay(); return; }
     _togglePlayPause();
   });

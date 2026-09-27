@@ -90,12 +90,8 @@ export function initBroadcast() {
   });
 
   // ── BFCACHE / PAGE VISIBILITY RECOVERY ──────────────────────────────────────
-  // Handles browser back/forward cache restores and tab-switch returns.
-  // When the page comes back from bfcache the media element is stale; we must
-  // revalidate the current authoritative state and reload media if needed.
   window.addEventListener('pageshow', (e) => {
     if (e.persisted) {
-      // Page was restored from bfcache — media element is in an unknown state.
       console.log('[AURENIX RECONNECT] pageshow (bfcache restore) — revalidating player state');
       _viewerReconnect('bfcache');
     }
@@ -103,10 +99,22 @@ export function initBroadcast() {
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      // Tab returned to foreground — check if the player stalled or went dead.
       _viewerReconnect('visibilitychange');
     }
   });
+}
+
+// Auto-open the gate immediately after the network/player is ready.
+// Called from _enterNetwork once channels and player DOM exist.
+function _autoEnterBroadcast() {
+  if (_gateOpen) return; // already entered
+  _gateOpen = true;
+  const gate = document.getElementById('ax-gate');
+  if (gate) gate.style.display = 'none';
+  console.log('[24TV BROADCAST] Auto-entering broadcast (no Watch Now required)');
+  const st = _activeChannel ? _channelStates[_activeChannel.id] : null;
+  if (st?.current_item) _playState(st);
+  _startTick();
 }
 
 /* ════════════════════════════════════
@@ -221,6 +229,10 @@ function _subscribeChannels() {
       _channels.forEach(ch => _subscribeChannelState(ch.id));
       const first = _channels[0];
       if (first) _setActiveChannel(first.id);
+      // Auto-enter broadcast immediately — no "Watch Now" step.
+      // _autoEnterBroadcast sets _gateOpen and will drive _playState once
+      // the first Firestore channel state snapshot arrives.
+      _autoEnterBroadcast();
       // Start the global tick immediately so ALL channels are watched from the
       // moment the network is ready — even if no channel has content yet.
       _startTick();
@@ -340,8 +352,14 @@ function _buildHero(channels) {
                   <!-- LIVE / COMMERCIAL badges -->
                   <div id="ax-one-viewer-live" style="display:none;position:absolute;top:10px;left:10px;z-index:10;background:rgba(255,45,85,0.92);color:#fff;font-size:10px;font-weight:900;letter-spacing:2px;padding:3px 8px;border-radius:4px;">● LIVE</div>
                   <div id="ax-one-viewer-comm" style="display:none;position:absolute;top:10px;right:10px;z-index:10;background:rgba(184,134,11,0.92);color:#fff;font-size:10px;font-weight:900;letter-spacing:1.5px;padding:3px 8px;border-radius:4px;">📢 COMMERCIAL BREAK</div>
-                  <!-- Autoplay gate -->
-                  <div class="ax-autoplay-gate" id="ax-gate">
+                  <!-- Tap-for-sound overlay (shown only when muted autoplay is active) -->
+                  <div id="ax-tap-sound" style="display:none;position:absolute;bottom:54px;left:50%;transform:translateX(-50%);z-index:15;cursor:pointer;">
+                    <button id="ax-tap-sound-btn" style="display:flex;align-items:center;gap:8px;padding:10px 20px;background:rgba(5,5,7,0.82);border:1px solid rgba(30,80,255,0.5);border-radius:40px;color:#fff;font-size:13px;font-weight:800;letter-spacing:1.5px;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">
+                      🔊 TAP FOR SOUND
+                    </button>
+                  </div>
+                  <!-- Autoplay gate — hidden; last-resort fallback only -->
+                  <div class="ax-autoplay-gate" id="ax-gate" style="display:none;">
                     <div class="ax-gate-logo">
                       <svg viewBox="0 0 64 64" fill="none" width="56" height="56">
                         <polygon points="32,6 58,56 6,56" fill="none" stroke="#b8860b" stroke-width="1.5"/>
@@ -727,7 +745,21 @@ function _toggleFullscreen() {
 
 function _bindPlayerControls() {
   document.getElementById('ax-gate-btn')?.addEventListener('click', _enterBroadcast);
+
+  // Tap-for-sound: unmute running player in-place — no restart.
+  document.getElementById('ax-tap-sound-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (_mediaEl) {
+      _mediaEl.muted  = false;
+      _mediaEl.volume = parseFloat(document.getElementById('ax-vol-slider')?.value || '0.8');
+    }
+    const ts = document.getElementById('ax-tap-sound');
+    if (ts) ts.style.display = 'none';
+    _updateMuteBtn(); _updateFsMuteBtn();
+  });
+
   document.getElementById('ax-media-area')?.addEventListener('click', (e) => {
+    if (e.target.closest('#ax-tap-sound')) return;
     if (!_gateOpen) return;
     if (e.target.closest('#ax-gate')) return;
     if (e.target.closest('.ax-fs-overlay')) return;
@@ -1273,19 +1305,30 @@ function _playState(st) {
     const pipBtn = document.getElementById('ax-pip-btn');
     if (pipBtn) pipBtn.style.display = isVideo && document.pictureInPictureEnabled ? '' : 'none';
 
-    _mediaEl.play().catch(() => {
-      // Autoplay blocked by browser policy — show the tap-to-play gate.
-      // Do NOT set _gateOpen = false here; _gateOpen tracks whether the viewer
-      // has interacted with the gate overlay, not whether autoplay succeeded.
-      // Keeping _gateOpen = true means tapping the gate later calls _enterBroadcast()
-      // which re-drives _playState with the current authoritative state.
-      const gate = document.getElementById('ax-gate');
-      if (gate) {
-        gate.style.display = 'flex';
-        const sub = gate.querySelector('.ax-gate-sub');
-        if (sub) sub.textContent = 'Tap to start the broadcast';
-      }
-      // Keep _gateOpen as-is (do not set false) — _enterBroadcast will replay state.
+    // ── AUTOPLAY STRATEGY ────────────────────────────────────────────────
+    // 1. Try audible autoplay.
+    // 2. If blocked, try muted — show Tap for Sound pill.
+    // 3. If even muted is blocked, show gate as last resort.
+    // Never require a "Watch Now" click under normal conditions.
+    // ─────────────────────────────────────────────────────────────────────
+    _mediaEl.play().then(() => {
+      const ts = document.getElementById('ax-tap-sound');
+      if (ts) ts.style.display = 'none';
+    }).catch(() => {
+      // Audible autoplay blocked — try muted.
+      _mediaEl.muted = true;
+      _mediaEl.play().then(() => {
+        const ts = document.getElementById('ax-tap-sound');
+        if (ts) ts.style.display = 'block';
+      }).catch(() => {
+        // Even muted blocked — show gate as last resort.
+        const gate = document.getElementById('ax-gate');
+        if (gate) {
+          gate.style.display = 'flex';
+          const sub = gate.querySelector('.ax-gate-sub');
+          if (sub) sub.textContent = 'Tap to start the broadcast';
+        }
+      });
     });
   }
   // Release transition lock — the new source is now loading.

@@ -260,6 +260,8 @@ body {
 }
 .ax-media-area video,
 .ax-media-area audio { display: none; }
+/* When video is shown (display:block set by JS), fill the container correctly */
+#ax-video { width: 100%; height: 100%; object-fit: contain; }
 .ax-media-thumbnail {
   position: absolute;
   inset: 0;
@@ -280,7 +282,7 @@ body {
   pointer-events: none;
 }
 
-/* Autoplay gate */
+/* Autoplay gate — starts hidden; only shown as last resort when even muted autoplay fails */
 .ax-autoplay-gate {
   position: absolute;
   inset: 0;

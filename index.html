@@ -11742,11 +11742,25 @@ body.arcade-fs-ios body::after { display:none !important; }
   font-size: clamp(15px,2.5vw,20px); font-weight: 900;
   letter-spacing: 0.12em; color: #c8d0e8; text-transform: uppercase;
 }
+/* Legacy on-air badge (kept for safety, now replaced by snx-tv-status) */
 .snx-tv-onair {
   display: flex; align-items: center; gap: 6px;
   padding: 3px 10px; border-radius: 20px;
   border: 1px solid rgba(255,51,68,0.4); background: rgba(255,51,68,0.08);
   font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #ff3344;
+}
+/* ● Live status indicator — reactive (CONNECTING / LIVE / OFF AIR / RECONNECTING) */
+.snx-tv-status {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 20px;
+  border: 1px solid rgba(90,128,168,0.35); background: rgba(90,128,168,0.08);
+  font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #5a80a8;
+  transition: color 0.4s, border-color 0.4s, background 0.4s;
+}
+.snx-tv-status-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: #5a80a8;
+  transition: background 0.4s, box-shadow 0.4s;
 }
 .snx-tv-dot {
   width: 7px; height: 7px; border-radius: 50%; background: #ff3344;
@@ -11807,6 +11821,8 @@ body.arcade-fs-ios body::after { display:none !important; }
   position: relative; background: #000; aspect-ratio: 16/9; overflow: hidden; cursor: pointer;
 }
 .ax-media-area video, .ax-media-area audio { display: none; }
+/* video: when JS shows it, fill the player box with proper aspect ratio */
+#ax-video { width: 100%; height: 100%; object-fit: contain; }
 .ax-media-thumbnail {
   position: absolute; inset: 0; background: #000;
   display: flex; align-items: center; justify-content: center;
@@ -11826,7 +11842,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 .ax-np-title { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 6px rgba(0,0,0,0.8); }
 .ax-np-artist { font-size: 11px; color: rgba(255,255,255,0.65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Autoplay gate */
+/* Autoplay gate — starts hidden; only shown as last resort when even muted autoplay fails */
 .ax-autoplay-gate {
   position: absolute; inset: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
@@ -11872,6 +11888,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 /* Fullscreen active state */
 .ax-fs-active { position: fixed !important; inset: 0 !important; z-index: 99999 !important; width: 100vw !important; height: 100vh !important; border-radius: 0 !important; }
 .ax-fs-active .ax-media-area { aspect-ratio: unset !important; width: 100% !important; height: 100% !important; }
+.ax-fs-active #ax-video { display: block !important; width: 100% !important; height: 100% !important; object-fit: contain !important; }
 .ax-fs-active .ax-fs-overlay { pointer-events: auto; }
 
 /* Progress bar (normal) */
