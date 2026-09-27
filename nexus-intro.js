@@ -31,6 +31,10 @@
     var SESSION_KEY     = 'snxIntroDone';
     var WELCOME_DOC     = 'welcomeConfig';   // /siteSettings/welcomeConfig
     var DEFAULT_VOLUME  = 0.45;
+    // Minimum time (ms) the intro must be visible before exiting.
+    // Prevents the intro from flashing for only a fraction of a second
+    // on very fast devices or cached loads.
+    var MIN_DISPLAY_MS  = 2500;
 
     // ── State ─────────────────────────────────────────────────────────────────
     var _cfg              = null;   // welcomeConfig from Firestore
@@ -41,6 +45,11 @@
     var _exiting          = false;  // guard against double-exit
     var _exitTimers       = [];     // all exit-sequence setTimeout IDs (for cleanup)
     var _founderPreviewActive = false; // true ONLY while snxwmPreviewFullIntro is running
+    // Timestamp when the intro was first shown — used to enforce MIN_DISPLAY_MS
+    var _introStartTime   = Date.now();
+    // Whether the user has pressed Enter/Skip — we hold here if app is not ready
+    var _exitRequested    = false;
+    var _exitFast         = false;
 
     // ── Mobile detection ──────────────────────────────────────────────────────
     var _isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ||
@@ -62,7 +71,10 @@
         var old = document.getElementById('snxIntroOverlay');
         if (old) old.remove();
         _stopAudio();
-        _exiting = false;
+        _exiting        = false;
+        _exitRequested  = false;
+        _exitFast       = false;
+        _introStartTime = Date.now();
         _clearExitTimers();
         // Reset guard so replay works
         window.__shadowNexusIntroStarted = false;
@@ -339,7 +351,18 @@
     }
 
     // ── Exit sequence ─────────────────────────────────────────────────────────
-    function _exit(fast) {
+
+    // Check whether the app is ready enough to allow the intro to exit.
+    // "Ready" means Firebase auth has resolved at least once.
+    function _isAppReady() {
+        return window.__shadowNexusAppReady === true;
+    }
+
+    // Perform the actual cinematic exit sequence.
+    // Called only when BOTH conditions are met:
+    //   1. Minimum display time has elapsed
+    //   2. window.__shadowNexusAppReady is true
+    function _doExit(fast) {
         if (_exiting) return;
         _exiting = true;
         sessionStorage.setItem(SESSION_KEY, '1');
@@ -375,7 +398,7 @@
                 ov.classList.add('snxi-exit');
             }, 180));
 
-            // Remove from DOM — mobile total: ~600ms
+            // Remove from DOM — mobile total: ~700ms
             _addTimer(setTimeout(function(){
                 ov.style.visibility = 'hidden';
                 ov.style.pointerEvents = 'none';
@@ -439,6 +462,54 @@
         }, 2800));
     }
 
+    // Public exit entry-point.
+    // Enforces:
+    //  - minimum display time (MIN_DISPLAY_MS) — prevents instant flash on fast devices
+    //  - app readiness (window.__shadowNexusAppReady) — prevents exiting before auth resolves
+    // If either condition is not met, the intro stays visible (no separate loading screen)
+    // and the exit happens automatically once both conditions are satisfied.
+    function _exit(fast) {
+        if (_exiting) return;
+        if (_exitRequested) return; // already waiting
+
+        _exitRequested = true;
+        _exitFast      = fast;
+
+        // Disable enter button to prevent double-tap while waiting
+        var enterBtn = document.getElementById('snxIntroEnterBtn');
+        if (enterBtn) {
+            enterBtn.disabled = true;
+            enterBtn.setAttribute('aria-disabled', 'true');
+            enterBtn.style.pointerEvents = 'none';
+        }
+
+        // Calculate how long the intro has been shown
+        var elapsed   = Date.now() - _introStartTime;
+        var remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
+
+        function _tryExit() {
+            if (_exiting) return;
+            if (!_isAppReady()) {
+                // App not ready yet — register a one-time callback and wait.
+                // The intro remains fully visible (no extra loading screen).
+                window.__shadowNexusAppReadyCb = function() {
+                    // App just became ready — attempt exit again on next tick
+                    setTimeout(_tryExit, 0);
+                };
+                return;
+            }
+            // Both conditions met — perform the cinematic exit
+            _doExit(_exitFast);
+        }
+
+        if (remaining > 0) {
+            // Minimum display time not yet elapsed — wait for it
+            _addTimer(setTimeout(_tryExit, remaining));
+        } else {
+            _tryExit();
+        }
+    }
+
     // ── Wire buttons ──────────────────────────────────────────────────────────
     function _wireButtons() {
         var enterBtn      = document.getElementById('snxIntroEnterBtn');
@@ -452,13 +523,13 @@
 
         function _onEnter(e) {
             if (e) e.preventDefault();
-            if (_enterFired || _exiting) return;
+            if (_enterFired || _exiting || _exitRequested) return;
             _enterFired = true;
             _exit(false);
         }
         function _onSkip(e) {
             if (e) e.preventDefault();
-            if (_skipFired || _exiting) return;
+            if (_skipFired || _exiting || _exitRequested) return;
             _skipFired = true;
             _exit(true);
         }
@@ -546,6 +617,9 @@
         // Extra guard: if overlay already exists in DOM, don't add another
         if (document.getElementById('snxIntroOverlay')) return;
 
+        // Record the actual start time when the overlay is inserted
+        _introStartTime = Date.now();
+
         _overlay = _buildOverlay();
         document.body.insertBefore(_overlay, document.body.firstChild);
         _injectCrows(document.getElementById('snxIntroCrows'));
@@ -554,8 +628,9 @@
         // Load config; show music info when ready
         _loadConfig(function(cfg){
             if (!cfg) return;
-            // If welcome screen is disabled by Founder, exit immediately
-            if (cfg.screenEnabled === false) { _exit(true); return; }
+            // If welcome screen is disabled by Founder, skip directly
+            // (bypass app-readiness check — founder admin action)
+            if (cfg.screenEnabled === false) { _doExit(true); return; }
             // Show Now Playing strip
             _showNowPlaying(cfg);
             // Start music

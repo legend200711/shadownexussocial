@@ -76,6 +76,8 @@
 <link rel="dns-prefetch" href="https://pub-1cb8318faddb49f0b2c91fbd098c271f.r2.dev">
 
 <style>
+/* ── Prevent any white/bright flash before CSS loads ── */
+html, body { background: #02040a !important; margin: 0; }
 :root {
     /* ── Shadow Nexus Social — Dark Blue + Bright Blue + Neon Green ── */
 
@@ -6501,22 +6503,25 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 <!-- ══════════════════════════════════════════════════════════
      AUTH GATE OVERLAY
-     Shown instantly on every page load, dismissed only after
-     Firebase resolves the auth state.  Prevents the login
-     screen from flashing for returning (logged-in) users.
+     Sits BELOW the cinematic intro (z-index 9990 < intro 10000).
+     Invisible — background only, no spinner shown.
+     Its sole purpose is preventing a login-page flash for
+     returning users while Firebase resolves auth state.
+     The cinematic intro is the only visible startup experience.
      ══════════════════════════════════════════════════════════ -->
 <style>
 #snx-auth-gate {
     position: fixed;
     inset: 0;
-    z-index: 99999;
-    background: #0B1F3A;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 20px;
-    /* Gate fades out instead of snapping away */
+    /* BELOW the cinematic intro (intro z-index: 999999).
+       Provides a dark background to prevent login-page flash when
+       Firebase resolves auth state. The intro covers it completely
+       during first-session startup. On subsequent sessions (no intro),
+       it prevents the login page from flashing while Firebase checks
+       the cached session. No spinner or loading content — silent. */
+    z-index: 9990;
+    background: #02040a;
+    pointer-events: none;
     transition: opacity 0.28s ease, visibility 0.28s ease;
 }
 #snx-auth-gate.resolved {
@@ -6524,43 +6529,14 @@ body.arcade-fs-ios body::after { display:none !important; }
     visibility: hidden;
     pointer-events: none;
 }
-.snx-gate-logo {
-    width: 76px;
-    height: 76px;
-    border-radius: 50%;
-    background: radial-gradient(circle at 38% 35%, #003d99 0%, #071428 100%);
-    border: 2.5px solid rgba(0,174,239,0.72);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 36px;
-    box-shadow: 0 0 36px rgba(0,174,239,0.58), 0 0 0 1px rgba(0,174,239,0.14);
-    animation: blueFlame 3s infinite;
-}
-.snx-gate-spinner {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    border: 3px solid rgba(0,174,239,0.18);
-    border-top-color: #00AEEF;
-    animation: spin360 0.75s linear infinite;
-}
-.snx-gate-label {
-    font-size: 12px;
-    color: #3a6a9a;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-}
+/* Legacy class references — keep as no-op so JS doesn't throw */
+.snx-gate-logo, .snx-gate-spinner, .snx-gate-label { display: none !important; }
 </style>
 
 <body>
 
-<!-- Auth gate — rendered before anything else, removed after Firebase resolves -->
-<div id="snx-auth-gate" aria-hidden="true">
-    <div class="snx-gate-logo">🌑</div>
-    <div class="snx-gate-spinner"></div>
-    <div class="snx-gate-label">Loading…</div>
-</div>
+<!-- Auth gate — invisible sentinel; cinematic intro is the real startup experience -->
+<div id="snx-auth-gate" aria-hidden="true"></div>
 
 <!-- ████ SHADOW NEXUS REALM — Entering Animation ████
      Hidden: replaced by the cinematic nexus-intro.js welcome experience.
@@ -12803,6 +12779,12 @@ body.arcade-fs-ios body::after { display:none !important; }
           _authFirstResolved = true;
           const _gate = document.getElementById('snx-auth-gate');
           if (_gate) _gate.classList.add('resolved');
+          // Signal app readiness so intro can exit even on bad network
+          window.__shadowNexusAppReady = true;
+          if (typeof window.__shadowNexusAppReadyCb === 'function') {
+              try { window.__shadowNexusAppReadyCb(); } catch(_) {}
+              window.__shadowNexusAppReadyCb = null;
+          }
           show('login');
       }
   }, 10000);
@@ -13074,6 +13056,12 @@ body.arcade-fs-ios body::after { display:none !important; }
               }
           } catch(_) {}
 
+          // ── Signal that the app is ready — intro can exit cleanly now ──
+          window.__shadowNexusAppReady = true;
+          if (typeof window.__shadowNexusAppReadyCb === 'function') {
+              try { window.__shadowNexusAppReadyCb(); } catch(_) {}
+              window.__shadowNexusAppReadyCb = null;
+          }
           navTo('feed');
           initTimelineStream();
           presenceUnsubscribe = initPresenceStrip();
@@ -13112,8 +13100,13 @@ body.arcade-fs-ios body::after { display:none !important; }
           // Genuine sign-out, expired session, or first load with no saved session.
           _hideLoginLoading();
           if (_firstCall) {
-              // First resolution with no user → show login immediately (no delay needed;
-              // the auth gate already covered the blank period above).
+              // First resolution with no user → show login immediately.
+              // Signal app readiness so the intro can exit to the login page.
+              window.__shadowNexusAppReady = true;
+              if (typeof window.__shadowNexusAppReadyCb === 'function') {
+                  try { window.__shadowNexusAppReadyCb(); } catch(_) {}
+                  window.__shadowNexusAppReadyCb = null;
+              }
               show('login');
               return;
           }
@@ -34048,19 +34041,17 @@ window.snxFounderPanelCleanup = (function() {
 <!-- ═══════════════════════════════════════════════════════════
      SHADOW NEXUS CINEMATIC WELCOME EXPERIENCE
      Loaded last so it never blocks main app init.
+     The intro overlay appears immediately and covers the page
+     while Firebase auth initializes behind it.
      ═══════════════════════════════════════════════════════════ -->
-<script src="nexus-intro.js?v=SNS-2026-MOBILE-FIX-001"></script>
+<script src="nexus-intro.js?v=SNS-2026-STARTUP-001"></script>
 <script>
-  /* ── snxIntroCompleted: called by nexus-intro.js when the user clicks
-     "Enter the Nexus" or "Skip Intro".  By this point Firebase auth may
-     already have resolved (returning user) or may still be pending
-     (first-time / logged-out user).  We do nothing here — the existing
-     onAuthStateChanged handler in the main app already drives navTo('feed')
-     or show('login') at the right time.  The intro simply sits on top and
-     then removes itself, revealing whatever state the app is already in. */
+  /* ── snxIntroCompleted: called by nexus-intro.js after the exit animation.
+     At this point the app is already initialized underneath the intro.
+     Auth has resolved, navTo('feed') or show('login') has already been called.
+     Nothing extra needed here — the correct page is already showing. */
   window.snxIntroCompleted = function () {
-      // No-op: existing auth flow handles navigation.
-      // Kept as a named hook so future integrations can extend it.
+      // No-op: auth flow already drove the app to the correct state.
   };
 </script>
 </body>
