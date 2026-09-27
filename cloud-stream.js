@@ -1477,10 +1477,11 @@ function _stopProgressRaf() {
    IOS / AUTOPLAY GATE
 ═══════════════════════════════════════════════════════ */
 function _isAutoplayBlocked() {
+  // Only block on true iOS Safari / installed PWA — not Android Chrome or desktop Safari.
   const ua = navigator.userAgent || '';
-  return /iPad|iPhone|iPod/.test(ua) && !window.MSStream
-    || (/Safari/.test(ua) && !/Chrome/.test(ua))
-    || window.navigator.standalone === true;
+  const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  const isStandalone = window.navigator.standalone === true;
+  return isIOS || isStandalone;
 }
 function _maybeShowTapOverlay() {
   if (_isAutoplayBlocked()) { _showTapOverlay(); _player.playing = false; }

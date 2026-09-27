@@ -5192,12 +5192,35 @@ function _renderNPCard(data) {
 
   _txt('snxNPDuration', _fmtDur(data.duration));
 
-  // UP NEXT
+  // UP NEXT (immediate next track label)
   if (data.nextTitle) {
     _show('snxNPNextRow', true);
     _txt('snxNPNextTitle', data.nextTitle);
   } else {
     _show('snxNPNextRow', false);
+  }
+
+  // PROPHECY QUEUE (up to 5 upcoming tracks)
+  var qSection = _el('snxNPQueueSection');
+  if (qSection) {
+    if (data.upNext && data.upNext.length) {
+      var html = '<div style="font-size:9px;letter-spacing:1.5px;color:#3a5a7a;margin-bottom:6px;font-weight:700;">PROPHECY QUEUE</div>';
+      for (var qi = 0; qi < data.upNext.length; qi++) {
+        var qt = data.upNext[qi];
+        var qIcon = qt.mediaType === 'video' ? '🎬' : qt.mediaType === 'picture' ? '🖼' : '𓆣';
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;background:rgba(0,174,239,0.04);border:1px solid rgba(0,174,239,0.09);margin-bottom:5px;">'
+          + '<span style="font-size:13px;flex-shrink:0;">' + qIcon + '</span>'
+          + '<div style="flex:1;min-width:0;">'
+          +   '<div style="font-size:11px;color:#7abadc;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _escHtml(qt.title || 'Untitled') + '</div>'
+          + (qt.artist ? '<div style="font-size:10px;color:#3a5a7a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _escHtml(qt.artist) + '</div>' : '')
+          + '</div>'
+          + '</div>';
+      }
+      qSection.innerHTML = html;
+      qSection.style.display = '';
+    } else {
+      qSection.style.display = 'none';
+    }
   }
 
   // Viewers + Likes
@@ -5215,6 +5238,11 @@ function _renderNPCard(data) {
   _np.pausedAt    = data.pausedAt  || 0;
   _np.seekPosition= data.seekPosition || 0;
   _np.paused      = !!data.paused;
+}
+
+/* ── HTML-escape helper for queue items ── */
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 /* ── progress RAF ── */
@@ -5289,12 +5317,13 @@ async function _pollServer() {
       return;
     }
 
-    var streamDoc = snap.docs[0];
+    var streamDoc     = snap.docs[0];
+    var streamDocData = streamDoc.data();
     _np.streamId = streamDoc.id;
     _np.status   = 'active';
 
-    // 3. Get sync data from worker
-    var sr = await fetch(_WORKER_URL + '/api/stream/sync/' + _np.streamId,
+    // 3. Get channel state from worker (includes upNext queue)
+    var sr = await fetch(_WORKER_URL + '/api/stream/channel/' + _np.streamId,
       { signal: AbortSignal.timeout(8000) });
     if (!sr.ok) { _setChannelBanner(true, 'ACTIVE'); return; }
     var sd = await sr.json();
@@ -5313,25 +5342,28 @@ async function _pollServer() {
       }
     } catch(e2) {}
 
+    // Channel endpoint returns media fields in a nested .media object
+    var m = sd.media || {};
     // Now playing data
     var nowData = {
-      title:       sd.currentMusicTitle    || '—',
-      artist:      sd.currentMusicArtist   || '',
-      duration:    sd.currentMusicDuration || 0,
-      artworkUrl:  sd.artworkUrl           || '',
-      mediaType:   sd.mediaType            || 'music',
-      nextTitle:   sd.nextMusicTitle       || '',
-      paused:      sd.musicStatus === 'paused',
-      viewerCount: sd.viewerCount          || 0,
-      likeCount:   sd.likeCount            || 0,
-      startedAt:   sd.lastAdvancedAt       ? new Date(sd.lastAdvancedAt).getTime()
-                                           : (Date.now() - (sd.seekPosition || 0) * 1000),
-      seekPosition:typeof sd.seekPosition === 'number' ? sd.seekPosition : 0,
+      title:       m.currentTitle          || '—',
+      artist:      m.currentArtist         || '',
+      duration:    m.currentDuration       || 0,
+      artworkUrl:  m.artworkUrl            || '',
+      mediaType:   m.mediaType             || 'music',
+      nextTitle:   m.nextTitle             || '',
+      upNext:      m.upNext                || [],
+      paused:      m.musicStatus === 'paused',
+      viewerCount: sd.viewerCount          || streamDocData.viewerCount || 0,
+      likeCount:   streamDocData.likeCount || sd.likeCount              || 0,
+      startedAt:   m.lastAdvancedAt        ? new Date(m.lastAdvancedAt).getTime()
+                                           : (Date.now() - (m.seekPosition || 0) * 1000),
+      seekPosition:typeof m.seekPosition === 'number' ? m.seekPosition : 0,
       pausedAt:    0
     };
-    if (sd.musicStatus === 'paused') {
+    if (m.musicStatus === 'paused') {
       nowData.startedAt    = Date.now();
-      nowData.seekPosition = sd.pausedPosition || sd.seekPosition || 0;
+      nowData.seekPosition = m.pausedPosition || m.seekPosition || 0;
       nowData.paused       = true;
     }
 
@@ -5383,16 +5415,15 @@ window.snxNPPlayPause = function() {
   if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
   user.getIdToken(false).then(function(tok) {
     var action = _np.paused ? 'resume' : 'pause';
-    return fetch(_WORKER_URL + '/api/stream/control', {
+    return fetch(_WORKER_URL + '/api/stream/music/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, action: action })
+      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid, action: action })
     });
   }).then(function() {
     setTimeout(_pollServer, 800);
   }).catch(function(e) {
     console.warn('[SNX NP] play/pause failed:', e.message);
-    window.location.href = 'cloud-stream.html';
   });
 };
 
@@ -5400,16 +5431,15 @@ window.snxNPSkip = function() {
   var user = window._snxCurrentUser;
   if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
   user.getIdToken(false).then(function(tok) {
-    return fetch(_WORKER_URL + '/api/stream/control', {
+    return fetch(_WORKER_URL + '/api/stream/music/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, action: 'skip' })
+      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid, action: 'next' })
     });
   }).then(function() {
     setTimeout(_pollServer, 1200);
   }).catch(function(e) {
     console.warn('[SNX NP] skip failed:', e.message);
-    window.location.href = 'cloud-stream.html';
   });
 };
 
@@ -5417,16 +5447,15 @@ window.snxNPPrev = function() {
   var user = window._snxCurrentUser;
   if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
   user.getIdToken(false).then(function(tok) {
-    return fetch(_WORKER_URL + '/api/stream/control', {
+    return fetch(_WORKER_URL + '/api/stream/music/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, action: 'previous' })
+      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid, action: 'previous' })
     });
   }).then(function() {
     setTimeout(_pollServer, 1200);
   }).catch(function(e) {
     console.warn('[SNX NP] prev failed:', e.message);
-    window.location.href = 'cloud-stream.html';
   });
 };
 
@@ -5434,22 +5463,38 @@ window.snxNPStopChannel = function() {
   if (!confirm('Stop the channel? This will end the broadcast.')) return;
   var user = window._snxCurrentUser;
   if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
+  var sid = _np.streamId;
   user.getIdToken(false).then(function(tok) {
     return fetch(_WORKER_URL + '/api/stream/stop', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid })
+      body: JSON.stringify({ streamId: sid, uid: user.uid })
     });
   }).then(function() {
+    // Mirror stop in Firestore so viewers see the channel go offline
+    var fs = window._snxFirestore;
+    if (fs && sid) {
+      var now = fs.serverTimestamp ? fs.serverTimestamp() : new Date();
+      fs.updateDoc(fs.doc(fs.db, 'cloudStreams', sid),
+        { status: 'stopped', stoppedAt: now }).catch(function(){});
+      fs.updateDoc(fs.doc(fs.db, 'studioCloudStreamMusic', sid),
+        { status: 'stopped', stoppedAt: now }).catch(function(){});
+      if (user.uid) {
+        fs.updateDoc(fs.doc(fs.db, 'liveRooms', user.uid),
+          { isLive: false, status: 'ended', updatedAt: now }).catch(function(){});
+      }
+    }
     _np.streamId = null;
     _np.status   = 'offline';
     _setChannelBanner(false, null);
     _txt('snxNPTitle', '—');
+    _txt('snxNPArtist', '');
     _show('snxNPControls', false);
+    _show('snxNPNextRow', false);
+    _show('snxNPQueueSection', false);
     _stopProgressRaf();
   }).catch(function(e) {
     console.warn('[SNX NP] stop failed:', e.message);
-    window.location.href = 'cloud-stream.html';
   });
 };
 
