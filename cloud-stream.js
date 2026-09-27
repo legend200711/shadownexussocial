@@ -198,14 +198,17 @@ function _getSessionId() {
    BOOT — Auth state
 ═══════════════════════════════════════════════════════ */
 onAuthStateChanged(_auth, async user => {
-  _show('csrLoading', false);
-
   if (!user) {
+    // Firebase has confirmed there is no authenticated session.
+    // Show auth gate and hide loading overlay without a flash.
+    _show('csrLoading', false);
     _show('csrAuthGate', true);
     _show('csrApp',      false);
     _setAuthBadge('Sign In');
     return;
   }
+  // Authenticated — hide loading immediately and open the app.
+  _show('csrLoading', false);
 
   // Guard: only run full init once per page load; avoid double-boot from SPA
   if (_booted) return;
