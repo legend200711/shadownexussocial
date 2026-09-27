@@ -3084,7 +3084,7 @@ window.snxAdminLoadCloudStreams = function() {
       var expiresTs   = d.expiresAt || null;
       var remaining   = expiresTs ? Math.max(0, Math.floor((expiresTs - Date.now()) / 60000)) + 'm' : '—';
       var startedFmt  = startedTs ? new Date(startedTs).toLocaleTimeString() : '—';
-      var listenUrl   = '24-hour-cloud-stream/index.html?id=' + encodeURIComponent(doc.id);
+      var listenUrl   = 'cloud-stream.html?id=' + encodeURIComponent(doc.id);
       return '<div class="snx-admin-stream-card">' +
         '<div class="snx-admin-stream-header">' +
           '<span style="font-size:18px;">&#9925;</span>' +

@@ -648,13 +648,30 @@ async function handleMusicControl(request, env, ctx, cors) {
       musicState.lastAdvancedAt = Date.now();
       break;
     }
+    case 'musicPrevious':
+    case 'previous': {
+      // Go back to previous track, or restart current if near beginning
+      const qLen = musicState.queue.length;
+      if (qLen === 0) break;
+      const cur = musicState.queueIndex || 0;
+      musicState.queueIndex = cur === 0 ? (musicState.repeat ? qLen - 1 : 0) : cur - 1;
+      musicState.lastAdvancedAt = Date.now();
+      break;
+    }
     case 'musicPause':
     case 'pause':
       musicState.status = 'paused';
+      musicState.pausedAt = Date.now();
       break;
     case 'musicResume':
     case 'resume':
       musicState.status = 'playing';
+      // Adjust lastAdvancedAt to account for pause duration so seek stays correct
+      if (musicState.pausedAt) {
+        const pauseDur = Date.now() - musicState.pausedAt;
+        musicState.lastAdvancedAt = (musicState.lastAdvancedAt || Date.now()) + pauseDur;
+        musicState.pausedAt = null;
+      }
       break;
     case 'musicShuffle':
       musicState.shuffle = typeof body.value === 'boolean' ? body.value : !musicState.shuffle;
@@ -668,6 +685,13 @@ async function handleMusicControl(request, env, ctx, cors) {
     case 'musicCrossfade':
       musicState.crossfade = typeof body.value === 'number' ? body.value : musicState.crossfade;
       break;
+    case 'queueAppend': {
+      // Append new items to end of existing queue
+      const newItems = Array.isArray(body.items) ? body.items : [];
+      if (!newItems.length) break;
+      musicState.queue = (musicState.queue || []).concat(newItems);
+      break;
+    }
     default:
       return jsonErr('Unknown music action: ' + action, 400, cors);
   }
@@ -717,8 +741,16 @@ async function handleMusicGet(request, env, url, cors) {
 async function pushNowPlayingToFirestore(env, streamId, musicState) {
   if (!env.FIREBASE_PROJECT_ID || !env.FIREBASE_API_KEY || !musicState) return;
 
-  const cur  = musicState.queue[musicState.queueIndex] || {};
-  const next = musicState.queue[(musicState.queueIndex + 1) % (musicState.queue.length || 1)] || {};
+  const q    = musicState.queue || [];
+  const idx  = musicState.queueIndex || 0;
+  const cur  = q[idx] || {};
+  const next = q[(idx + 1) % (q.length || 1)] || {};
+  // Build upNext array (next 5 items after current)
+  const upNext = [];
+  for (let i = 1; i <= 5; i++) {
+    const item = q[(idx + i) % (q.length || 1)];
+    if (item) upNext.push({ title: item.title || '', artist: item.artist || '', mediaType: item.mediaType || 'music', artworkUrl: item.artworkUrl || '', duration: item.duration || 0 });
+  }
 
   try {
     // Sign in anonymously for Firestore REST
@@ -755,12 +787,30 @@ async function pushNowPlayingToFirestore(env, streamId, musicState) {
           currentArtist:   { stringValue: cur.artist    || '' },
           currentTrackUrl: { stringValue: cur.url       || '' },
           currentDuration: { integerValue: String(cur.duration || 0) },
+          artworkUrl:      { stringValue: cur.artworkUrl || '' },
+          mediaType:       { stringValue: cur.mediaType || 'music' },
           nextTrackId:     { stringValue: next.id       || '' },
           nextTitle:       { stringValue: next.title    || '' },
           nextArtist:      { stringValue: next.artist   || '' },
           queueIndex:      { integerValue: String(musicState.queueIndex || 0) },
           status:          { stringValue: musicState.status || 'playing' },
-          updatedAt:       { timestampValue: new Date().toISOString() }
+          lastAdvancedAt:  { integerValue: String(musicState.lastAdvancedAt || Date.now()) },
+          upNext: {
+            arrayValue: {
+              values: upNext.map(item => ({
+                mapValue: {
+                  fields: {
+                    title:     { stringValue: item.title || '' },
+                    artist:    { stringValue: item.artist || '' },
+                    mediaType: { stringValue: item.mediaType || 'music' },
+                    artworkUrl:{ stringValue: item.artworkUrl || '' },
+                    duration:  { integerValue: String(item.duration || 0) }
+                  }
+                }
+              }))
+            }
+          },
+          updatedAt: { timestampValue: new Date().toISOString() }
         }
       })
     });
@@ -1448,16 +1498,19 @@ async function handleStreamSync(request, env, url, cors) {
       const cur = ms.queue[ms.queueIndex || 0] || {};
       const nxt = ms.queue[((ms.queueIndex || 0) + 1) % ms.queue.length] || {};
       musicInfo = {
-        currentMusicTitle:   cur.title    || '',
-        currentMusicArtist:  cur.artist   || '',
-        currentMusicUrl:     cur.url      || '',
-        currentMusicId:      cur.id       || '',
-        currentMusicDuration: cur.duration || 0,
-        nextMusicTitle:      nxt.title    || '',
-        nextMusicArtist:     nxt.artist   || '',
-        queueIndex:          ms.queueIndex || 0,
-        musicStatus:         ms.status    || 'playing',
-        lastAdvancedAt:      ms.lastAdvancedAt || 0
+        currentMusicTitle:    cur.title      || '',
+        currentMusicArtist:   cur.artist     || '',
+        currentMusicUrl:      cur.url        || '',
+        currentMusicId:       cur.id         || '',
+        currentMusicDuration: cur.duration   || 0,
+        artworkUrl:           cur.artworkUrl || '',
+        mediaType:            cur.mediaType  || 'music',
+        nextMusicTitle:       nxt.title      || '',
+        nextMusicArtist:      nxt.artist     || '',
+        queueIndex:           ms.queueIndex  || 0,
+        musicStatus:          ms.status      || 'playing',
+        lastAdvancedAt:       ms.lastAdvancedAt || 0,
+        pausedAt:             ms.pausedAt    || null,
       };
     }
   }
@@ -1922,7 +1975,7 @@ async function handleControlExtended(request, env, ctx, cors) {
 
   // Music playback actions — handle inline with the already-parsed body
   // (cannot re-read request.json() after it has been consumed above).
-  const musicActions = ['musicNext','musicPause','musicResume','musicShuffle','musicRepeat','musicVolume','musicCrossfade','next','pause','resume'];
+  const musicActions = ['musicNext','musicPrevious','musicPause','musicResume','musicShuffle','musicRepeat','musicVolume','musicCrossfade','next','previous','pause','resume','queueAppend'];
   if (musicActions.includes(action)) {
     return _handleMusicControlBody(body, request, env, ctx, cors);
   }
@@ -1958,12 +2011,39 @@ async function _handleMusicControlBody(body, request, env, ctx, cors) {
       musicState.lastAdvancedAt = Date.now();
       break;
     }
-    case 'musicPause':  case 'pause':  musicState.status  = 'paused';  break;
-    case 'musicResume': case 'resume': musicState.status  = 'playing'; break;
+    case 'musicPrevious':
+    case 'previous': {
+      const qLen2 = musicState.queue.length;
+      if (qLen2 > 0) {
+        const cur2 = musicState.queueIndex || 0;
+        musicState.queueIndex = cur2 === 0 ? (musicState.repeat ? qLen2 - 1 : 0) : cur2 - 1;
+        musicState.lastAdvancedAt = Date.now();
+      }
+      break;
+    }
+    case 'musicPause':
+    case 'pause':
+      musicState.status = 'paused';
+      musicState.pausedAt = Date.now();
+      break;
+    case 'musicResume':
+    case 'resume':
+      musicState.status = 'playing';
+      if (musicState.pausedAt) {
+        const pauseDur2 = Date.now() - musicState.pausedAt;
+        musicState.lastAdvancedAt = (musicState.lastAdvancedAt || Date.now()) + pauseDur2;
+        musicState.pausedAt = null;
+      }
+      break;
     case 'musicShuffle':   musicState.shuffle   = typeof body.value === 'boolean' ? body.value : !musicState.shuffle; break;
     case 'musicRepeat':    musicState.repeat    = typeof body.value === 'boolean' ? body.value : !musicState.repeat;  break;
     case 'musicVolume':    musicState.volume    = typeof body.value === 'number'  ? body.value : musicState.volume;   break;
     case 'musicCrossfade': musicState.crossfade = typeof body.value === 'number'  ? body.value : musicState.crossfade; break;
+    case 'queueAppend': {
+      const appendItems = Array.isArray(body.items) ? body.items : [];
+      if (appendItems.length) musicState.queue = (musicState.queue || []).concat(appendItems);
+      break;
+    }
     default: return jsonErr('Unknown music action: ' + action, 400, cors);
   }
 

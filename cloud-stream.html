@@ -545,8 +545,12 @@
         <div class="csr-np-next" id="csrAdminNpNext"></div>
       </div>
       <div class="csr-controls-row">
-        <button class="csr-btn csr-btn-music" onclick="csrScrollToPlaylist()">♫ Manage Playlist</button>
-        <button class="csr-btn csr-btn-next" id="csrNextBtn" onclick="csrSkipTrack()">⏭ Skip Track</button>
+        <div class="csr-playback-controls">
+          <button class="csr-btn csr-btn-next csr-btn-sm" id="csrPrevBtn" onclick="csrPreviousTrack()" title="Previous track">⏮ PREV</button>
+          <button class="csr-btn csr-btn-sm" id="csrPauseResumeBtn" onclick="csrTogglePauseResume()" title="Pause / Resume broadcast">⏸ PAUSE</button>
+          <button class="csr-btn csr-btn-next csr-btn-sm" id="csrNextBtn" onclick="csrSkipTrack()" title="Skip to next track">⏭ NEXT</button>
+        </div>
+        <button class="csr-btn csr-btn-music" onclick="csrScrollToLibrary()">♫ Media Library</button>
         <button class="csr-btn csr-btn-danger" onclick="csrConfirmStop()" id="csrStopBtn">🚫 END BROADCAST</button>
       </div>
     </div>
@@ -635,6 +639,81 @@
       <div id="csrHistoryList" class="csr-history-list">
         <div class="csr-loading-text">Loading history…</div>
       </div>
+    </div>
+
+  </section>
+
+  <!-- ══════════════════════════════════════════════
+       MEDIA LIBRARY — upload & manage tracks
+  ═══════════════════════════════════════════════════ -->
+  <div id="csrLibraryDivider" class="csr-admin-divider" style="display:none;" aria-hidden="true">
+    <span class="csr-admin-divider-label">📚 MEDIA LIBRARY</span>
+  </div>
+
+  <section id="csrLibrarySection" class="csr-admin-section" style="display:none;" aria-label="Media Library">
+
+    <!-- Upload panel -->
+    <div class="csr-admin-card">
+      <div class="csr-card-title">⬆ Upload Media</div>
+      <p class="csr-card-desc">Add audio, video, or images to your media library. Files are stored permanently in Cloudflare R2.</p>
+      <div class="csr-form-row" style="margin-bottom:10px;">
+        <div class="csr-form-group">
+          <label class="csr-label">Title</label>
+          <input class="csr-input" id="csrLibTitle" placeholder="Track / file title" maxlength="120">
+        </div>
+        <div class="csr-form-group">
+          <label class="csr-label">Artist <span class="csr-optional">optional</span></label>
+          <input class="csr-input" id="csrLibArtist" placeholder="Artist name">
+        </div>
+      </div>
+      <div class="csr-form-group">
+        <label class="csr-label">Media Type</label>
+        <select class="csr-input csr-select" id="csrLibType">
+          <option value="music">🎵 Audio / Music</option>
+          <option value="video">🎬 Video</option>
+          <option value="picture">🖼 Image / Picture</option>
+        </select>
+      </div>
+      <div class="csr-form-group">
+        <label class="csr-label">Media File</label>
+        <button class="csr-btn csr-btn-outline" onclick="document.getElementById('csrLibFileInput').click()" id="csrLibFileBtn">📁 Choose File</button>
+        <input type="file" id="csrLibFileInput" accept="audio/*,video/*,image/*" onchange="csrLibHandleFile(event)" style="display:none;">
+        <div class="csr-hint" id="csrLibFileHint">No file selected</div>
+      </div>
+      <div class="csr-form-group">
+        <label class="csr-label">Cover Artwork <span class="csr-optional">optional</span></label>
+        <button class="csr-btn csr-btn-outline csr-btn-sm" onclick="document.getElementById('csrLibArtworkInput').click()" id="csrLibArtworkBtn">🖼 Choose Artwork</button>
+        <input type="file" id="csrLibArtworkInput" accept="image/*" onchange="csrLibHandleArtwork(event)" style="display:none;">
+        <div class="csr-hint" id="csrLibArtworkHint">No artwork selected</div>
+      </div>
+      <div id="csrLibUploadProgress" style="display:none;">
+        <div class="csr-handoff-steps" id="csrLibUploadSteps"></div>
+      </div>
+      <div id="csrLibUploadError" class="csr-error" style="display:none;"></div>
+      <button class="csr-btn csr-btn-start" id="csrLibUploadBtn" onclick="csrLibUpload()" style="margin-top:10px;">
+        ⬆ UPLOAD TO LIBRARY
+      </button>
+    </div>
+
+    <!-- Library list -->
+    <div class="csr-admin-card" style="margin-top:10px;">
+      <div class="csr-card-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>📚 Your Media</span>
+        <button class="csr-btn csr-btn-sm csr-btn-outline" onclick="csrLibLoad()">↺ Refresh</button>
+      </div>
+      <div id="csrLibList" class="csr-lib-list">
+        <div class="csr-loading-text">Loading your media library…</div>
+      </div>
+    </div>
+
+    <!-- Add-to-queue panel (shown when stream is active) -->
+    <div id="csrLibAddToQueuePanel" class="csr-admin-card" style="display:none;margin-top:10px;">
+      <div class="csr-card-title">⚡ Add to Live Queue</div>
+      <p class="csr-card-desc" style="margin-bottom:8px;">Select tracks above then add them to the running broadcast queue.</p>
+      <div id="csrLibQueueSelected" class="csr-queue-preview" style="display:none;"></div>
+      <button class="csr-btn csr-btn-primary" onclick="csrLibAddSelectedToQueue()" style="margin-top:8px;">
+        ➕ ADD SELECTED TO BROADCAST
+      </button>
     </div>
 
   </section>

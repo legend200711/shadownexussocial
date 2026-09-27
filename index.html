@@ -12232,7 +12232,7 @@ body.arcade-fs-ios body::after { display:none !important; }
       // Studio Live routes through the existing live.html viewer (same proven system).
       // Cloud Stream uses the 24-Hour Cloud Stream standalone page.
       const watchUrl = isCloudStream
-        ? '24-hour-cloud-stream/index.html?id=' + roomId
+        ? 'cloud-stream.html?id=' + roomId
         : 'live.html#watch=' + roomId;
       const tsRaw    = room.createdAt ? (room.createdAt.toMillis ? room.createdAt.toMillis() : room.createdAt) : '';
       const livePill = isCloudStream ? '☁️ CLOUDSTREAM' : isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
@@ -12494,7 +12494,7 @@ body.arcade-fs-ios body::after { display:none !important; }
       const isCloudStream = room.type === '24hour_cloudstream';
       const isStudioLive  = room.type === '24hour_studio_live';
       const watchUrl      = isCloudStream
-        ? '24-hour-cloud-stream/index.html?id=' + roomId
+        ? 'cloud-stream.html?id=' + roomId
         : 'live.html#watch=' + roomId;
 
       const card = document.createElement('a');

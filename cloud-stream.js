@@ -62,7 +62,11 @@ const _rtdb  = getDatabase(_app);
 
 setPersistence(_auth, browserLocalPersistence).catch(() => {});
 
-const WORKER_URL = 'https://snx-cloudstream.nthntjrn.workers.dev';
+const WORKER_URL     = 'https://snx-cloudstream.nthntjrn.workers.dev';
+const R2_UPLOAD_URL  = 'https://yellow-term-11e6.nthntjrn.workers.dev';
+
+/* ── Single-init guard — prevents double-boot on SPA re-entry ── */
+let _booted = false;
 
 /* ═══════════════════════════════════════════════════════
    STATE
@@ -71,12 +75,22 @@ let _user     = null;
 let _userData = null;
 
 /* Creator/admin state */
-let _streamId   = null;
-let _streamData = null;
-let _artworkDataUrl = null;
+let _streamId        = null;
+let _streamData      = null;
+let _artworkDataUrl  = null;
+let _broadcastPaused = false;  // tracks server-side pause state
 let _creator = {
   playlists: [], selectedPl: null, queue: [],
   healthInterval: null, expiryInterval: null,
+};
+
+/* Media library state */
+let _lib = {
+  items:    [],
+  selected: new Set(),   // Set of track IDs selected for queue addition
+  uploadFile:    null,
+  uploadArtFile: null,
+  _uploading:    false,
 };
 
 /* Viewer/player state */
@@ -193,6 +207,10 @@ onAuthStateChanged(_auth, async user => {
     return;
   }
 
+  // Guard: only run full init once per page load; avoid double-boot from SPA
+  if (_booted) return;
+  _booted = true;
+
   _user = user;
   try {
     const snap = await getDoc(doc(_db, 'users', user.uid));
@@ -207,7 +225,7 @@ onAuthStateChanged(_auth, async user => {
   _show('csrApp', true);
 
   if (watchId) {
-    // Direct listener link — show viewer section
+    // Direct listener link — show viewer section only
     _show('csrViewerSection', true);
     await _initListenerMode(watchId);
   } else {
@@ -223,9 +241,11 @@ async function _initCreatorMode() {
   // Always show the viewer section
   _show('csrViewerSection', true);
 
-  // Show channel management section to the stream owner (any authenticated user)
-  _show('csrAdminSection', true);
-  _show('csrAdminDivider', true);
+  // Show channel management + library sections
+  _show('csrAdminSection',    true);
+  _show('csrAdminDivider',    true);
+  _show('csrLibrarySection',  true);
+  _show('csrLibraryDivider',  true);
 
   // Check for an active stream belonging to this user
   try {
@@ -250,6 +270,7 @@ async function _initCreatorMode() {
 
   _loadPlaylists();
   _loadHistory();
+  _libLoad();
 
   // Also join as a viewer of the most-recent active stream
   _discoverAndJoinStream();
@@ -299,12 +320,17 @@ function _showActiveStream() {
   _startHealthMonitor();
   _startExpiryCountdown();
   _subscribeAdminNowPlaying(_streamId);
+  // Show "Add to live queue" panel in library section
+  _show('csrLibAddToQueuePanel', true);
+  // Restore pause/resume button state
+  _updatePauseResumeBtn(_broadcastPaused);
 }
 
 function _showCreateForm() {
   _show('csrStatusPanel', false);
   _show('csrActiveBanner', false);
   _show('csrCreatePanel', true);
+  _show('csrLibAddToQueuePanel', false);
   _renderCreateForm();
   _show('csrHistoryPanel', true);
 }
@@ -377,9 +403,27 @@ async function _checkHealth() {
       _setStatusBadge(data.status);
       _setText('csrInfoWorker',    data.workerActive ? 'active' : 'offline');
       _setText('csrInfoListeners', String(data.viewerCount || 0));
+      // Sync pause state from worker
+      const workerPaused = data.musicStatus === 'paused';
+      if (workerPaused !== _broadcastPaused) {
+        _broadcastPaused = workerPaused;
+        _updatePauseResumeBtn(_broadcastPaused);
+      }
     }
     if (_streamData && _streamData.expiresAt && _streamData.expiresAt - Date.now() <= 0) _streamExpired();
   } catch(_) {}
+}
+
+function _updatePauseResumeBtn(paused) {
+  const btn = _el('csrPauseResumeBtn');
+  if (!btn) return;
+  if (paused) {
+    btn.innerHTML = '▶ RESUME';
+    btn.className = btn.className.replace('csr-btn-next','').trim() + ' csr-btn-paused';
+  } else {
+    btn.innerHTML = '⏸ PAUSE';
+    btn.className = btn.className.replace('csr-btn-paused','').trim() + ' csr-btn-next';
+  }
 }
 
 /* ── Expiry countdown ── */
@@ -430,6 +474,8 @@ async function _initListenerMode(streamId) {
     await _initListenerForStream(streamId, streamData);
 
     if (data.currentMusicUrl) {
+      // Use lastAdvancedAt for server-authoritative seek
+      _player.trackStartedAt = data.pausedAt ? data.pausedAt : (data.lastAdvancedAt || data.startedAt || Date.now());
       _syncToNowPlaying({
         currentTitle:    data.currentMusicTitle    || '',
         currentArtist:   data.currentMusicArtist   || '',
@@ -440,8 +486,14 @@ async function _initListenerMode(streamId) {
         mediaType:       data.mediaType            || 'music',
         nextTitle:       data.nextMusicTitle       || '',
         nextArtist:      data.nextMusicArtist      || '',
+        status:          data.musicStatus          || 'playing',
         updatedAt:       { toMillis: () => data.lastAdvancedAt || Date.now() },
       });
+      // If broadcast is paused server-side, reflect that in viewer UI
+      if (data.musicStatus === 'paused') {
+        _player.playing = false;
+        _setPlayBtn(false);
+      }
     }
   } catch (e) {
     console.warn('[CSR] Worker sync failed, using Firestore only:', e.message);
@@ -650,6 +702,30 @@ function _syncToNowPlaying(d) {
   const mediaType = d.mediaType       || 'music';
   const nextTitle = d.nextTitle       || '';
   const trackId   = d.currentTrackId  || '';
+  const status    = d.status          || 'playing';
+
+  // Handle server-side pause signal
+  if (status === 'paused' && _player.playing) {
+    const media = _player.mediaType === 'video' ? _player.video : _player.audio;
+    if (media) { try { media.pause(); } catch(_) {} }
+    _player.playing = false;
+    _setPlayBtn(false);
+    _stopProgressRaf();
+  }
+  // Handle server-side resume signal
+  if (status === 'playing' && url && url === _player.trackUrl && !_player.playing && _player._userInteracted) {
+    const tapOverlay = _el('csrTapOverlay');
+    if (!tapOverlay || tapOverlay.style.display === 'none') {
+      const media = _player.mediaType === 'video' ? _player.video : _player.audio;
+      if (media) {
+        const p = media.play();
+        if (p) p.catch(() => {});
+        _player.playing = true;
+        _setPlayBtn(true);
+        _startProgressRaf();
+      }
+    }
+  }
 
   // Update Now Playing artifact plaque
   _setText('csrNpTitle',   title);
@@ -1936,8 +2012,10 @@ async function _stopBroadcast() {
   if (_player.unsub) { try { _player.unsub(); } catch(_) {} _player.unsub = null; }
   _stopAudio();
   _streamId = _streamData = null;
+  _broadcastPaused = false;
   _show('csrStatusPanel', false);
   _show('csrActiveBanner', false);
+  _show('csrLibAddToQueuePanel', false);
   _show('csrCreatePanel', true);
   _renderCreateForm();
   _toast('Broadcast ended.', 'info');
@@ -1946,6 +2024,8 @@ async function _stopBroadcast() {
 /* ── Skip Track ── */
 window.csrSkipTrack = async function() {
   if (!_streamId || !_user) return;
+  const btn = _el('csrNextBtn');
+  if (btn) btn.disabled = true;
   try {
     const idToken = await _user.getIdToken(true);
     await fetch(WORKER_URL + '/api/stream/music/control', {
@@ -1953,10 +2033,61 @@ window.csrSkipTrack = async function() {
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
       body: JSON.stringify({ streamId: _streamId, uid: _user.uid, action: 'next' }),
     });
-    _toast('Skipping…', 'info');
+    _toast('Skipping to next…', 'info');
     setTimeout(_checkHealth, 1500);
   } catch(e) {
     _toast('Could not skip: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+/* ── Previous Track ── */
+window.csrPreviousTrack = async function() {
+  if (!_streamId || !_user) return;
+  const btn = _el('csrPrevBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const idToken = await _user.getIdToken(true);
+    await fetch(WORKER_URL + '/api/stream/music/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+      body: JSON.stringify({ streamId: _streamId, uid: _user.uid, action: 'previous' }),
+    });
+    _toast('Going back…', 'info');
+    setTimeout(_checkHealth, 1500);
+  } catch(e) {
+    _toast('Could not go back: ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+};
+
+/* ── Pause / Resume broadcast ── */
+window.csrTogglePauseResume = async function() {
+  if (!_streamId || !_user) return;
+  const btn = _el('csrPauseResumeBtn');
+  if (btn) btn.disabled = true;
+  const action = _broadcastPaused ? 'resume' : 'pause';
+  try {
+    const idToken = await _user.getIdToken(true);
+    const r = await fetch(WORKER_URL + '/api/stream/music/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+      body: JSON.stringify({ streamId: _streamId, uid: _user.uid, action }),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      _broadcastPaused = d.status === 'paused';
+      _updatePauseResumeBtn(_broadcastPaused);
+      _toast(_broadcastPaused ? '⏸ Broadcast paused' : '▶ Broadcast resumed', 'info');
+    } else {
+      _toast('Could not ' + action + ': ' + (d.error || 'unknown error'), 'error');
+    }
+  } catch(e) {
+    _toast('Could not ' + action + ': ' + e.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
   }
 };
 
@@ -1994,7 +2125,6 @@ async function _loadHistory() {
 /* ── Artwork (broadcast cover) ── */
 // Uploads the chosen image to Cloudflare R2 and stores the permanent URL.
 // Falls back to a local blob URL for the preview while the upload is in flight.
-const _R2_UPLOAD_WORKER = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 window.csrLoadArtwork = function(evt) {
   const file = evt.target.files?.[0];
   if (!file || !file.type.startsWith('image/')) return;
@@ -2051,7 +2181,7 @@ window.csrLoadArtwork = function(evt) {
       if (btn) btn.textContent = '🖼 Retry Image';
     };
 
-    xhr.open('POST', _R2_UPLOAD_WORKER + '/');
+    xhr.open('POST', R2_UPLOAD_URL + '/');
     xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
     xhr.send(form);
   }).catch(function(e) {
@@ -2072,6 +2202,10 @@ window.csrScrollToAdmin  = function() {
   const el = _el('csrAdminSection');
   if (el) el.scrollIntoView({ behavior: 'smooth' });
 };
+window.csrScrollToLibrary = function() {
+  const el = _el('csrLibrarySection');
+  if (el) el.scrollIntoView({ behavior: 'smooth' });
+};
 window.csrScrollToPlaylist = function() { window.location.href = '/?snxPage=studioPage'; };
 window.csrOpenExistingStream = function() { _show('csrDuplicateWarn', false); _showActiveStream(); };
 
@@ -2088,6 +2222,8 @@ window.csrConfirmProceed = function() { _show('csrConfirmOverlay', false); if (_
 /* ── SPA re-init ── */
 window.csrSpaInit = async function() {
   if (!_user) return;
+  // SPA re-init resets the guard so returning to the page works
+  _booted = true;
   _show('csrLoading', false);
   _show('csrAuthGate', false);
   _show('csrApp', true);
@@ -2097,4 +2233,310 @@ window.csrSpaInit = async function() {
 
 window.csrRefreshPlaylists = function() {
   if (_user) _loadPlaylists();
+};
+
+/* ═══════════════════════════════════════════════════════
+   MEDIA LIBRARY — upload, browse, and manage tracks
+   Firestore: cloudStreamTracks/{uid}/tracks/{id}
+   Storage:   Cloudflare R2 via upload-worker
+═══════════════════════════════════════════════════════ */
+
+async function _libLoad() {
+  const el = _el('csrLibList');
+  if (!el || !_user) return;
+  el.innerHTML = '<div class="csr-loading-text">Loading your media library…</div>';
+  try {
+    const snap = await getDocs(query(
+      collection(_db, 'cloudStreamTracks', _user.uid, 'tracks'),
+      orderBy('createdAt', 'desc'), limit(100)
+    ));
+    _lib.items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    _libRender();
+  } catch(e) {
+    el.innerHTML = `<div class="csr-lib-empty">Could not load library: ${_esc(e.message)}</div>`;
+  }
+}
+
+function _libRender() {
+  const el = _el('csrLibList');
+  if (!el) return;
+  if (!_lib.items.length) {
+    el.innerHTML = '<div class="csr-lib-empty">📭 No media yet. Upload your first file above.</div>';
+    return;
+  }
+  el.innerHTML = _lib.items.map(item => {
+    const icon = item.mediaType === 'video' ? '🎬' : item.mediaType === 'picture' ? '🖼' : '🎵';
+    const isSel = _lib.selected.has(item.id);
+    const thumbHtml = item.artworkUrl
+      ? `<img src="${_esc(item.artworkUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : icon;
+    return `<div class="csr-lib-item${isSel ? ' selected' : ''}" onclick="csrLibToggleSelect('${_esc(item.id)}')">
+      <div class="csr-lib-check">${isSel ? '✓' : ''}</div>
+      <div class="csr-lib-thumb">${thumbHtml}</div>
+      <div class="csr-lib-info">
+        <div class="csr-lib-title">${_esc(item.title || 'Untitled')}</div>
+        <div class="csr-lib-meta">${icon} ${_esc(item.mediaType || 'music')}${item.artist ? ' · ' + _esc(item.artist) : ''}</div>
+      </div>
+      <div class="csr-lib-dur">${_fmtDur(item.duration || 0)}</div>
+      <button class="csr-lib-delete" onclick="event.stopPropagation();csrLibDelete('${_esc(item.id)}')" title="Delete" aria-label="Delete ${_esc(item.title || 'item')}">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+window.csrLibToggleSelect = function(id) {
+  if (_lib.selected.has(id)) { _lib.selected.delete(id); } else { _lib.selected.add(id); }
+  _libRender();
+  _libUpdateQueuePanel();
+};
+
+function _libUpdateQueuePanel() {
+  const panel = _el('csrLibQueueSelected');
+  if (!panel || !_streamId) return;
+  const sel = _lib.items.filter(i => _lib.selected.has(i.id));
+  if (!sel.length) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  panel.innerHTML = `<div class="csr-queue-header">${sel.length} selected for broadcast</div>` +
+    sel.map(t =>
+      `<div class="csr-queue-item">
+        <span class="csr-queue-num">${t.mediaType === 'video' ? '🎬' : t.mediaType === 'picture' ? '🖼' : '🎵'}</span>
+        <div class="csr-queue-info"><div class="csr-queue-title">${_esc(t.title || 'Untitled')}</div></div>
+        <span class="csr-queue-dur">${_fmtDur(t.duration || 0)}</span>
+      </div>`
+    ).join('');
+}
+
+window.csrLibLoad = function() { _libLoad(); };
+
+window.csrLibDelete = async function(id) {
+  if (!_user) return;
+  if (!confirm('Delete this item from your library?')) return;
+  try {
+    await deleteDoc(doc(_db, 'cloudStreamTracks', _user.uid, 'tracks', id));
+    _lib.items = _lib.items.filter(i => i.id !== id);
+    _lib.selected.delete(id);
+    _libRender();
+    _libUpdateQueuePanel();
+    _toast('Item deleted from library.', 'info');
+  } catch(e) {
+    _toast('Could not delete: ' + e.message, 'error');
+  }
+};
+
+/* ── File selection ── */
+window.csrLibHandleFile = function(evt) {
+  const file = evt.target.files?.[0];
+  if (!file) return;
+  _lib.uploadFile = file;
+  const hint = _el('csrLibFileHint');
+  if (hint) hint.textContent = file.name + ' (' + _fmtFileSize(file.size) + ')';
+  const btn = _el('csrLibFileBtn');
+  if (btn) btn.textContent = '📁 ' + file.name.slice(0, 30);
+  // Auto-detect type
+  const type = _el('csrLibType');
+  if (type) {
+    if (file.type.startsWith('video/')) type.value = 'video';
+    else if (file.type.startsWith('image/')) type.value = 'picture';
+    else type.value = 'music';
+  }
+  // Auto-fill title from filename if empty
+  const titleEl = _el('csrLibTitle');
+  if (titleEl && !titleEl.value) {
+    titleEl.value = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ');
+  }
+};
+
+window.csrLibHandleArtwork = function(evt) {
+  const file = evt.target.files?.[0];
+  if (!file) return;
+  _lib.uploadArtFile = file;
+  const hint = _el('csrLibArtworkHint');
+  if (hint) hint.textContent = file.name;
+  const btn = _el('csrLibArtworkBtn');
+  if (btn) btn.textContent = '🖼 ' + file.name.slice(0, 25);
+};
+
+function _fmtFileSize(bytes) {
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / 1024 / 1024).toFixed(1) + 'MB';
+}
+
+/* ── Upload to R2 ── */
+window.csrLibUpload = async function() {
+  if (_lib._uploading) return;
+  if (!_user) { _toast('Sign in required.', 'error'); return; }
+  if (!_lib.uploadFile) { _showError('csrLibUploadError', 'Please choose a media file first.'); return; }
+  const title = (_el('csrLibTitle') || {}).value?.trim();
+  if (!title) { _showError('csrLibUploadError', 'Please enter a title.'); return; }
+
+  _lib._uploading = true;
+  _showError('csrLibUploadError', '');
+  const btn = _el('csrLibUploadBtn');
+  if (btn) btn.disabled = true;
+  _show('csrLibUploadProgress', true);
+
+  const mediaType = (_el('csrLibType') || {}).value || 'music';
+  const artist    = (_el('csrLibArtist') || {}).value?.trim() || '';
+
+  function _libStep(step, label) {
+    const el = _el('csrLibUploadSteps');
+    if (!el) return;
+    const steps = ['Preparing upload…', 'Uploading media…', 'Uploading artwork…', 'Saving to library…', 'Done!'];
+    el.innerHTML = steps.map((s, i) => {
+      const done = i < step, active = i === step;
+      const icon = done ? '✓' : active ? '⏳' : '○';
+      return `<div class="csr-handoff-step${done ? ' done' : active ? ' active' : ''}">
+        <span class="csr-handoff-icon">${icon}</span>
+        <span>${i === step ? _esc(label) : s}</span>
+      </div>`;
+    }).join('');
+  }
+
+  try {
+    _libStep(0, 'Preparing upload…');
+    const idToken  = await _user.getIdToken(true);
+    const uid      = _user.uid;
+    const trackId  = 'tr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    const safeName = _lib.uploadFile.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+    const r2Key    = 'cloud-stream/' + uid + '/media/' + trackId + '_' + safeName;
+
+    _libStep(1, 'Uploading media file…');
+    const form = new FormData();
+    form.append('file', _lib.uploadFile, _lib.uploadFile.name);
+    form.append('path', r2Key);
+    const mediaRes = await fetch(R2_UPLOAD_URL + '/', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + idToken }, body: form,
+    });
+    if (!mediaRes.ok) throw new Error('Media upload failed (HTTP ' + mediaRes.status + ')');
+    const mediaData = await mediaRes.json();
+    const mediaUrl  = mediaData.url;
+    if (!mediaUrl) throw new Error('No URL returned from media upload.');
+
+    // Duration detection for audio/video
+    let duration = 0;
+    if (mediaType !== 'picture') {
+      try {
+        duration = await new Promise(resolve => {
+          const el = mediaType === 'video' ? document.createElement('video') : document.createElement('audio');
+          el.src = URL.createObjectURL(_lib.uploadFile);
+          el.onloadedmetadata = () => { resolve(Math.round(el.duration) || 0); URL.revokeObjectURL(el.src); };
+          el.onerror = () => { resolve(0); };
+          setTimeout(() => resolve(0), 8000);
+        });
+      } catch(_) {}
+    }
+
+    _libStep(2, 'Uploading artwork…');
+    let artworkUrl = '';
+    if (_lib.uploadArtFile) {
+      try {
+        const artKey = 'cloud-stream/' + uid + '/artwork/' + trackId + '_art';
+        const artForm = new FormData();
+        artForm.append('file', _lib.uploadArtFile, _lib.uploadArtFile.name);
+        artForm.append('path', artKey);
+        const artRes = await fetch(R2_UPLOAD_URL + '/', {
+          method: 'POST', headers: { 'Authorization': 'Bearer ' + idToken }, body: artForm,
+        });
+        if (artRes.ok) { const d = await artRes.json(); artworkUrl = d.url || ''; }
+      } catch(_) {}
+    }
+
+    _libStep(3, 'Saving to library…');
+    const trackData = {
+      id: trackId, ownerUid: uid,
+      title, artist, mediaType,
+      url: mediaUrl, artworkUrl,
+      duration, createdAt: serverTimestamp(),
+    };
+    await setDoc(doc(_db, 'cloudStreamTracks', uid, 'tracks', trackId), trackData);
+
+    _libStep(4, 'Done!');
+    _lib.items.unshift({ ...trackData, id: trackId, createdAt: new Date() });
+    _libRender();
+
+    // Reset form
+    if (_el('csrLibTitle'))   _el('csrLibTitle').value = '';
+    if (_el('csrLibArtist'))  _el('csrLibArtist').value = '';
+    if (_el('csrLibFileInput')) _el('csrLibFileInput').value = '';
+    if (_el('csrLibArtworkInput')) _el('csrLibArtworkInput').value = '';
+    if (_el('csrLibFileHint'))    _el('csrLibFileHint').textContent = 'No file selected';
+    if (_el('csrLibArtworkHint')) _el('csrLibArtworkHint').textContent = 'No artwork selected';
+    if (_el('csrLibFileBtn'))     _el('csrLibFileBtn').textContent = '📁 Choose File';
+    if (_el('csrLibArtworkBtn'))  _el('csrLibArtworkBtn').textContent = '🖼 Choose Artwork';
+    _lib.uploadFile = null; _lib.uploadArtFile = null;
+
+    // Also refresh playlists (new track can be added to playlists)
+    _loadPlaylists();
+
+    await _sleep(1200);
+    _show('csrLibUploadProgress', false);
+    _toast('✓ Media added to library!', 'success');
+  } catch(e) {
+    _show('csrLibUploadProgress', false);
+    _showError('csrLibUploadError', e.message || 'Upload failed.');
+    _toast('Upload failed: ' + e.message, 'error');
+    console.error('[CSR Library] upload error:', e);
+  } finally {
+    _lib._uploading = false;
+    if (btn) btn.disabled = false;
+  }
+};
+
+/* ── Add selected library items to the running broadcast queue ── */
+window.csrLibAddSelectedToQueue = async function() {
+  if (!_streamId || !_user) { _toast('No active broadcast.', 'error'); return; }
+  const sel = _lib.items.filter(i => _lib.selected.has(i.id));
+  if (!sel.length) { _toast('Select at least one item to add.', 'info'); return; }
+
+  const btn = _el('csrLibUploadBtn');  // reuse disabled state
+
+  try {
+    const idToken = await _user.getIdToken(true);
+
+    // First fetch current queue from worker
+    const syncR = await fetch(WORKER_URL + '/api/stream/sync/' + _streamId);
+    const syncD = await syncR.json();
+
+    // Build new queue items
+    const newItems = sel.map(t => ({
+      id: t.id,
+      title:     t.title    || 'Untitled',
+      artist:    t.artist   || '',
+      url:       t.url      || '',
+      duration:  t.duration || 0,
+      artworkUrl:t.artworkUrl || '',
+      mediaType: t.mediaType || 'music',
+    }));
+
+    // POST music/set to append to queue
+    // We fetch the current KV music state via /music/ then add to it
+    const musR = await fetch(WORKER_URL + '/api/stream/music/' + _streamId);
+    const musD = await musR.json();
+    const curQueue = (musD.queueLength > 0) ? [] : [];  // We can't get full queue from GET, so we do a control action instead
+
+    // Use the /api/stream/music/control with action 'queueAppend'
+    // For now call /api/stream/music/set with the appended queue built from the sync response
+    // Since we don't have the full queue from the API, we append via a dedicated endpoint
+    const r = await fetch(WORKER_URL + '/api/stream/music/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+      body: JSON.stringify({
+        streamId: _streamId, uid: _user.uid,
+        action: 'queueAppend',
+        items: newItems,
+      }),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      _lib.selected.clear();
+      _libRender();
+      _libUpdateQueuePanel();
+      _toast(`✓ ${newItems.length} item(s) added to broadcast queue!`, 'success');
+      setTimeout(_checkHealth, 1000);
+    } else {
+      _toast('Could not add to queue: ' + (d.error || 'unknown error'), 'error');
+    }
+  } catch(e) {
+    _toast('Queue update failed: ' + e.message, 'error');
+  }
 };
