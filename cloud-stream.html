@@ -119,6 +119,11 @@
     <div class="csr-energy-line" aria-hidden="true"></div>
   </header>
 
+  <!-- ── CLOUD ENGINE STATUS INDICATOR (Stage 2) ── -->
+  <div id="csrEngineStatus" class="csr-engine-status csr-engine-warn" aria-live="polite">
+    ⚡ CLOUD ENGINE: CONNECTING…
+  </div>
+
   <!-- ── ACTIVE BANNER (admin) ── -->
   <div id="csrActiveBanner" class="csr-active-banner" style="display:none;" role="alert">
     <span class="csr-pulse-dot-sm" aria-hidden="true"></span>
@@ -621,7 +626,14 @@
         <label class="csr-label">Shuffle &amp; Repeat</label>
         <div class="csr-toggle-row">
           <label class="csr-toggle-label"><input type="checkbox" id="csrFormShuffle"> Shuffle playlist</label>
-          <label class="csr-toggle-label"><input type="checkbox" id="csrFormRepeat" checked> Repeat (loop)</label>
+          <div class="csr-form-group" style="margin-top:4px;">
+            <label class="csr-label" style="font-size:11px;">Repeat Mode</label>
+            <select class="csr-input csr-select" id="csrFormRepeat" style="font-size:12px;padding:4px 8px;">
+              <option value="queue" selected>🔁 Repeat Queue</option>
+              <option value="one">🔂 Repeat One</option>
+              <option value="off">⏸ No Repeat</option>
+            </select>
+          </div>
         </div>
       </div>
       <div id="csrValidationError" class="csr-error" style="display:none;"></div>
@@ -677,8 +689,10 @@
       <div class="csr-form-group">
         <label class="csr-label">Media File</label>
         <button class="csr-btn csr-btn-outline" onclick="document.getElementById('csrLibFileInput').click()" id="csrLibFileBtn">📁 Choose File</button>
-        <input type="file" id="csrLibFileInput" accept="audio/*,video/*,image/*" onchange="csrLibHandleFile(event)" style="display:none;">
-        <div class="csr-hint" id="csrLibFileHint">No file selected</div>
+        <input type="file" id="csrLibFileInput"
+          accept="audio/mpeg,audio/mp4,audio/aac,audio/wav,audio/ogg,audio/*,video/mp4,video/webm,video/quicktime,video/*,image/jpeg,image/jpg,image/png,image/webp,image/*"
+          onchange="csrLibHandleFile(event)" style="display:none;">
+        <div class="csr-hint" id="csrLibFileHint">No file selected · MP3, M4A, AAC, WAV, OGG, MP4, WEBM, JPG, PNG, WEBP</div>
       </div>
       <div class="csr-form-group">
         <label class="csr-label">Cover Artwork <span class="csr-optional">optional</span></label>
@@ -688,6 +702,10 @@
       </div>
       <div id="csrLibUploadProgress" style="display:none;">
         <div class="csr-handoff-steps" id="csrLibUploadSteps"></div>
+        <!-- Real upload progress bar (filled by XHR onprogress) -->
+        <div style="background:rgba(0,174,239,0.12);border-radius:4px;margin-top:6px;height:6px;overflow:hidden;">
+          <div id="csrLibUploadPct" style="height:100%;width:0%;background:#00AEEF;border-radius:4px;transition:width .25s;"></div>
+        </div>
       </div>
       <div id="csrLibUploadError" class="csr-error" style="display:none;"></div>
       <button class="csr-btn csr-btn-start" id="csrLibUploadBtn" onclick="csrLibUpload()" style="margin-top:10px;">

@@ -2058,3 +2058,17 @@ body > * { position: relative; z-index: 1; }
 @media (min-width: 480px) {
   .csr-playback-controls .csr-btn { flex: unset; }
 }
+
+/* ── Stage 2: Cloud Engine Status Indicator ── */
+.csr-engine-status {
+  display:block;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.06em;
+  text-align:center;
+  padding:4px 12px;
+  border-bottom:1px solid rgba(0,174,239,0.12);
+}
+.csr-engine-ok   { color:#39ff14; background:rgba(57,255,20,0.06); }
+.csr-engine-warn { color:#ffaa00; background:rgba(255,170,0,0.08); animation:csr-engine-blink 1.5s ease-in-out infinite; }
+@keyframes csr-engine-blink { 0%,100%{opacity:1} 50%{opacity:.6} }

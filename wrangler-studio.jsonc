@@ -1,26 +1,28 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
 
-  // Shadow Nexus Social — CloudStream Worker
+  // Shadow Nexus Social — CloudStream Worker  (Stage 2)
   // Provides server-side 24-hour broadcast scheduling and control
   //
   // Deploy: npx wrangler deploy --config wrangler-studio.jsonc
-  // Secrets: npx wrangler secret put FIREBASE_PROJECT_ID --config wrangler-studio.jsonc
-  //          npx wrangler secret put STREAM_SECRET --config wrangler-studio.jsonc
+  //
+  // Required secrets (set once via wrangler CLI):
+  //   npx wrangler secret put FIREBASE_API_KEY  --config wrangler-studio.jsonc
+  //   npx wrangler secret put STREAM_SECRET     --config wrangler-studio.jsonc
+  //
+  // Required wrangler kv namespace (create once):
+  //   npx wrangler kv namespace create cloudStreamKV
+  //   Then update the "id" field below with the printed namespace ID.
 
   "name": "snx-cloudstream",
   "main": "cloudstream-worker.js",
-  "compatibility_date": "2024-09-23",
+  "compatibility_date": "2025-01-01",
   "account_id": "f276c4406b82d3c1e35efed1ef486235",
 
-  // ── Routes ──
-  // Workers.dev endpoint is enabled so the worker is reachable immediately.
-  // To add a custom domain (snx-cloudstream.shadownexussocial.online), add a
-  // Custom Domain in the Cloudflare dashboard: Workers > snx-cloudstream > Settings > Domains & Routes
+  // Workers.dev endpoint — immediately reachable without a custom domain.
   "workers_dev": true,
 
-  // ── KV Namespace for stream state ──
-  // Create with: npx wrangler kv namespace create cloudStreamKV
+  // ── KV Namespace: stream state, music state, media metadata, viewer presence ──
   "kv_namespaces": [
     {
       "binding": "cloudStreamKV",
@@ -28,7 +30,8 @@
     }
   ],
 
-  // ── Durable Objects for persistent 24-hour scheduling ──
+  // ── Durable Objects: persistent 24-hour channel clock + alarms ──
+  // One DO instance per channel: idFromName("{streamId}_music")
   "durable_objects": {
     "bindings": [
       {
@@ -38,8 +41,9 @@
     ]
   },
 
-  // ── Migrations (required for new Durable Object class) ──
-  // Free plan requires new_sqlite_classes instead of new_classes
+  // ── Migrations ──
+  // Stage 2: keep same tag v1 if CloudStreamScheduler already deployed.
+  // If deploying fresh, this creates the SQLite-backed DO class.
   "migrations": [
     {
       "tag": "v1",
@@ -49,13 +53,16 @@
 
   // ── Non-secret config vars ──
   "vars": {
-    "SNX_ORIGIN":  "https://shadownexussocial.online",
-    "SNX_ORIGIN2": "https://chrislegendofshadows.com",
-    "FIREBASE_PROJECT_ID": "horr-a08f4",
-    "WORKER_ENV": "production"
+    "SNX_ORIGIN":           "https://shadownexussocial.online",
+    "SNX_ORIGIN2":          "https://chrislegendofshadows.com",
+    "FIREBASE_PROJECT_ID":  "horr-a08f4",
+    "WORKER_ENV":           "production"
   }
 
-  // ── Secrets (set via: npx wrangler secret put <NAME> --config wrangler-studio.jsonc) ──
-  //   STREAM_SECRET     — used to sign/verify stream auth tokens
-  //   FIREBASE_API_KEY  — Firebase Web API key (for server-side REST calls only)
+  // ── Secrets (NEVER commit values — set via wrangler CLI) ──
+  //   STREAM_SECRET    — optional signing secret for stream tokens
+  //   FIREBASE_API_KEY — Firebase Web API key for server-side REST (accounts:signUp, accounts:lookup)
+  //
+  // The upload-worker (wrangler.jsonc / yellow-term-11e6) handles R2 file serving.
+  // The cloudstream worker reads R2 public URLs stored in KV media metadata.
 }

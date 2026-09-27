@@ -65,6 +65,39 @@ setPersistence(_auth, browserLocalPersistence).catch(() => {});
 const WORKER_URL     = 'https://snx-cloudstream.nthntjrn.workers.dev';
 const R2_UPLOAD_URL  = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 
+/* ── Cloud Engine connection indicator ── */
+let _engineConnected = false;
+let _engineCheckTimer = null;
+
+function _setEngineStatus(connected) {
+  _engineConnected = connected;
+  const el = _el('csrEngineStatus');
+  if (!el) return;
+  if (connected) {
+    el.textContent = '⚡ CLOUD ENGINE: CONNECTED';
+    el.className = 'csr-engine-status csr-engine-ok';
+  } else {
+    el.textContent = '⚡ CLOUD ENGINE: RECONNECTING…';
+    el.className = 'csr-engine-status csr-engine-warn';
+  }
+}
+
+async function _pingEngine() {
+  try {
+    const r = await fetch(WORKER_URL + '/health', { signal: AbortSignal.timeout(5000) });
+    _setEngineStatus(r.ok);
+  } catch {
+    _setEngineStatus(false);
+  }
+}
+
+function _startEngineMonitor() {
+  _pingEngine();
+  if (!_engineCheckTimer) {
+    _engineCheckTimer = setInterval(_pingEngine, 30000);
+  }
+}
+
 /* ── Single-init guard — prevents double-boot on SPA re-entry ── */
 let _booted = false;
 
@@ -274,6 +307,7 @@ async function _initCreatorMode() {
   _loadPlaylists();
   _loadHistory();
   _libLoad();
+  _startEngineMonitor();
 
   // Also join as a viewer of the most-recent active stream
   _discoverAndJoinStream();
@@ -477,8 +511,18 @@ async function _initListenerMode(streamId) {
     await _initListenerForStream(streamId, streamData);
 
     if (data.currentMusicUrl) {
-      // Use lastAdvancedAt for server-authoritative seek
-      _player.trackStartedAt = data.pausedAt ? data.pausedAt : (data.lastAdvancedAt || data.startedAt || Date.now());
+      // Stage 2: use server-provided seekPosition directly (no client-side calculation needed)
+      // seekPosition is already computed authoritatively on the server as:
+      //   paused  → pausedPosition
+      //   playing → (serverNow - lastAdvancedAt) / 1000
+      const serverSeekSecs = typeof data.seekPosition === 'number' ? data.seekPosition :
+        (data.musicStatus === 'paused'
+          ? (data.pausedPosition || 0)
+          : Math.max(0, (data.serverTime ? (Date.now() - (data.lastAdvancedAt || Date.now())) / 1000 : 0)));
+
+      // Store as a timestamp equivalent so _loadAndPlayAudio can seek using the same logic
+      _player.trackStartedAt = Date.now() - serverSeekSecs * 1000;
+
       _syncToNowPlaying({
         currentTitle:    data.currentMusicTitle    || '',
         currentArtist:   data.currentMusicArtist   || '',
@@ -490,7 +534,7 @@ async function _initListenerMode(streamId) {
         nextTitle:       data.nextMusicTitle       || '',
         nextArtist:      data.nextMusicArtist      || '',
         status:          data.musicStatus          || 'playing',
-        updatedAt:       { toMillis: () => data.lastAdvancedAt || Date.now() },
+        updatedAt:       { toMillis: () => _player.trackStartedAt },
       });
       // If broadcast is paused server-side, reflect that in viewer UI
       if (data.musicStatus === 'paused') {
@@ -780,12 +824,21 @@ function _syncToNowPlaying(d) {
 
   // Load new media if URL changed
   if (url && url !== _player.trackUrl) {
-    _player.trackUrl      = url;
-    _player.trackId       = trackId;
-    _player.trackDur      = dur;
-    _player.artworkUrl    = artwork;
-    _player.mediaType     = mediaType;
-    _player.trackStartedAt = d.updatedAt?.toMillis ? d.updatedAt.toMillis() : Date.now();
+    _player.trackUrl   = url;
+    _player.trackId    = trackId;
+    _player.trackDur   = dur;
+    _player.artworkUrl = artwork;
+    _player.mediaType  = mediaType;
+
+    // Stage 2: prefer server-provided seekPosition to compute trackStartedAt
+    if (typeof d.seekPosition === 'number' && d.seekPosition >= 0) {
+      _player.trackStartedAt = Date.now() - d.seekPosition * 1000;
+    } else if (d.updatedAt?.toMillis) {
+      _player.trackStartedAt = d.updatedAt.toMillis();
+    } else {
+      _player.trackStartedAt = Date.now();
+    }
+
     _loadMedia(url, dur, mediaType, artwork, title, artist);
   }
 }
@@ -1855,8 +1908,12 @@ window.csrStartBroadcast = async function() {
     const title   = (_el('csrFormTitle')    || {}).value?.trim() || 'CloudStream by ' + (_userData?.displayName || _user.uid);
     const desc    = (_el('csrFormDesc')     || {}).value?.trim() || '';
     const cat     = (_el('csrFormCategory') || {}).value || 'Music';
-    const shuffle = (_el('csrFormShuffle')  || {}).checked || false;
-    const repeat  = (_el('csrFormRepeat')   || {}).checked !== false;
+    const shuffle    = (_el('csrFormShuffle')  || {}).checked || false;
+    const repeatEl   = _el('csrFormRepeat');
+    // Support both checkbox (boolean) and select (off/queue/one) for repeat mode
+    const repeat     = repeatEl
+      ? (repeatEl.tagName === 'SELECT' ? repeatEl.value : (repeatEl.checked !== false ? 'queue' : 'off'))
+      : 'queue';
 
     _show('csrStartingProgress', true);
     _show('csrValidationError', false);
@@ -2313,8 +2370,40 @@ window.csrLibLoad = function() { _libLoad(); };
 window.csrLibDelete = async function(id) {
   if (!_user) return;
   if (!confirm('Delete this item from your library?')) return;
+
+  // Safety check: don't delete if it's the currently playing track
+  const item = _lib.items.find(i => i.id === id);
+  if (item && _player.trackUrl && item.url && item.url === _player.trackUrl) {
+    if (!confirm('This item is currently playing. Delete anyway?')) return;
+  }
+
   try {
+    const idToken = await _user.getIdToken(true);
+
+    // 1. Delete metadata from Worker KV
+    try {
+      await fetch(WORKER_URL + `/api/media/delete/${_user.uid}/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + idToken },
+      });
+    } catch (_) {}
+
+    // 2. Delete the R2 file if we have an r2Key
+    if (item && (item.r2Key || item.url)) {
+      const r2Key = item.r2Key || (item.url ? item.url.replace(R2_UPLOAD_URL + '/', '') : null);
+      if (r2Key) {
+        try {
+          await fetch(R2_UPLOAD_URL + '/' + r2Key, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + idToken },
+          });
+        } catch (_) {}
+      }
+    }
+
+    // 3. Delete from Firestore (legacy compatibility)
     await deleteDoc(doc(_db, 'cloudStreamTracks', _user.uid, 'tracks', id));
+
     _lib.items = _lib.items.filter(i => i.id !== id);
     _lib.selected.delete(id);
     _libRender();
@@ -2403,28 +2492,51 @@ window.csrLibUpload = async function() {
     const safeName = _lib.uploadFile.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
     const r2Key    = 'cloud-stream/' + uid + '/media/' + trackId + '_' + safeName;
 
-    _libStep(1, 'Uploading media file…');
-    const form = new FormData();
-    form.append('file', _lib.uploadFile, _lib.uploadFile.name);
-    form.append('path', r2Key);
-    const mediaRes = await fetch(R2_UPLOAD_URL + '/', {
-      method: 'POST', headers: { 'Authorization': 'Bearer ' + idToken }, body: form,
-    });
-    if (!mediaRes.ok) throw new Error('Media upload failed (HTTP ' + mediaRes.status + ')');
-    const mediaData = await mediaRes.json();
-    const mediaUrl  = mediaData.url;
-    if (!mediaUrl) throw new Error('No URL returned from media upload.');
+    _libStep(1, 'Uploading media file… 0%');
 
-    // Duration detection for audio/video
+    // XHR with real upload progress
+    const mediaUrl = await new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', _lib.uploadFile, _lib.uploadFile.name);
+      form.append('path', r2Key);
+      const xhr = new XMLHttpRequest();
+      xhr.timeout = 15 * 60 * 1000; // 15 min for large files
+      xhr.upload.onprogress = evt => {
+        if (!evt.lengthComputable) return;
+        const pct = Math.round((evt.loaded / evt.total) * 100);
+        _libStep(1, `Uploading… ${pct}%`);
+        const bar = _el('csrLibUploadPct');
+        if (bar) bar.style.width = pct + '%';
+      };
+      xhr.onload = () => {
+        const bar = _el('csrLibUploadPct');
+        if (bar) bar.style.width = '100%';
+        if (xhr.status === 200) {
+          try {
+            const res = JSON.parse(xhr.responseText);
+            if (res.url) { resolve(res.url); return; }
+          } catch(_) {}
+        }
+        reject(new Error('Media upload failed (HTTP ' + xhr.status + ')'));
+      };
+      xhr.onerror = () => reject(new Error('Network error during upload. Check your connection.'));
+      xhr.ontimeout = () => reject(new Error('Upload timed out. Try a smaller file or check your connection.'));
+      xhr.open('POST', R2_UPLOAD_URL + '/');
+      xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
+      xhr.send(form);
+    });
+
+    // Duration detection for audio/video (use local blob — accurate, no extra request)
     let duration = 0;
     if (mediaType !== 'picture') {
       try {
         duration = await new Promise(resolve => {
           const el = mediaType === 'video' ? document.createElement('video') : document.createElement('audio');
-          el.src = URL.createObjectURL(_lib.uploadFile);
-          el.onloadedmetadata = () => { resolve(Math.round(el.duration) || 0); URL.revokeObjectURL(el.src); };
-          el.onerror = () => { resolve(0); };
-          setTimeout(() => resolve(0), 8000);
+          const blobUrl = URL.createObjectURL(_lib.uploadFile);
+          el.src = blobUrl;
+          el.onloadedmetadata = () => { URL.revokeObjectURL(blobUrl); resolve(Math.round(el.duration) || 0); };
+          el.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(0); };
+          setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch(_) {} resolve(0); }, 8000);
         });
       } catch(_) {}
     }
@@ -2433,11 +2545,11 @@ window.csrLibUpload = async function() {
     let artworkUrl = '';
     if (_lib.uploadArtFile) {
       try {
-        const artKey = 'cloud-stream/' + uid + '/artwork/' + trackId + '_art';
+        const artKey  = 'cloud-stream/' + uid + '/artwork/' + trackId + '_art';
         const artForm = new FormData();
         artForm.append('file', _lib.uploadArtFile, _lib.uploadArtFile.name);
         artForm.append('path', artKey);
-        const artRes = await fetch(R2_UPLOAD_URL + '/', {
+        const artRes  = await fetch(R2_UPLOAD_URL + '/', {
           method: 'POST', headers: { 'Authorization': 'Bearer ' + idToken }, body: artForm,
         });
         if (artRes.ok) { const d = await artRes.json(); artworkUrl = d.url || ''; }
@@ -2445,11 +2557,35 @@ window.csrLibUpload = async function() {
     }
 
     _libStep(3, 'Saving to library…');
+
+    // Save metadata to Worker KV (canonical media record)
+    const mediaMetadata = {
+      mediaId: trackId, ownerUid: uid,
+      filename: _lib.uploadFile.name,
+      title, artist, mediaType,
+      mimeType: _lib.uploadFile.type || '',
+      r2Key,
+      publicUrl: mediaUrl,
+      url: mediaUrl,         // alias used by queue system
+      artworkUrl,
+      duration,
+      fileSize: _lib.uploadFile.size || 0,
+      uploadStatus: 'ready',
+    };
+    try {
+      await fetch(WORKER_URL + '/api/media/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+        body: JSON.stringify(mediaMetadata),
+      });
+    } catch(_) {}
+
     const trackData = {
       id: trackId, ownerUid: uid,
       title, artist, mediaType,
-      url: mediaUrl, artworkUrl,
-      duration, createdAt: serverTimestamp(),
+      url: mediaUrl, artworkUrl, r2Key,
+      duration, fileSize: _lib.uploadFile.size || 0,
+      createdAt: serverTimestamp(),
     };
     await setDoc(doc(_db, 'cloudStreamTracks', uid, 'tracks', trackId), trackData);
 

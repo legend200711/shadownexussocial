@@ -1254,76 +1254,111 @@ _handleLayout();
 // creator keeping their device open.
 // ═══════════════════════════════════════════════════════
 
-let _npAudio          = null;   // current HTMLAudioElement
+// ═══════════════════════════════════════════════════════
+// CLOUDSTREAM MEDIA PLAYER (Stage 2)
+// ── Server-authoritative seek: uses seekPosition from worker
+// ── Supports audio, video, and image media types
+// ── Stable single audio element (no destroy/recreate on track change)
+// ── Reconnect-and-seek: viewer joining mid-track seeks to correct position
+// ═══════════════════════════════════════════════════════
+
+let _npAudio          = null;   // stable HTMLAudioElement (reused, src swapped)
+let _npVideo          = null;   // HTMLVideoElement for video media
 let _npCurrentId      = null;   // currently-loaded track ID
 let _npUnsub          = null;   // Firestore onSnapshot unsubscribe
 let _npMuted          = false;
 let _npVolume         = 0.8;
 let _npProgressTmr    = null;
+let _npMediaType      = 'music'; // current: music | video | picture
+let _npSeekOnLoad     = 0;       // seconds to seek to when metadata loads
+let _npInteracted     = false;   // user has tapped/clicked
 const _NP_BAR         = () => document.getElementById('snxvNowPlaying');
 const _NP_TITLE       = () => document.getElementById('snxvNpTitle');
 const _NP_ARTIST      = () => document.getElementById('snxvNpArtist');
 const _NP_NEXT        = () => document.getElementById('snxvNpNext');
 const _NP_FILL        = () => document.getElementById('snxvNpProgressFill');
 
+function _getOrCreateAudio() {
+  if (!_npAudio) {
+    _npAudio = new Audio();
+    _npAudio.preload     = 'auto';
+    _npAudio.crossOrigin = 'anonymous';
+    _npAudio.setAttribute('playsinline', '');
+    _npAudio.setAttribute('webkit-playsinline', '');
+    _npAudio.ontimeupdate = () => {
+      const fill = _NP_FILL();
+      if (fill && _npAudio.duration) {
+        fill.style.width = ((_npAudio.currentTime / _npAudio.duration) * 100) + '%';
+      }
+    };
+  }
+  _npAudio.volume = _npMuted ? 0 : _npVolume;
+  return _npAudio;
+}
+
 // Called once cloudStreamId is known (from _loadRoom → _cloudStreamId is set)
 function _startMusicPlayer(cloudStreamId) {
   if (!cloudStreamId) return;
-  _stopMusicPlayer();   // tear down any prior session
+  _stopMusicPlayer();
 
   // ── Subscribe to Firestore studioCloudStreamMusic/{cloudStreamId} ─────────
-  // The Cloudflare Durable Object alarm updates this doc every track.
-  // The creator's browser also pushes to it when they select a track.
+  // The Cloudflare Durable Object alarm updates this doc on every track change.
   if (window._snxFirestore) {
     const fs = window._snxFirestore;
     _npUnsub = fs.onSnapshot(
       fs.doc(fs.db, 'studioCloudStreamMusic', cloudStreamId),
       snap => {
         if (!snap || !snap.exists()) {
-          // Firestore doc not yet created — fall back to the health endpoint
-          // which reads from KV (always authoritative regardless of Firestore state).
           _fetchAndPlayCurrentTrack(cloudStreamId);
           return;
         }
         const d = snap.data();
-        // Only act if the status is playing and there is a track
-        if (d.status === 'stopped' || d.status === 'ended' || d.status === 'paused') {
+
+        if (d.status === 'stopped' || d.status === 'ended') {
           _pauseNpAudio();
+          const bar = _NP_BAR(); if (bar) bar.style.display = 'none';
           return;
         }
-        // Fast path: if the Firestore doc includes currentTrackUrl (written by the
-        // studio queue system or the DO alarm), play it directly without a health
-        // endpoint round-trip.
-        if (d.currentTrackUrl) {
-          const trackId = d.currentTrackId || d.currentTrackUrl;
-          if (trackId !== _npCurrentId) {
-            _loadNpTrack(
-              d.currentTrackUrl,
-              trackId,
-              d.currentTitle    || '',
-              d.currentArtist   || '',
-              d.nextTitle       || '',
-              d.currentDuration || 0,
-              (d.volume || 80) / 100
-            );
-          } else if (!_npAudio || _npAudio.paused) {
-            if (_npAudio) _npAudio.play().catch(() => {});
-          }
+
+        if (d.status === 'paused') {
+          _pauseNpAudio();
           _updateNpUI(d.currentTitle || '', d.currentArtist || '', d.nextTitle || '');
           return;
         }
-        // Fallback: fetch URL from the worker health endpoint (KV authoritative source)
+
+        if (d.currentTrackUrl) {
+          const trackId = d.currentTrackId || d.currentTrackUrl;
+          // Use seekPosition from Firestore doc (written by the DO alarm) for correct seek
+          const seekPos = typeof d.seekPosition === 'number' ? d.seekPosition : 0;
+
+          if (trackId !== _npCurrentId) {
+            _loadNpTrack({
+              url:          d.currentTrackUrl,
+              id:           trackId,
+              title:        d.currentTitle    || '',
+              artist:       d.currentArtist   || '',
+              nextTitle:    d.nextTitle        || '',
+              durationSecs: d.currentDuration || 0,
+              volume:       (d.volume || 80) / 100,
+              mediaType:    d.mediaType        || 'music',
+              seekSecs:     seekPos,
+            });
+          } else {
+            // Same track — just ensure it's playing (may have been paused)
+            if (_npAudio && _npAudio.paused && _npInteracted && d.status === 'playing') {
+              _npAudio.play().catch(() => {});
+            }
+            _updateNpUI(d.currentTitle || '', d.currentArtist || '', d.nextTitle || '');
+          }
+          return;
+        }
         _fetchAndPlayCurrentTrack(cloudStreamId);
       },
-      () => {
-        // Firestore subscription failed — fall back to health endpoint polling only
-        _fetchAndPlayCurrentTrack(cloudStreamId);
-      }
+      () => _fetchAndPlayCurrentTrack(cloudStreamId)
     );
   }
 
-  // Always do an immediate health fetch so audio starts as soon as the viewer opens,
-  // regardless of whether the Firestore doc exists yet.
+  // Immediate fetch to start audio on join (Firestore doc may not exist yet)
   _fetchAndPlayCurrentTrack(cloudStreamId);
 }
 
@@ -1332,91 +1367,210 @@ function _stopMusicPlayer() {
   _stopNpAudio();
 }
 
+// Fetch current track from the worker's channel endpoint (authoritative seek data)
 async function _fetchAndPlayCurrentTrack(cloudStreamId) {
   try {
-    const r = await fetch(CLOUDSTREAM_WORKER + '/api/stream/health/' + cloudStreamId);
-    if (!r.ok) return;
+    // Stage 2: use /api/stream/channel/ which returns seekPosition directly
+    const r = await fetch(CLOUDSTREAM_WORKER + '/api/stream/channel/' + cloudStreamId);
+    if (!r.ok) throw new Error('channel endpoint failed: ' + r.status);
     const data = await r.json();
     if (!data.success) return;
-    if (data.musicStatus === 'no_music' || data.musicStatus === 'ended' || !data.currentMusicUrl) {
-      // No music currently — hide bar
-      const bar = _NP_BAR();
-      if (bar) bar.style.display = 'none';
+
+    const media = data.media;
+    if (!media || !media.currentTrackUrl || media.musicStatus === 'no_music' || media.musicStatus === 'ended') {
+      const bar = _NP_BAR(); if (bar) bar.style.display = 'none';
       return;
     }
-    // Play if:
-    //   a) track ID changed, OR
-    //   b) we have no audio playing at all yet (_npCurrentId is null / no audio element)
-    const trackChanged = data.currentMusicId && data.currentMusicId !== _npCurrentId;
+
+    if (media.musicStatus === 'paused') {
+      _pauseNpAudio();
+      _updateNpUI(media.currentTitle || '', media.currentArtist || '', media.nextTitle || '');
+      return;
+    }
+
+    const trackChanged = media.currentTrackId && media.currentTrackId !== _npCurrentId;
     const noAudioYet   = !_npCurrentId && (!_npAudio || _npAudio.paused);
+
     if (trackChanged || noAudioYet) {
-      _loadNpTrack(data.currentMusicUrl, data.currentMusicId || data.currentMusicUrl,
-                   data.currentMusicTitle, data.currentMusicArtist,
-                   data.nextMusicTitle, data.currentMusicDuration || 0,
-                   (data.musicVolume || 80) / 100);
-    } else if (_npAudio && _npAudio.paused) {
-      // Same track but audio was stopped — resume
+      _loadNpTrack({
+        url:          media.currentTrackUrl,
+        id:           media.currentTrackId || media.currentTrackUrl,
+        title:        media.currentTitle   || '',
+        artist:       media.currentArtist  || '',
+        nextTitle:    media.nextTitle       || '',
+        durationSecs: media.currentDuration || 0,
+        volume:       _npVolume,
+        mediaType:    media.mediaType       || 'music',
+        seekSecs:     media.seekPosition    || 0, // ← Stage 2: server-authoritative
+      });
+    } else if (_npAudio && _npAudio.paused && _npInteracted) {
       _npAudio.play().catch(() => {});
     }
-    // Update UI regardless (title/next might have changed)
-    _updateNpUI(data.currentMusicTitle, data.currentMusicArtist, data.nextMusicTitle);
-  } catch (_) {}
+    _updateNpUI(media.currentTitle || '', media.currentArtist || '', media.nextTitle || '');
+  } catch (_) {
+    // Fallback to legacy health endpoint if channel endpoint unavailable
+    try {
+      const r2 = await fetch(CLOUDSTREAM_WORKER + '/api/stream/health/' + cloudStreamId);
+      if (!r2.ok) return;
+      const data2 = await r2.json();
+      if (!data2.success || !data2.currentMusicUrl) { const bar = _NP_BAR(); if (bar) bar.style.display = 'none'; return; }
+      const seekPos = typeof data2.seekPosition === 'number' ? data2.seekPosition : 0;
+      if (data2.currentMusicId !== _npCurrentId || !_npCurrentId) {
+        _loadNpTrack({
+          url:          data2.currentMusicUrl,
+          id:           data2.currentMusicId || data2.currentMusicUrl,
+          title:        data2.currentMusicTitle  || '',
+          artist:       data2.currentMusicArtist || '',
+          nextTitle:    data2.nextMusicTitle      || '',
+          durationSecs: data2.currentMusicDuration || 0,
+          volume:       (data2.musicVolume || 80) / 100,
+          mediaType:    data2.mediaType || 'music',
+          seekSecs:     seekPos,
+        });
+      }
+      _updateNpUI(data2.currentMusicTitle, data2.currentMusicArtist, data2.nextMusicTitle);
+    } catch (_2) {}
+  }
 }
 
-function _loadNpTrack(url, id, title, artist, nextTitle, durationSecs, volume) {
-  _stopNpAudio();
+// Load and play a track with server-authoritative seek
+function _loadNpTrack({ url, id, title, artist, nextTitle, durationSecs, volume, mediaType, seekSecs }) {
+  mediaType  = mediaType || 'music';
+  seekSecs   = seekSecs  || 0;
 
-  _npCurrentId = id;
-  const audio  = new Audio();
-  audio.crossOrigin  = 'anonymous';
-  audio.preload      = 'auto';
-  audio.volume       = _npMuted ? 0 : Math.min(1, Math.max(0, _npVolume));
-  _npAudio = audio;
+  // Handle video media type
+  if (mediaType === 'video') {
+    _loadNpVideo({ url, id, title, artist, nextTitle, seekSecs });
+    return;
+  }
 
-  audio.ontimeupdate = () => {
-    const fill = _NP_FILL();
-    if (fill && audio.duration) {
-      fill.style.width = ((audio.currentTime / audio.duration) * 100) + '%';
+  // Handle image media type (picture/slideshow)
+  if (mediaType === 'picture') {
+    _stopNpAudio();
+    _npCurrentId = id;
+    // Show artwork in the overlay if applicable
+    const overlay = document.getElementById('snxvStatusOverlay');
+    if (overlay) {
+      overlay.style.backgroundImage = `url('${url.replace(/'/g, "\\'")}')`;
+      overlay.style.backgroundSize  = 'contain';
+      overlay.style.backgroundPosition = 'center';
+      overlay.style.backgroundRepeat = 'no-repeat';
     }
-  };
+    _updateNpUI(title, artist, nextTitle);
+    const bar = _NP_BAR(); if (bar) bar.style.display = '';
+    return;
+  }
+
+  // Audio track
+  const audio = _getOrCreateAudio();
+  _npMediaType  = 'music';
+  _npSeekOnLoad = seekSecs;
+
+  const isNewSrc = !_npCurrentId || id !== _npCurrentId;
+  _npCurrentId  = id;
+
+  if (isNewSrc) {
+    audio.pause();
+    audio.src = url;
+    audio.load();
+  }
 
   audio.onended = () => {
-    // Let the DO alarm advance the track; re-poll health in 3 s
-    setTimeout(() => {
-      if (_cloudStreamId) _fetchAndPlayCurrentTrack(_cloudStreamId);
-    }, 3000);
+    // DO alarm will advance the queue; poll for next track after 2s
+    setTimeout(() => { if (_cloudStreamId) _fetchAndPlayCurrentTrack(_cloudStreamId); }, 2000);
   };
 
   audio.onerror = () => {
-    // On error, try again after a short delay
-    setTimeout(() => {
-      if (_cloudStreamId) _fetchAndPlayCurrentTrack(_cloudStreamId);
-    }, 5000);
+    setTimeout(() => { if (_cloudStreamId) _fetchAndPlayCurrentTrack(_cloudStreamId); }, 5000);
   };
 
-  // Set src AFTER event handlers to avoid missed events on fast loads
-  audio.src = url;
-  audio.play().catch(() => {
-    // Autoplay blocked by browser — show a play button hint
-    const bar = _NP_BAR();
-    if (bar) {
-      const hint = bar.querySelector('.snxv-np-play-hint') || (() => {
-        const b = document.createElement('div');
-        b.className = 'snxv-np-play-hint';
-        b.style.cssText = 'font-size:11px;color:#ffaa00;margin-top:4px;cursor:pointer;';
-        b.textContent = '▶ Tap to hear music';
-        b.onclick = () => { audio.play().catch(() => {}); b.remove(); };
-        bar.appendChild(b);
-        return b;
-      })();
+  // Seek to authoritative position when metadata is available
+  const doSeek = () => {
+    if (seekSecs > 1 && isFinite(audio.duration) && audio.duration > 0) {
+      const target = Math.min(seekSecs, audio.duration - 1);
+      try { audio.currentTime = target; } catch(_) {}
     }
-  });
+  };
+
+  if (isNewSrc) {
+    audio.addEventListener('loadedmetadata', () => {
+      doSeek();
+      _tryPlay(audio);
+    }, { once: true });
+  } else {
+    doSeek();
+    if (audio.paused) _tryPlay(audio);
+  }
 
   _updateNpUI(title, artist, nextTitle);
+  const bar = _NP_BAR(); if (bar) bar.style.display = '';
+}
 
-  // Show bar
-  const bar = _NP_BAR();
-  if (bar) bar.style.display = '';
+// Load and play a video track (seek-to-position)
+function _loadNpVideo({ url, id, title, artist, nextTitle, seekSecs }) {
+  // Re-use or create the video element
+  if (!_npVideo) {
+    _npVideo = document.getElementById('snxvLiveVideo');
+    if (!_npVideo) return;
+  }
+  _stopNpAudio(); // stop any audio
+  _npCurrentId = id;
+  _npMediaType = 'video';
+
+  // Show the video element, hide status overlay
+  _npVideo.src   = url;
+  _npVideo.load();
+  _npVideo.style.display = '';
+  const overlay = document.getElementById('snxvStatusOverlay');
+  if (overlay) overlay.style.display = 'none';
+
+  seekSecs = seekSecs || 0;
+  _npVideo.addEventListener('loadedmetadata', () => {
+    if (seekSecs > 1 && isFinite(_npVideo.duration) && _npVideo.duration > 0) {
+      try { _npVideo.currentTime = Math.min(seekSecs, _npVideo.duration - 1); } catch(_) {}
+    }
+    _tryPlay(_npVideo);
+  }, { once: true });
+
+  _npVideo.onended = () => {
+    if (overlay) overlay.style.display = '';
+    _npVideo.style.display = 'none';
+    setTimeout(() => { if (_cloudStreamId) _fetchAndPlayCurrentTrack(_cloudStreamId); }, 2000);
+  };
+  _npVideo.onerror = () => {
+    if (overlay) overlay.style.display = '';
+    _npVideo.style.display = 'none';
+    setTimeout(() => { if (_cloudStreamId) _fetchAndPlayCurrentTrack(_cloudStreamId); }, 5000);
+  };
+
+  _updateNpUI(title, artist, nextTitle);
+  const bar = _NP_BAR(); if (bar) bar.style.display = '';
+}
+
+// Attempt to play — show tap-to-play hint if autoplay blocked
+function _tryPlay(mediaEl) {
+  if (!mediaEl) return;
+  const p = mediaEl.play();
+  if (p) p.catch(() => {
+    // Autoplay blocked — show hint once
+    if (_npInteracted) return;
+    const bar = _NP_BAR();
+    if (bar) {
+      let hint = bar.querySelector('.snxv-np-play-hint');
+      if (!hint) {
+        hint = document.createElement('div');
+        hint.className = 'snxv-np-play-hint';
+        hint.style.cssText = 'font-size:11px;color:#ffaa00;margin-top:4px;cursor:pointer;';
+        hint.textContent = '▶ Tap to enable sound';
+        hint.onclick = () => {
+          _npInteracted = true;
+          mediaEl.play().catch(() => {});
+          hint.remove();
+        };
+        bar.appendChild(hint);
+      }
+    }
+  });
 }
 
 function _updateNpUI(title, artist, next) {
@@ -1429,11 +1583,11 @@ function _updateNpUI(title, artist, next) {
 function _stopNpAudio() {
   if (_npProgressTmr) { clearInterval(_npProgressTmr); _npProgressTmr = null; }
   if (_npAudio) {
-    _npAudio.onended = null;
-    _npAudio.onerror = null;
-    _npAudio.ontimeupdate = null;
-    try { _npAudio.pause(); _npAudio.src = ''; } catch(_) {}
-    _npAudio = null;
+    _npAudio.onended      = null;
+    _npAudio.onerror      = null;
+    // Keep ontimeupdate — it's bound to the stable element
+    try { _npAudio.pause(); } catch(_) {}
+    // Don't destroy the element — just pause and keep it for reuse
   }
   _npCurrentId = null;
   const fill = _NP_FILL();
@@ -1442,41 +1596,62 @@ function _stopNpAudio() {
 
 function _pauseNpAudio() {
   if (_npAudio && !_npAudio.paused) { try { _npAudio.pause(); } catch(_) {} }
+  if (_npVideo && !_npVideo.paused) { try { _npVideo.pause(); } catch(_) {} }
 }
 
-// Volume / mute controls exposed to HTML onclick handlers
+// Volume / mute controls
 window.snxvToggleMute = function() {
   _npMuted = !_npMuted;
   if (_npAudio) _npAudio.volume = _npMuted ? 0 : _npVolume;
+  if (_npVideo) _npVideo.volume = _npMuted ? 0 : _npVolume;
   const btn = document.getElementById('snxvNpMute');
   if (btn) btn.textContent = _npMuted ? '🔇' : '🔊';
+  _npInteracted = true;
 };
 
 window.snxvSetVolume = function(val) {
   _npVolume = parseInt(val, 10) / 100;
-  _npMuted = false;
+  _npMuted  = false;
   if (_npAudio) _npAudio.volume = _npVolume;
+  if (_npVideo) _npVideo.volume = _npVolume;
   const btn = document.getElementById('snxvNpMute');
   if (btn) btn.textContent = _npVolume > 0 ? '🔊' : '🔇';
+  _npInteracted = true;
 };
 
-// ── _syncMusicFromHealth — called by the music player's own poll and
-//    by the patched _pollHealth below after health data is received ─────────
+// ── _syncMusicFromHealth — legacy path (called by _pollHealth on health data)
 function _syncMusicFromHealth(data) {
   if (!data) return;
-  if (data.currentMusicUrl && data.musicStatus !== 'no_music' && data.musicStatus !== 'ended') {
-    if (data.currentMusicId && data.currentMusicId !== _npCurrentId) {
-      _loadNpTrack(data.currentMusicUrl, data.currentMusicId,
-                   data.currentMusicTitle, data.currentMusicArtist,
-                   data.nextMusicTitle, data.currentMusicDuration || 0,
-                   (data.musicVolume || 80) / 100);
-    } else {
-      _updateNpUI(data.currentMusicTitle, data.currentMusicArtist, data.nextMusicTitle);
-    }
-  } else {
+  const musicStatus = data.musicStatus || data.status;
+  if (!data.currentMusicUrl || musicStatus === 'no_music' || musicStatus === 'ended') {
     const bar = _NP_BAR(); if (bar) bar.style.display = 'none';
+    return;
+  }
+  if (musicStatus === 'paused') {
+    _pauseNpAudio();
+    _updateNpUI(data.currentMusicTitle, data.currentMusicArtist, data.nextMusicTitle);
+    return;
+  }
+  if (data.currentMusicId && data.currentMusicId !== _npCurrentId) {
+    _loadNpTrack({
+      url:          data.currentMusicUrl,
+      id:           data.currentMusicId,
+      title:        data.currentMusicTitle  || '',
+      artist:       data.currentMusicArtist || '',
+      nextTitle:    data.nextMusicTitle      || '',
+      durationSecs: data.currentMusicDuration || 0,
+      volume:       (data.musicVolume || 80) / 100,
+      mediaType:    data.mediaType   || 'music',
+      seekSecs:     data.seekPosition || 0,
+    });
+  } else {
+    _updateNpUI(data.currentMusicTitle, data.currentMusicArtist, data.nextMusicTitle);
   }
 }
+
+// Track user interaction for autoplay policy compliance
+document.addEventListener('click', () => { _npInteracted = true; }, { once: true });
+document.addEventListener('touchstart', () => { _npInteracted = true; }, { once: true });
 
 </script>
 </body>
