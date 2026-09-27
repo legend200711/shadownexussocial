@@ -11015,8 +11015,8 @@ body.arcade-fs-ios body::after { display:none !important; }
        <div class="csr-subtitle">Music Library · Playlists · Queue</div>
      </div>
    </div>
-   <a href="javascript:void(0)" onclick="realmNavTo('nexusPage')" style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;background:rgba(197,164,29,0.12);border:1px solid rgba(197,164,29,0.30);color:#c5a41d;font-size:11px;font-weight:700;text-decoration:none;letter-spacing:0.8px;white-space:nowrap;">
-     𓂀 24-Hour Nexus
+   <a href="cloud-stream.html" style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;background:rgba(197,164,29,0.12);border:1px solid rgba(197,164,29,0.30);color:#c5a41d;font-size:11px;font-weight:700;text-decoration:none;letter-spacing:0.8px;white-space:nowrap;">
+     𓂀 THE ETERNAL STREAM
    </a>
  </header>
 
@@ -11032,7 +11032,7 @@ body.arcade-fs-ios body::after { display:none !important; }
     <button class="snx-studio-tab"         id="snxStudioTabBtn_playlists" onclick="snxStudioTabSwitch('playlists',this)" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#128203;<br>Playlists</button>
     <button class="snx-studio-tab"         id="snxStudioTabBtn_queue"    onclick="snxStudioTabSwitch('queue',this)"    style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127926;<br>Queue</button>
     <button class="snx-studio-tab"         id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#9654;&#65039;<br>Playing</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_stream"   onclick="realmNavTo('nexusPage')" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#c5a41d;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">𓂀<br>Nexus</button>
+    <button class="snx-studio-tab"         id="snxStudioTabBtn_stream"   onclick="window.location.href='cloud-stream.html'" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#c5a41d;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">𓂀<br>Nexus</button>
   </nav>
 
   <!-- ══════════════════════════════════════════════════════
@@ -11186,45 +11186,99 @@ body.arcade-fs-ios body::after { display:none !important; }
   </div><!-- end Queue tab -->
 
   <!-- ══════════════════════════════════════════════════════
-       NOW PLAYING TAB
+       NOW PLAYING TAB — Server channel status + controls
   ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_nowplaying" style="display:none;padding:16px 14px 100px;">
+ <div id="snxStudioTab_nowplaying" style="display:none;padding:12px 14px 100px;">
 
-    <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;margin-bottom:12px;text-align:center;">&#9654;&#65039; NOW PLAYING</div>
+   <!-- Cloud Engine Status -->
+   <div id="snxNPEngineStatus" style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;background:rgba(0,174,239,0.06);border:1px solid rgba(0,174,239,0.18);margin-bottom:10px;font-size:11px;font-weight:700;letter-spacing:0.5px;">
+     <span id="snxNPEngineIcon" style="font-size:13px;">⚡</span>
+     <span id="snxNPEngineText" style="color:#5a80a8;">CLOUD ENGINE: CHECKING…</span>
+   </div>
 
-    <!-- Now Playing bar (studio.js _renderNowPlayingBar renders here) -->
-    <div id="snxNowPlayingBarEl"></div>
+   <!-- Server Scheduler Status -->
+   <div id="snxNPSchedulerRow" style="display:none;padding:6px 12px;border-radius:8px;background:rgba(0,0,0,0.25);border:1px solid rgba(0,174,239,0.12);margin-bottom:10px;font-size:10px;color:#4a7a9a;font-weight:700;letter-spacing:0.5px;" id="snxNPSchedulerText">
+   </div>
 
-    <!-- Tip -->
-    <div style="margin-top:16px;text-align:center;font-size:11px;color:#3a5a7a;line-height:1.6;">
-      Plays your personal queue via the Studio player.<br>
-      Use the <strong style="color:#4a7a9a;">Queue</strong> tab to add songs.
-    </div>
+   <!-- Channel Live/Offline Banner -->
+   <div id="snxNPChannelBanner" style="display:none;padding:8px 12px;border-radius:10px;margin-bottom:12px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-align:center;"></div>
 
-  </div><!-- end Now Playing tab -->
+   <!-- Now Playing Card -->
+   <div id="snxNPCard" style="background:linear-gradient(135deg,rgba(0,174,239,0.06),rgba(0,174,239,0.03));border:1px solid rgba(0,174,239,0.18);border-radius:14px;padding:16px 14px;margin-bottom:12px;">
+     <div style="font-size:9px;letter-spacing:2px;color:#4a7a9a;margin-bottom:8px;font-weight:700;">NOW TRANSMITTING</div>
+
+     <!-- Artwork + Info -->
+     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+       <div id="snxNPArtwork" style="width:64px;height:64px;border-radius:10px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.20);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;overflow:hidden;">&#127925;</div>
+       <div style="flex:1;min-width:0;">
+         <div id="snxNPTitle" style="font-size:15px;font-weight:800;color:#d8eeff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+         <div id="snxNPArtist" style="font-size:12px;color:#5a80a8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+         <div id="snxNPMeta" style="font-size:10px;color:#3a5a7a;margin-top:4px;"></div>
+       </div>
+     </div>
+
+     <!-- Progress -->
+     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+       <span id="snxNPCurrentTime" style="font-size:10px;color:#4a7a9a;min-width:30px;">—</span>
+       <div style="flex:1;height:4px;background:rgba(0,174,239,0.12);border-radius:2px;overflow:hidden;">
+         <div id="snxNPProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,#00AEEF,#0090cc);border-radius:2px;transition:width 0.5s linear;"></div>
+       </div>
+       <span id="snxNPDuration" style="font-size:10px;color:#4a7a9a;min-width:30px;text-align:right;">—</span>
+     </div>
+
+     <!-- Viewer Count -->
+     <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;font-size:11px;color:#4a7a9a;">
+       <span>👁 <span id="snxNPViewers">0</span> WATCHING</span>
+       <span>❤ <span id="snxNPLikes">0</span></span>
+     </div>
+
+     <!-- UP NEXT -->
+     <div id="snxNPNextRow" style="display:none;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid rgba(0,174,239,0.10);font-size:11px;color:#4a7a9a;">
+       UP NEXT: <span id="snxNPNextTitle" style="color:#7abadc;font-weight:700;"></span>
+     </div>
+   </div>
+
+   <!-- Server Controls -->
+   <div id="snxNPControls" style="display:none;">
+     <div style="font-size:10px;letter-spacing:1.5px;color:#3a5a7a;margin-bottom:8px;font-weight:700;">SERVER CONTROLS</div>
+     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+       <button id="snxNPPlayPauseBtn" onclick="snxNPPlayPause()" style="flex:1;min-width:80px;padding:10px;border-radius:10px;background:rgba(0,174,239,0.15);border:1px solid rgba(0,174,239,0.35);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">⏸ PAUSE</button>
+       <button onclick="snxNPPrev()" style="padding:10px 14px;border-radius:10px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.22);color:#5a80a8;font-size:12px;cursor:pointer;">⏮ PREV</button>
+       <button onclick="snxNPSkip()" style="padding:10px 14px;border-radius:10px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.22);color:#5a80a8;font-size:12px;cursor:pointer;">⏭ NEXT</button>
+     </div>
+     <button onclick="snxNPStopChannel()" style="width:100%;padding:10px;border-radius:10px;background:rgba(255,51,85,0.08);border:1px solid rgba(255,51,85,0.30);color:#ff3355;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:10px;">⛔ STOP CHANNEL</button>
+   </div>
+
+   <!-- Open Eternal Stream -->
+   <div style="text-align:center;margin-top:8px;">
+     <a href="cloud-stream.html" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,rgba(197,164,29,0.20),rgba(197,164,29,0.10));border:1px solid rgba(197,164,29,0.40);color:#c5a41d;font-size:12px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:1px;">
+       𓂀 OPEN ETERNAL STREAM
+     </a>
+   </div>
+
+ </div><!-- end Now Playing tab -->
 
   <!-- ══════════════════════════════════════════════════════
-       STREAM TAB — opens 24-Hour Nexus (new system)
-       The old standalone cloud-stream.html has been retired.
-       All streaming traffic now goes through 24-HOUR NEXUS.
+       STREAM TAB — opens THE ETERNAL STREAM (cloud-stream.html)
+       This is the official 24-Hour Cloud Stream interface.
   ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_stream" style="display:none;padding:32px 16px;text-align:center;">
-    <div style="background:rgba(197,164,29,0.07);border:1px solid rgba(197,164,29,0.25);border-radius:16px;padding:32px 20px;max-width:420px;margin:0 auto;">
-      <div style="font-size:32px;margin-bottom:12px;">𓂀</div>
-      <div style="font-size:15px;font-weight:800;color:#c5a41d;letter-spacing:1.5px;margin-bottom:6px;">24-HOUR NEXUS</div>
-      <div style="font-size:12px;color:#8a7a5a;margin-bottom:20px;line-height:1.6;">
-        THE ETERNAL STREAM · COMMUNITY CHANNELS<br>
-        Egyptian · Horror · Cosmic
-      </div>
-      <button onclick="realmNavTo('nexusPage')" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#c5a41d,#7a6010);border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;letter-spacing:1px;border:none;">
-        𓂀 OPEN 24-HOUR NEXUS
-      </button>
-      <div style="margin-top:16px;font-size:11px;color:#4a3a1a;">
-        DISCOVER · MY CHANNEL · WATCH · VAULT<br>
-        PLAYLISTS · QUEUE · UPLOAD · CHANNEL
-      </div>
-    </div>
-  </div><!-- end snxStudioTab_stream -->
+ <div id="snxStudioTab_stream" style="display:none;padding:32px 16px;text-align:center;">
+   <div style="background:rgba(197,164,29,0.07);border:1px solid rgba(197,164,29,0.25);border-radius:16px;padding:32px 20px;max-width:420px;margin:0 auto;">
+     <div style="font-size:32px;margin-bottom:12px;">𓂀</div>
+     <div style="font-size:15px;font-weight:800;color:#c5a41d;letter-spacing:1.5px;margin-bottom:6px;">THE ETERNAL STREAM</div>
+     <div style="font-size:12px;color:#8a7a5a;margin-bottom:20px;line-height:1.6;">
+       24-HOUR CLOUD TRANSMISSION · ALWAYS ON<br>
+       Start · Manage · Watch Your Channel
+     </div>
+     <a href="cloud-stream.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#c5a41d,#7a6010);border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;letter-spacing:1px;border:none;text-decoration:none;">
+       𓂀 OPEN THE ETERNAL STREAM
+     </a>
+     <div style="margin-top:16px;font-size:11px;color:#4a3a1a;">
+       VIEWER · CREATOR CONTROLS · CHANNEL<br>
+       NOW TRANSMITTING · PROPHECY QUEUE
+     </div>
+   </div>
+ </div><!-- end snxStudioTab_stream -->
 
 </div><!-- end studioPage -->
 

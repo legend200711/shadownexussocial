@@ -2157,3 +2157,64 @@ body.snx-studio-open .snx-studio-bottom-nav { display: flex; }
 }
 .snxs-stop-btn:hover { background: rgba(255,51,85,.22); }
 
+
+/* ═══════════════════════════════════════════════════════
+   STUDIO PAGE — MOBILE LAYOUT FIXES
+   Targeted safe-area, overflow, and spacing corrections.
+═══════════════════════════════════════════════════════ */
+
+/* Safe area bottom padding on iPhone (notch/home indicator) */
+#studioPage {
+  padding-bottom: max(120px, calc(80px + env(safe-area-inset-bottom)));
+}
+
+/* Tab bar: prevent horizontal overflow + sticky at top */
+#snxStudioTabBar {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Track items: prevent long titles from causing overflow */
+.snx-track-title,
+.snx-track-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.snx-track-item {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Now Playing bar: prevent overflow */
+.snx-npb-title,
+.snx-npb-artist {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Queue list: scrollable with safe area */
+#snxSQQueueList,
+#snxTrackLibraryList,
+#snxCSTrackLibraryList {
+  overflow-x: hidden;
+}
+
+/* Controls bar buttons: good touch targets */
+.snx-npb-btn {
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Upload zone: full width on mobile */
+#snxUploadZone {
+  box-sizing: border-box;
+  width: 100%;
+}
+

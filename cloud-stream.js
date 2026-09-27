@@ -67,6 +67,7 @@ const R2_UPLOAD_URL  = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 
 /* ── Cloud Engine connection indicator ── */
 let _engineConnected = false;
+let _channelLive     = false;   // separate: engine reachable vs channel actually live
 let _engineCheckTimer = null;
 
 function _setEngineStatus(connected) {
@@ -79,6 +80,24 @@ function _setEngineStatus(connected) {
   } else {
     el.textContent = '⚡ CLOUD ENGINE: DISCONNECTED';
     el.className = 'csr-engine-status csr-engine-error';
+  }
+}
+
+/* Show CHANNEL status separately from engine status.
+   Engine CONNECTED but channel OFFLINE is a normal state (no song playing).
+   Only report a connection error if the worker itself is unreachable. */
+function _setChannelStatus(live) {
+  _channelLive = live;
+  const el = _el('csrSchedulerStatus');
+  if (!el) return;
+  if (!_engineConnected) return; // engine banner already explains the situation
+  if (live) {
+    // Channel status is shown via scheduler status / now-playing — nothing extra here
+    el.style.display = 'none';
+  } else {
+    el.style.display = '';
+    el.textContent  = '⚫ CHANNEL: OFFLINE — no broadcast is currently running';
+    el.className    = 'csr-scheduler-status csr-scheduler-warn';
   }
 }
 
@@ -307,6 +326,9 @@ async function _initCreatorMode() {
   _loadPlaylists();
   _loadHistory();
   _libLoad();
+
+  // Ping engine FIRST so _engineConnected is accurate before _discoverAndJoinStream
+  await _pingEngine();
   _startEngineMonitor();
 
   // Also join as a viewer of the most-recent active stream
@@ -330,14 +352,23 @@ async function _discoverAndJoinStream() {
     ));
     if (snap.docs.length) {
       const d = snap.docs[0];
+      _setChannelStatus(true);
       await _initListenerForStream(d.id, d.data());
     } else {
-      // No active stream — show offline state
-      _setOfflineMsg('No broadcast is currently running.');
+      // No active stream — engine is reachable but channel is offline.
+      // Do NOT say "Could not connect to stream" — that implies a network error.
+      _setChannelStatus(false);
+      _setOfflineMsg('The channel is currently offline. Waiting for a broadcast to begin.');
     }
   } catch(e) {
     console.warn('[CSR] discoverAndJoinStream:', e.message);
-    _setOfflineMsg('Could not connect to stream.');
+    // Only show "could not connect" if this is a genuine network/auth failure
+    if (!_engineConnected) {
+      _setOfflineMsg('Could not reach the Cloud Engine. Check your connection.');
+    } else {
+      _setChannelStatus(false);
+      _setOfflineMsg('The channel is currently offline.');
+    }
   }
 }
 
@@ -449,6 +480,8 @@ async function _checkHealth() {
         _broadcastPaused = workerPaused;
         _updatePauseResumeBtn(_broadcastPaused);
       }
+      // Channel is live (we have a health response for this stream)
+      _setChannelStatus(true);
     }
     if (_streamData && _streamData.expiresAt && _streamData.expiresAt - Date.now() <= 0) _streamExpired();
     _setEngineStatus(true);
@@ -529,18 +562,23 @@ function _streamExpired() {
    LISTENER / VIEWER MODE
 ═══════════════════════════════════════════════════════ */
 async function _initListenerMode(streamId) {
+  // Ping engine first so _engineConnected is set correctly for error messaging
+  await _pingEngine();
   try {
     const r    = await fetch(WORKER_URL + '/api/stream/sync/' + streamId);
     const data = await r.json();
 
     if (!r.ok || !data.success) {
+      _setChannelStatus(false);
       _setOfflineMsg(data.error || 'Broadcast not found or offline.');
       return;
     }
     if (!['active','recovering','starting'].includes(data.status)) {
+      _setChannelStatus(false);
       _setOfflineMsg('This broadcast has ended.');
       return;
     }
+    _setChannelStatus(true);
 
     const streamData = {
       streamName:  data.streamName  || 'Shadow Nexus Cloud Stream',
@@ -594,7 +632,8 @@ async function _initListenerMode(streamId) {
 async function _initListenerForStream(streamId, streamData) {
   _player._streamId = streamId;
 
-  // Hide offline panel — we have a stream
+  // We have a stream — mark channel as live and hide offline panel
+  _setChannelStatus(true);
   const offline = _el('csrModeOffline');
   if (offline) offline.classList.add('hidden');
 
@@ -606,9 +645,10 @@ async function _initListenerForStream(streamId, streamData) {
   _player.unsub = onSnapshot(
     doc(_db, 'studioCloudStreamMusic', streamId),
     snap => {
-      if (!snap.exists()) { _setOfflineMsg('Broadcast ended.'); return; }
+      if (!snap.exists()) { _setChannelStatus(false); _setOfflineMsg('Broadcast ended.'); return; }
       const d = snap.data();
-      if (d.status === 'stopped' || d.status === 'ended') { _setOfflineMsg('Broadcast ended.'); return; }
+      if (d.status === 'stopped' || d.status === 'ended') { _setChannelStatus(false); _setOfflineMsg('Broadcast ended.'); return; }
+      _setChannelStatus(true);
       _syncToNowPlaying(d);
     },
     err => console.warn('[CSR] nowPlaying snapshot error:', err.message)

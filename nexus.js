@@ -113,7 +113,19 @@ window.snxNexusInit = function() {
     var params = new URLSearchParams(window.location.search);
     var watchCh = params.get('watchChannel');
     if (watchCh) {
-      _openPublicWatch(watchCh);
+      // Load channel doc to get activeStreamId, then redirect to Eternal Stream
+      var fs = window._snxFirestore;
+      if (fs) {
+        fs.getDoc(fs.doc(fs.db, 'nexusChannels', watchCh)).then(function(snap) {
+          if (snap && snap.exists() && snap.data().activeStreamId) {
+            window.location.href = 'cloud-stream.html?id=' + encodeURIComponent(snap.data().activeStreamId);
+          } else {
+            _openPublicWatch(watchCh);
+          }
+        }).catch(function() { _openPublicWatch(watchCh); });
+      } else {
+        _openPublicWatch(watchCh);
+      }
       return;
     }
     // Pre-load discovery
@@ -387,11 +399,22 @@ function _renderSearchResults(results) {
 ═══════════════════════════════════════════════════════ */
 window.snxNexusOpenChannel = function(channelId) {
   if (!channelId) return;
-  // If it's the user's own channel, go to My Channel
+  // If it's the user's own channel, go to My Channel in nexus (for management)
   if (_nx.myChannel && _nx.myChannel.channelId === channelId) {
     _switchMain('mychannel');
     return;
   }
+  // For other channels: open The Eternal Stream with the active stream ID if live,
+  // otherwise fall back to embedded public watch
+  var ch = _nx.liveChannels.find(function(c) { return c.channelId === channelId; }) ||
+           _nx.allChannels.find(function(c) { return c.channelId === channelId; });
+  if (ch && ch.activeStreamId) {
+    // Open The Eternal Stream viewer with correct stream ID
+    window.location.href = 'cloud-stream.html?id=' + encodeURIComponent(ch.activeStreamId);
+    return;
+  }
+  // Channel found but no active stream ID cached — fall back to embedded viewer
+  // (it will show offline state properly)
   _openPublicWatch(channelId);
 };
 

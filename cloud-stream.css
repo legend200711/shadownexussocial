@@ -2084,3 +2084,78 @@ body > * { position: relative; z-index: 1; }
 .csr-engine-warn  { color:#ffaa00; background:rgba(255,170,0,0.08); animation:csr-engine-blink 1.5s ease-in-out infinite; }
 .csr-engine-error { color:#ff3355; background:rgba(255,51,85,0.07); animation:csr-engine-blink 1.5s ease-in-out infinite; }
 @keyframes csr-engine-blink { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ETERNAL STREAM — MOBILE LAYOUT FIXES
+   Safe-area, overflow, and touch target corrections for phones.
+═══════════════════════════════════════════════════════════════════════ */
+
+/* Safe area on iPhone */
+main#csrApp {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent horizontal overflow at all screen sizes */
+#csrApp, .csr-viewer-section, .csr-admin-section, .csr-library-section {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Player controls bar: touch-friendly on mobile */
+.csr-play-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Prophecy queue: scrollable on small screens */
+.csr-prophecy-list {
+  max-height: 280px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Plaque title/artist: no overflow on small phones */
+.csr-plaque-title {
+  word-break: break-word;
+}
+
+/* Controls row: stack on very small screens */
+@media (max-width: 380px) {
+  .csr-controls-row {
+    flex-direction: column;
+  }
+  .csr-playback-controls {
+    justify-content: center;
+  }
+  .csr-btn-danger {
+    width: 100%;
+  }
+}
+
+/* Header: prevent long names from breaking layout */
+.csr-header-title,
+.csr-header-subtitle {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Admin card: prevent form inputs from overflowing */
+.csr-admin-section .csr-input {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* Engine status bar: wrap text gracefully */
+#csrEngineStatus, #csrSchedulerStatus {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+  #csrEngineStatus, #csrSchedulerStatus {
+    white-space: normal;
+    font-size: 10px;
+  }
+}

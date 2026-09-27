@@ -65,7 +65,7 @@
     <div class="csr-auth-glyph" aria-hidden="true">𓂀</div>
     <div class="csr-auth-title">THE ETERNAL STREAM</div>
     <p class="csr-auth-desc">Entry to the Shadow Nexus Temple requires identification.<br>Sign in to access the Eternal Broadcast.</p>
-    <a class="csr-temple-btn csr-temple-btn-gold" href="/?snxPage=studioPage">&#8592; Return to Shadow Nexus</a>
+    <a class="csr-temple-btn csr-temple-btn-gold" href="/">&#8592; Return to Shadow Nexus</a>
   </div>
 </div>
 
@@ -87,7 +87,7 @@
 
     <!-- Main header content -->
     <div class="csr-header-inner">
-      <a class="csr-back-link" href="/?snxPage=studioPage" aria-label="Return to Shadow Nexus">
+      <a class="csr-back-link" id="csrBackLink" href="/?snxPage=studioPage" aria-label="Return to Shadow Nexus">
         <span aria-hidden="true">◂</span> NEXUS
       </a>
 
@@ -762,6 +762,21 @@
   </div>
 </div>
 
+<script>
+/* Back link: if viewer arrived via ?id=…, go back to main feed.
+   If no id param (creator entered directly from Studio), go to studioPage. */
+(function() {
+  var params  = new URLSearchParams(window.location.search);
+  var watchId = params.get('id') || params.get('watch') || params.get('stream');
+  var link    = document.getElementById('csrBackLink');
+  if (link && watchId) {
+    // Viewer coming from a watch link — back to main Shadow Nexus feed
+    link.href = '/';
+    link.textContent = '◂ SHADOW NEXUS';
+  }
+  // else: creator — keep default href="/?snxPage=studioPage"
+})();
+</script>
 <script type="module" src="cloud-stream.js"></script>
 </body>
 </html>

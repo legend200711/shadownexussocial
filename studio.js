@@ -5065,3 +5065,410 @@ window.snxStudioRefreshQueueLib = function() {
 
 })(); // end tab system IIFE
 
+
+/* ═══════════════════════════════════════════════════════
+   33. PLAYING TAB — Server Channel Status & Controls
+   ─────────────────────────────────────────────────────
+   Polls the canonical CloudStream Worker for live state.
+   Displays: CLOUD ENGINE, SCHEDULER, NOW TRANSMITTING,
+             progress, viewers, likes, UP NEXT.
+   Creator controls: Play/Pause, Prev, Skip, Stop Channel.
+   DOES NOT run a local playback engine — all calls go
+   through the server API (cloudstream-worker.js).
+═══════════════════════════════════════════════════════ */
+
+(function() {
+
+var _WORKER_URL = 'https://snx-cloudstream.nthntjrn.workers.dev';
+
+var _np = {
+  streamId:       null,
+  status:         'offline',    // 'active' | 'offline' | 'connecting'
+  engineOk:       null,         // null = unchecked, true/false
+  paused:         false,
+  interval:       null,
+  progressRaf:    null,
+  // current track
+  title:          '',
+  artist:         '',
+  duration:       0,
+  artworkUrl:     '',
+  mediaType:      'music',
+  startedAt:      0,
+  pausedAt:       0,
+  seekPosition:   0,
+  nextTitle:      '',
+  viewerCount:    0,
+  likeCount:      0
+};
+
+/* ── tiny helpers ── */
+function _el(id)     { return document.getElementById(id); }
+function _txt(id, v) { var e = _el(id); if (e) e.textContent = v || ''; }
+function _show(id, v){ var e = _el(id); if (e) e.style.display = v ? '' : 'none'; }
+
+function _fmtDur(secs) {
+  secs = Math.floor(secs || 0);
+  if (secs <= 0) return '0:00';
+  var h = Math.floor(secs / 3600);
+  var m = Math.floor((secs % 3600) / 60);
+  var s = secs % 60;
+  if (h > 0) return h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+/* ── engine status display ── */
+function _setEngineStatus(ok) {
+  _np.engineOk = ok;
+  var el  = _el('snxNPEngineStatus');
+  var txt = _el('snxNPEngineText');
+  if (!el || !txt) return;
+  if (ok) {
+    el.style.borderColor = 'rgba(57,255,20,0.30)';
+    el.style.background  = 'rgba(57,255,20,0.06)';
+    txt.style.color      = '#39ff14';
+    txt.textContent      = 'CLOUD ENGINE: CONNECTED';
+  } else {
+    el.style.borderColor = 'rgba(255,51,85,0.30)';
+    el.style.background  = 'rgba(255,51,85,0.06)';
+    txt.style.color      = '#ff3355';
+    txt.textContent      = 'CLOUD ENGINE: DISCONNECTED';
+  }
+}
+
+/* ── channel banner ── */
+function _setChannelBanner(live, statusText) {
+  var el = _el('snxNPChannelBanner');
+  if (!el) return;
+  if (live) {
+    el.style.display    = '';
+    el.style.background = 'rgba(57,255,20,0.08)';
+    el.style.border     = '1px solid rgba(57,255,20,0.30)';
+    el.style.color      = '#39ff14';
+    el.textContent      = '🔴 CHANNEL: LIVE — ' + (statusText || 'ACTIVE');
+  } else {
+    el.style.display    = '';
+    el.style.background = 'rgba(90,128,168,0.08)';
+    el.style.border     = '1px solid rgba(90,128,168,0.25)';
+    el.style.color      = '#5a80a8';
+    el.textContent      = '⚫ CHANNEL: OFFLINE';
+  }
+}
+
+/* ── scheduler status ── */
+function _setSchedulerStatus(active, nextIn, musicStatus) {
+  var row = _el('snxNPSchedulerRow');
+  if (!row) return;
+  row.style.display = '';
+  if (active) {
+    var nextStr = nextIn != null ? _fmtDur(nextIn) : '—';
+    row.textContent  = '⚙ SERVER SCHEDULER: ACTIVE · NEXT IN: ' + nextStr;
+    row.style.color  = '#39ff14';
+  } else if (musicStatus === 'paused') {
+    row.textContent  = '⏸ SERVER SCHEDULER: PAUSED';
+    row.style.color  = '#ffaa00';
+  } else {
+    row.textContent  = '⚠ SERVER SCHEDULER: UNAVAILABLE';
+    row.style.color  = '#ff3355';
+  }
+}
+
+/* ── now transmitting card ── */
+function _renderNPCard(data) {
+  _txt('snxNPTitle',  data.title  || '—');
+  _txt('snxNPArtist', data.artist || '');
+  _txt('snxNPMeta',   data.mediaType === 'video' ? '🎬 Video' :
+                      data.mediaType === 'picture' ? '🖼 Picture' : '🎵 Music');
+
+  // Artwork
+  var artEl = _el('snxNPArtwork');
+  if (artEl) {
+    if (data.artworkUrl) {
+      artEl.innerHTML = '<img src="' + data.artworkUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">';
+    } else {
+      artEl.innerHTML = '&#127925;';
+    }
+  }
+
+  _txt('snxNPDuration', _fmtDur(data.duration));
+
+  // UP NEXT
+  if (data.nextTitle) {
+    _show('snxNPNextRow', true);
+    _txt('snxNPNextTitle', data.nextTitle);
+  } else {
+    _show('snxNPNextRow', false);
+  }
+
+  // Viewers + Likes
+  _txt('snxNPViewers', String(data.viewerCount || 0));
+  _txt('snxNPLikes',   String(data.likeCount   || 0));
+
+  // Pause/Resume button label
+  var ppBtn = _el('snxNPPlayPauseBtn');
+  if (ppBtn) ppBtn.textContent = data.paused ? '▶ RESUME' : '⏸ PAUSE';
+
+  // Store for progress RAF
+  _np.title       = data.title     || '';
+  _np.duration    = data.duration  || 0;
+  _np.startedAt   = data.startedAt || 0;
+  _np.pausedAt    = data.pausedAt  || 0;
+  _np.seekPosition= data.seekPosition || 0;
+  _np.paused      = !!data.paused;
+}
+
+/* ── progress RAF ── */
+function _startProgressRaf() {
+  _stopProgressRaf();
+  function tick() {
+    _np.progressRaf = requestAnimationFrame(tick);
+    var dur = _np.duration;
+    if (!dur || !_np.startedAt) return;
+    var elapsed;
+    if (_np.paused) {
+      elapsed = _np.seekPosition;
+    } else {
+      elapsed = _np.seekPosition + (Date.now() - _np.startedAt) / 1000;
+    }
+    elapsed = Math.max(0, Math.min(elapsed, dur));
+    var pct = (elapsed / dur) * 100;
+    var fill = _el('snxNPProgressFill');
+    if (fill) fill.style.width = pct.toFixed(2) + '%';
+    _txt('snxNPCurrentTime', _fmtDur(elapsed));
+  }
+  tick();
+}
+function _stopProgressRaf() {
+  if (_np.progressRaf) { cancelAnimationFrame(_np.progressRaf); _np.progressRaf = null; }
+}
+
+/* ── main poll ── */
+async function _pollServer() {
+  // 1. Ping health (engine status)
+  try {
+    var hr = await fetch(_WORKER_URL + '/health', { signal: AbortSignal.timeout(6000) });
+    _setEngineStatus(hr.ok);
+    if (!hr.ok) {
+      _setChannelBanner(false, null);
+      _txt('snxNPTitle', '—');
+      _show('snxNPControls', false);
+      return;
+    }
+  } catch(e) {
+    _setEngineStatus(false);
+    _setChannelBanner(false, null);
+    _show('snxNPControls', false);
+    return;
+  }
+
+  // 2. Find user's active stream
+  var user = window._snxCurrentUser;
+  if (!user) return;
+
+  try {
+    var fs = window._snxFirestore;
+    if (!fs) return;
+
+    var snap = await fs.getDocs(fs.query(
+      fs.collection(fs.db, 'cloudStreams'),
+      fs.where('uid', '==', user.uid),
+      fs.where('status', 'in', ['active', 'starting', 'recovering']),
+      fs.limit(1)
+    ));
+
+    if (!snap || !snap.docs || !snap.docs.length) {
+      _np.streamId = null;
+      _np.status   = 'offline';
+      _setChannelBanner(false, null);
+      _txt('snxNPTitle', '—');
+      _txt('snxNPArtist', '');
+      _txt('snxNPMeta', 'Start your channel from THE ETERNAL STREAM');
+      _show('snxNPControls', false);
+      _show('snxNPSchedulerRow', false);
+      _stopProgressRaf();
+      return;
+    }
+
+    var streamDoc = snap.docs[0];
+    _np.streamId = streamDoc.id;
+    _np.status   = 'active';
+
+    // 3. Get sync data from worker
+    var sr = await fetch(_WORKER_URL + '/api/stream/sync/' + _np.streamId,
+      { signal: AbortSignal.timeout(8000) });
+    if (!sr.ok) { _setChannelBanner(true, 'ACTIVE'); return; }
+    var sd = await sr.json();
+    if (!sd.success) { _setChannelBanner(true, 'ACTIVE'); return; }
+
+    _setChannelBanner(true, sd.status ? sd.status.toUpperCase() : 'ACTIVE');
+    _show('snxNPControls', true);
+
+    // Scheduler status
+    try {
+      var scr = await fetch(_WORKER_URL + '/api/stream/scheduler-status/' + _np.streamId,
+        { signal: AbortSignal.timeout(6000) });
+      if (scr.ok) {
+        var scd = await scr.json();
+        if (scd.success) _setSchedulerStatus(scd.schedulerActive, scd.nextTransitionIn, scd.musicStatus);
+      }
+    } catch(e2) {}
+
+    // Now playing data
+    var nowData = {
+      title:       sd.currentMusicTitle    || '—',
+      artist:      sd.currentMusicArtist   || '',
+      duration:    sd.currentMusicDuration || 0,
+      artworkUrl:  sd.artworkUrl           || '',
+      mediaType:   sd.mediaType            || 'music',
+      nextTitle:   sd.nextMusicTitle       || '',
+      paused:      sd.musicStatus === 'paused',
+      viewerCount: sd.viewerCount          || 0,
+      likeCount:   sd.likeCount            || 0,
+      startedAt:   sd.lastAdvancedAt       ? new Date(sd.lastAdvancedAt).getTime()
+                                           : (Date.now() - (sd.seekPosition || 0) * 1000),
+      seekPosition:typeof sd.seekPosition === 'number' ? sd.seekPosition : 0,
+      pausedAt:    0
+    };
+    if (sd.musicStatus === 'paused') {
+      nowData.startedAt    = Date.now();
+      nowData.seekPosition = sd.pausedPosition || sd.seekPosition || 0;
+      nowData.paused       = true;
+    }
+
+    _renderNPCard(nowData);
+
+    if (!nowData.paused && nowData.title !== '—') {
+      _startProgressRaf();
+    } else {
+      _stopProgressRaf();
+      var fill = _el('snxNPProgressFill');
+      if (fill) {
+        var pct = nowData.duration > 0 ? (nowData.seekPosition / nowData.duration) * 100 : 0;
+        fill.style.width = pct.toFixed(2) + '%';
+      }
+    }
+
+  } catch(e) {
+    console.warn('[SNX NP] poll error:', e.message);
+  }
+}
+
+/* ── start polling when tab is opened ── */
+function _startPolling() {
+  _pollServer();
+  if (!_np.interval) {
+    _np.interval = setInterval(_pollServer, 15000);
+  }
+}
+function _stopPolling() {
+  if (_np.interval) { clearInterval(_np.interval); _np.interval = null; }
+  _stopProgressRaf();
+}
+
+/* ── hook into tab switch ── */
+var _origTabSwitch = window.snxStudioTabSwitch;
+window.snxStudioTabSwitch = function(tab, btn) {
+  if (_origTabSwitch) _origTabSwitch.apply(this, arguments);
+  if (tab === 'nowplaying') {
+    _startPolling();
+  } else {
+    _stopPolling();
+  }
+};
+
+/* ── Public controls (call server API via cloud-stream.js functions) ── */
+
+window.snxNPPlayPause = function() {
+  var user = window._snxCurrentUser;
+  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
+  user.getIdToken(false).then(function(tok) {
+    var action = _np.paused ? 'resume' : 'pause';
+    return fetch(_WORKER_URL + '/api/stream/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+      body: JSON.stringify({ streamId: _np.streamId, action: action })
+    });
+  }).then(function() {
+    setTimeout(_pollServer, 800);
+  }).catch(function(e) {
+    console.warn('[SNX NP] play/pause failed:', e.message);
+    window.location.href = 'cloud-stream.html';
+  });
+};
+
+window.snxNPSkip = function() {
+  var user = window._snxCurrentUser;
+  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
+  user.getIdToken(false).then(function(tok) {
+    return fetch(_WORKER_URL + '/api/stream/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+      body: JSON.stringify({ streamId: _np.streamId, action: 'skip' })
+    });
+  }).then(function() {
+    setTimeout(_pollServer, 1200);
+  }).catch(function(e) {
+    console.warn('[SNX NP] skip failed:', e.message);
+    window.location.href = 'cloud-stream.html';
+  });
+};
+
+window.snxNPPrev = function() {
+  var user = window._snxCurrentUser;
+  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
+  user.getIdToken(false).then(function(tok) {
+    return fetch(_WORKER_URL + '/api/stream/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+      body: JSON.stringify({ streamId: _np.streamId, action: 'previous' })
+    });
+  }).then(function() {
+    setTimeout(_pollServer, 1200);
+  }).catch(function(e) {
+    console.warn('[SNX NP] prev failed:', e.message);
+    window.location.href = 'cloud-stream.html';
+  });
+};
+
+window.snxNPStopChannel = function() {
+  if (!confirm('Stop the channel? This will end the broadcast.')) return;
+  var user = window._snxCurrentUser;
+  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
+  user.getIdToken(false).then(function(tok) {
+    return fetch(_WORKER_URL + '/api/stream/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
+      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid })
+    });
+  }).then(function() {
+    _np.streamId = null;
+    _np.status   = 'offline';
+    _setChannelBanner(false, null);
+    _txt('snxNPTitle', '—');
+    _show('snxNPControls', false);
+    _stopProgressRaf();
+  }).catch(function(e) {
+    console.warn('[SNX NP] stop failed:', e.message);
+    window.location.href = 'cloud-stream.html';
+  });
+};
+
+/* Initial engine ping when studioPage loads */
+(function() {
+  function _tryPing() {
+    if (document.getElementById('snxNPEngineStatus')) {
+      // Do a silent engine ping so the status bar isn't stuck on "CHECKING"
+      fetch(_WORKER_URL + '/health', { signal: AbortSignal.timeout(5000) })
+        .then(function(r) { if (r.ok) _setEngineStatus(true); else _setEngineStatus(false); })
+        .catch(function() { _setEngineStatus(false); });
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() { setTimeout(_tryPing, 2000); });
+  } else {
+    setTimeout(_tryPing, 2000);
+  }
+})();
+
+})(); // end Playing tab IIFE
+
