@@ -1,14 +1,21 @@
 /*
- * nexus-intro.css  v3
+ * nexus-intro.css  v4
  * Shadow Nexus Social — Cinematic Welcome Experience
  * Namespaced: #snxIntro* / .snxi-*   Zero collision with existing styles.
  * NO flashing / strobe effects.  Atmospheric only.
+ *
+ * v4: Mobile-safe overlay, no scale/zoom exit on mobile, 100dvh/100svh support,
+ *     lightweight mobile rendering mode via [data-snxi-mobile] attribute.
  */
 
 /* ─── Overlay ───────────────────────────────────────────────────────────── */
 #snxIntroOverlay {
     position: fixed;
     inset: 0;
+    /* Mobile-safe viewport height — fallback chain */
+    min-height: 100vh;
+    min-height: 100svh;
+    height: 100dvh;
     z-index: 999999;
     background: #000204;
     overflow: hidden;
@@ -18,6 +25,14 @@
     justify-content: center;
     /* transition used only for exit, not entry */
     transition: opacity 1.8s ease;
+    /* GPU compositing hint — prevents flicker on iOS */
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+    will-change: opacity;
+    /* Safe-area insets for notched phones */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
 }
 #snxIntroOverlay.snxi-exit {
     opacity: 0;
@@ -484,14 +499,20 @@
     filter: blur(2px);
 }
 
-/* Portal expand on ENTER press */
+/* Portal expand on ENTER press — overridden to none in the mobile @media block below */
 #snxIntroPortal.snxi-portal-expand {
     animation: snxiPortalBurst 2.2s ease-in forwards !important;
 }
 
-/* ─── Camera travel (enter sequence) ──────────────────────────────────────── */
-#snxIntroOverlay.snxi-enter-travel {
+/* ─── Camera travel (enter sequence) — DESKTOP ONLY ───────────────────────── */
+/* On mobile, data-snxi-mobile is set so we skip scale/zoom entirely */
+#snxIntroOverlay.snxi-enter-travel:not([data-snxi-mobile]) {
     animation: snxiCameraIn 1.4s 0.6s cubic-bezier(0.4,0,0.2,1) both !important;
+}
+/* On mobile: no scale animation — just the opacity fade from .snxi-exit */
+#snxIntroOverlay[data-snxi-mobile].snxi-enter-travel {
+    animation: none !important;
+    transform: translateZ(0) !important;
 }
 /* Blue energy fill on enter */
 #snxIntroEnergy {
@@ -819,14 +840,76 @@
     #snxIntroStartMusicBtn { opacity: 1; }
 }
 
-/* ─── Mobile performance: reduce blur, particle count reduction via class ── */
-@media (max-width: 640px) {
-    .snxi-flame:nth-child(6) { filter: blur(14px); }
-    #snxIntroPortal::before  { filter: blur(10px); }
-    #snxIntroWolf            { filter: blur(4px) drop-shadow(0 0 10px rgba(0,60,200,.22)); }
-    .snxi-fog                { filter: blur(22px); }
-    .snxi-fog:nth-child(2)   { filter: blur(30px); }
-    .snxi-fog:nth-child(4)   { display: none; } /* drop deepest bg fog on small screens */
+/* ─── Mobile performance: lightweight rendering mode ──────────────────────── */
+@media (max-width: 767px) {
+    /* Reduce blur costs on small GPUs */
+    .snxi-flame:nth-child(6)  { filter: blur(8px); }
+    #snxIntroPortal::before   { filter: blur(8px); animation: none; }
+    #snxIntroWolf             { filter: blur(3px) drop-shadow(0 0 8px rgba(0,60,200,.18)); }
+    .snxi-fog                 { filter: blur(18px); }
+    .snxi-fog:nth-child(2)    { filter: blur(22px); }
+    .snxi-fog:nth-child(3)    { filter: blur(16px); }
+    /* Drop the deepest bg fog layers on mobile */
+    .snxi-fog:nth-child(4)    { display: none; }
+    /* Reduce flame count visually — hide outer decorative flames */
+    .snxi-flame:nth-child(1),
+    .snxi-flame:nth-child(2),
+    .snxi-flame:nth-child(9),
+    .snxi-flame:nth-child(10) { display: none; }
+    /* Simplify flame animations — use translate3d for GPU friendliness */
+    .snxi-flame               { will-change: transform; }
+    /* Remove filter-based blur on bolts (expensive on mobile) */
+    .snxi-bolt                { filter: none !important; }
+    /* Limit portal rings to 3 (JS still injects all, CSS hides outer ones) */
+    .snxi-pring:nth-child(4),
+    .snxi-pring:nth-child(5)  { display: none; }
+    /* Reduce portal animation cost */
+    .snxi-pcore               { filter: none; }
+    /* Simpler glow — remove multi-stop radial animation */
+    #snxIntroLightGlow        { display: none; }
+    /* Cat already not rendered on mobile (JS skips innerHTML) */
+    #snxIntroCat              { display: none; }
+    /* Wolf — simpler, no drop-shadow animation */
+    #snxIntroWolf             { animation: snxiWolfFade 5s 8s both ease-out; filter: none; opacity: 0; }
+    /* Reduce shimmer on Enter button */
+    #snxIntroEnterBtn::before { display: none; }
+    /* Overflow hidden on overlay: prevents any child from causing layout reflow */
+    #snxIntroOverlay          { overflow: hidden; }
+    /* Force GPU layer on all animated children */
+    #snxIntroGlow,
+    #snxIntroStars,
+    #snxIntroFog,
+    #snxIntroPortal,
+    #snxIntroFlames,
+    #snxIntroForest,
+    #snxIntroCrows            { transform: translateZ(0); will-change: transform, opacity; }
+    /* Mobile exit: fast clean fade, no scale transform */
+    #snxIntroOverlay[data-snxi-mobile].snxi-exit {
+        transition: opacity 0.5s ease !important;
+        opacity: 0 !important;
+    }
+    /* Mobile: prevent portal-burst scale from firing */
+    #snxIntroPortal.snxi-portal-expand {
+        animation: none !important;
+    }
+    /* Mobile: prevent fog-burst scale from firing */
+    .snxi-fog.snxi-fog-expand {
+        animation: none !important;
+    }
+}
+
+/* ─── Landscape mobile optimization ───────────────────────────────────────── */
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 500px) {
+    #snxIntroPortal  { width: min(52vw, 52vh); height: min(52vw, 52vh); }
+    #snxIntroTitle   { padding: 0 16px; }
+    .snxi-main-title { font-size: clamp(22px, 5vh, 48px); }
+    #snxIntroBtns    { margin-top: clamp(10px, 2vh, 20px); }
+    #snxIntroForest  { height: 24vh; }
+    #snxIntroFlames  { height: 22vh; }
+    /* In landscape, reduce fog height to not overlap portal */
+    .snxi-fog:nth-child(1) { height: 16vh; }
+    .snxi-fog:nth-child(2) { height: 18vh; }
+    .snxi-fog:nth-child(3) { height: 12vh; }
 }
 
 /* ─── Founder Control — Welcome Music tab ───────────────────────────────── */
