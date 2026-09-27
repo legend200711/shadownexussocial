@@ -6623,10 +6623,10 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">📡</span>
             <span class="sc-item-label">Go Live</span>
         </button>
-        <!-- NEXUS (channel discovery) -->
-        <button class="sc-item" id="scNavNexus" onclick="realmNavTo('nexusPage')" aria-label="Nexus" style="color:#c5a41d;">
-            <span class="sc-item-icon">𓂀</span>
-            <span class="sc-item-label">Nexus</span>
+        <!-- 24-HOUR TV — native SNS page -->
+        <button class="sc-item" id="scNavNexus" onclick="realmNavTo('tvPage')" aria-label="24-Hour TV" style="color:#00AEEF;">
+            <span class="sc-item-icon">📺</span>
+            <span class="sc-item-label">24-Hour TV</span>
         </button>
         <!-- Arcade -->
         <button class="sc-item" id="scNavArcade" onclick="openArcadeHub()" aria-label="Arcade">
@@ -6732,9 +6732,9 @@ body.arcade-fs-ios body::after { display:none !important; }
             <div class="ncm-icon-wrap">📡</div>
             <div class="ncm-label">Go Live</div>
         </div>
-        <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('nexusPage');mobileNavTo('_close')" style="color:#c5a41d;">
-            <div class="ncm-icon-wrap">𓂀</div>
-            <div class="ncm-label">Nexus</div>
+        <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
+            <div class="ncm-icon-wrap">📺</div>
+            <div class="ncm-label">24-Hour TV</div>
         </div>
         <div class="ncm-item" id="ncmArcade" onclick="mobileNavTo('_arcade')">
             <div class="ncm-icon-wrap">🕹️</div>
@@ -6856,8 +6856,8 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="nav-icon">📡</span> Go Live
             <span id="navLiveDot" class="nav-badge" style="display:none;background:#ff3344;"></span>
         </button>
-        <button class="nav-item" id="navNexus" onclick="realmNavTo('nexusPage')" style="color:#c5a41d;border-left:3px solid rgba(197,164,29,0.55);">
-            <span class="nav-icon">𓂀</span> 24-HOUR NEXUS
+        <button class="nav-item" id="navNexus" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
+            <span class="nav-icon">📺</span> 24-Hour TV
         </button>
         <button class="nav-item" id="navArcade" onclick="openArcadeHub()">
             <span class="nav-icon">🕹️</span> Arcade
@@ -11717,6 +11717,382 @@ body.arcade-fs-ios body::after { display:none !important; }
   </div>
 
 </div><!-- end nexusPage -->
+
+<!-- ████████████████████████████████████████████████████████████
+     📺  SHADOW NEXUS — 24-HOUR TV
+     Native channel viewer + founder studio.
+     Auth: reads window._snxCurrentUser (SNS session).
+     No second login. No separate page.
+     ████████████████████████████████████████████████████████ -->
+
+<!-- ── 24-Hour TV: SNS-native page styles ── -->
+<style>
+/* ── TV Page wrapper ── */
+#tvPage.page { max-width: 100% !important; padding: 0 !important; }
+
+/* ── TV header bar ── */
+.snx-tv-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid rgba(0,174,239,0.15);
+  flex-wrap: wrap; gap: 10px;
+}
+.snx-tv-title-wrap { display: flex; align-items: center; gap: 12px; }
+.snx-tv-title {
+  font-size: clamp(15px,2.5vw,20px); font-weight: 900;
+  letter-spacing: 0.12em; color: #c8d0e8; text-transform: uppercase;
+}
+.snx-tv-onair {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 20px;
+  border: 1px solid rgba(255,51,68,0.4); background: rgba(255,51,68,0.08);
+  font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #ff3344;
+}
+.snx-tv-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #ff3344;
+  box-shadow: 0 0 8px rgba(255,51,68,0.7);
+  animation: snxTvDot 2s ease-in-out infinite;
+}
+@keyframes snxTvDot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+/* ── Watch/Studio tabs ── */
+.snx-tv-tabs { display: flex; gap: 6px; }
+.snx-tv-tab {
+  padding: 7px 18px; border-radius: 8px;
+  background: rgba(0,174,239,0.07); border: 1px solid rgba(0,174,239,0.22);
+  color: #5a80a8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+  cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.snx-tv-tab:hover { background: rgba(0,174,239,0.14); color: #c8d0e8; }
+.snx-tv-tab.active {
+  background: rgba(0,174,239,0.18); border-color: rgba(0,174,239,0.55);
+  color: #00AEEF;
+}
+
+/* ── Founder bar ── */
+#snx-tv-founder-bar {
+  align-items: center; gap: 10px; padding: 8px 14px;
+  background: rgba(57,255,20,0.05);
+  border-bottom: 1px solid rgba(57,255,20,0.15);
+}
+
+/* ── Main layout ── */
+.snx-tv-panel { padding: 0 16px 24px; }
+.snx-tv-player-area { margin-bottom: 18px; }
+
+/* Player: inherits ax-player-shell + adds width constraint */
+.snx-tv-player-shell { width: 100%; }
+
+/* Channel badge */
+.ax-channel-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 14px; border-radius: 4px 4px 0 0;
+  background: #0090cc; color: #fff;
+  font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
+}
+.ax-badge-dot { opacity: 0.6; }
+.ax-live-indicator { display: flex; align-items: center; gap: 5px; color: #39FF14; }
+.ax-live-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #ff3344;
+  box-shadow: 0 0 8px rgba(255,51,68,0.6);
+  animation: snxTvDot 2s ease-in-out infinite;
+}
+
+/* Media area */
+.ax-player-shell {
+  background: #071428; border: 1px solid rgba(0,174,239,0.22);
+  border-radius: 0 12px 12px 12px; overflow: hidden;
+}
+.ax-media-area {
+  position: relative; background: #000; aspect-ratio: 16/9; overflow: hidden; cursor: pointer;
+}
+.ax-media-area video, .ax-media-area audio { display: none; }
+.ax-media-thumbnail {
+  position: absolute; inset: 0; background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+.ax-media-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* Now Playing overlay */
+.ax-np-overlay {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 12px 14px; z-index: 5; pointer-events: none;
+}
+.ax-np-label { font-size: 9px; font-weight: 800; letter-spacing: 2px; color: rgba(255,255,255,0.6); margin-bottom: 2px; }
+.ax-np-title { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 6px rgba(0,0,0,0.8); }
+.ax-np-artist { font-size: 11px; color: rgba(255,255,255,0.65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Autoplay gate */
+.ax-autoplay-gate {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+  background: rgba(2,4,10,0.88); backdrop-filter: blur(8px); z-index: 10;
+}
+.ax-gate-logo { font-size: 48px; }
+.ax-gate-title { font-size: 18px; font-weight: 900; letter-spacing: 0.15em; color: #c8d0e8; }
+.ax-gate-sub { font-size: 12px; color: #5a80a8; }
+.ax-gate-btn {
+  padding: 12px 32px; background: #0090cc; color: #fff; border: none; border-radius: 8px;
+  font-size: 14px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
+  transition: background 0.18s;
+}
+.ax-gate-btn:hover { background: #00AEEF; }
+
+/* Fullscreen overlay */
+.ax-fs-overlay {
+  position: absolute; inset: 0; z-index: 20;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.2s;
+}
+.ax-fs-overlay.visible { opacity: 1; pointer-events: auto; }
+.ax-fs-overlay-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 120px; background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%); pointer-events: none; }
+.ax-fs-ctrl-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px;
+}
+.ax-fs-progress-wrap { display: flex; flex-direction: column; gap: 4px; }
+.ax-fs-progress-bar { height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; cursor: pointer; }
+.ax-fs-progress-fill { height: 100%; background: linear-gradient(90deg, #00AEEF, #39FF14); border-radius: 2px; transition: width 0.8s linear; }
+.ax-fs-times { display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.7); }
+.ax-fs-btns { display: flex; align-items: center; gap: 8px; }
+.ax-fs-ctrl-btn {
+  background: none; border: none; color: rgba(255,255,255,0.85); font-size: 18px;
+  cursor: pointer; padding: 4px 6px; border-radius: 4px; line-height: 1;
+}
+.ax-fs-ctrl-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.ax-fs-exit-btn { margin-left: auto; }
+.ax-fs-spacer { flex: 1; }
+.ax-fs-vol-slider { width: 80px; accent-color: #00AEEF; }
+.ax-fs-hide-cursor { cursor: none; }
+
+/* Fullscreen active state */
+.ax-fs-active { position: fixed !important; inset: 0 !important; z-index: 99999 !important; width: 100vw !important; height: 100vh !important; border-radius: 0 !important; }
+.ax-fs-active .ax-media-area { aspect-ratio: unset !important; width: 100% !important; height: 100% !important; }
+.ax-fs-active .ax-fs-overlay { pointer-events: auto; }
+
+/* Progress bar (normal) */
+.ax-progress-wrap { padding: 10px 14px 4px; }
+.ax-progress-bar { height: 4px; background: rgba(0,174,239,0.15); border-radius: 2px; overflow: hidden; }
+.ax-progress-fill { height: 100%; background: linear-gradient(90deg, #00AEEF, #39FF14); border-radius: 2px; transition: width 0.8s linear; }
+.ax-progress-times { display: flex; justify-content: space-between; font-size: 11px; color: #5a80a8; padding: 4px 0; }
+
+/* Controls */
+.ax-controls {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 12px;
+}
+.ax-ctrl-btn {
+  background: rgba(0,174,239,0.08); border: 1px solid rgba(0,174,239,0.22);
+  color: #5a80a8; border-radius: 6px; padding: 7px 12px;
+  font-size: 13px; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.ax-ctrl-btn:hover { background: rgba(0,174,239,0.18); color: #00AEEF; }
+.ax-ctrl-btn.primary { background: rgba(0,174,239,0.15); color: #00AEEF; border-color: rgba(0,174,239,0.35); }
+.ax-volume-wrap { display: flex; align-items: center; gap: 6px; }
+.ax-volume-slider { width: 80px; accent-color: #00AEEF; }
+.ax-controls-spacer { flex: 1; }
+
+/* Now Playing panel (below player) */
+.ax-now-playing-panel {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  padding: 12px 4px 0; flex-wrap: wrap;
+}
+.ax-np-panel-label { font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #ff3344; margin-bottom: 2px; }
+.ax-np-panel-title { font-size: 15px; font-weight: 800; color: #c8d0e8; line-height: 1.2; margin-bottom: 2px; }
+.ax-np-panel-meta { font-size: 11px; color: #5a80a8; }
+.ax-np-panel-time { font-size: 12px; color: #5a80a8; text-align: right; }
+.ax-np-panel-remain { font-size: 11px; color: #3a5a7a; text-align: right; margin-top: 2px; }
+
+/* ── Info row (channels + up next + EPG) ── */
+.snx-tv-info-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: 14px; margin-top: 18px;
+}
+.snx-tv-section-card {
+  background: rgba(7,20,40,0.85);
+  border: 1px solid rgba(0,174,239,0.16);
+  border-radius: 12px; overflow: hidden;
+}
+.snx-tv-section-title {
+  font-size: 10px; font-weight: 800; letter-spacing: 2px;
+  color: #5a80a8; text-transform: uppercase;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(0,174,239,0.1);
+}
+
+/* Channel list */
+.ax-channels { overflow-y: auto; max-height: 320px; }
+.ax-channel-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 14px; background: transparent;
+  border: none; border-left: 3px solid transparent;
+  color: #5a80a8; font-size: 12px; font-weight: 600;
+  cursor: pointer; text-align: left; transition: background 0.15s, color 0.15s;
+}
+.ax-channel-btn:hover { background: rgba(0,174,239,0.07); color: #c8d0e8; }
+.ax-channel-btn.active { background: rgba(0,174,239,0.1); color: #00AEEF; border-left-color: #00AEEF; }
+.ax-ch-num { font-size: 10px; color: #3a5a7a; min-width: 22px; }
+.ax-ch-icon { font-size: 14px; }
+.ax-ch-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ax-ch-status { width: 7px; height: 7px; border-radius: 50%; background: #1a3a5c; flex-shrink: 0; }
+.ax-ch-status.live { background: #39FF14; box-shadow: 0 0 6px rgba(57,255,20,0.6); animation: snxTvDot 2s ease-in-out infinite; }
+.ax-ch-status.idle { background: #1a3a5c; }
+
+/* Schedule / Up Next */
+.ax-schedule-list { overflow-y: auto; max-height: 320px; }
+.ax-schedule-item { padding: 9px 14px; border-bottom: 1px solid rgba(0,174,239,0.08); }
+.ax-schedule-item:last-child { border-bottom: none; }
+.ax-sched-title { font-size: 12px; font-weight: 700; color: #c8d0e8; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ax-sched-meta { font-size: 10px; color: #5a80a8; }
+
+/* EPG */
+.ax-epg-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 10px 4px; }
+.ax-epg-tab {
+  padding: 4px 10px; border-radius: 14px; font-size: 10px; font-weight: 700;
+  background: rgba(0,174,239,0.07); border: 1px solid rgba(0,174,239,0.18);
+  color: #5a80a8; cursor: pointer; letter-spacing: 0.5px;
+  transition: background 0.15s, color 0.15s;
+}
+.ax-epg-tab:hover { background: rgba(0,174,239,0.14); color: #c8d0e8; }
+.ax-epg-tab.active { background: rgba(0,174,239,0.18); border-color: rgba(0,174,239,0.45); color: #00AEEF; }
+.ax-epg-body { overflow-y: auto; max-height: 280px; padding-bottom: 8px; }
+.ax-epg-row { display: flex; align-items: flex-start; gap: 8px; padding: 9px 14px 8px; border-bottom: 1px solid rgba(0,174,239,0.07); }
+.ax-epg-row:last-child { border-bottom: none; }
+.ax-epg-row.current { background: rgba(0,174,239,0.05); }
+.ax-epg-badge { font-size: 9px; font-weight: 800; letter-spacing: 1px; color: #5a80a8; min-width: 36px; padding-top: 2px; flex-shrink: 0; }
+.ax-epg-info { flex: 1; min-width: 0; }
+.ax-epg-title { font-size: 12px; font-weight: 700; color: #c8d0e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ax-epg-meta { font-size: 10px; color: #5a80a8; margin-top: 1px; }
+.ax-epg-remain { font-size: 10px; color: #3a5a7a; flex-shrink: 0; padding-top: 2px; }
+.ax-epg-empty { padding: 16px 14px; font-size: 12px; color: #3a5a7a; }
+
+/* Submit modal */
+.ax-modal-overlay {
+  position: fixed; inset: 0; z-index: 8000;
+  background: rgba(0,3,15,0.88); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.ax-modal-box {
+  background: #060d1e; border: 1px solid rgba(0,174,239,0.35);
+  border-radius: 16px; padding: 22px 20px;
+  max-height: 90vh; overflow-y: auto;
+  box-shadow: 0 0 60px rgba(0,100,255,0.2);
+  animation: snxTvModalIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+@keyframes snxTvModalIn { from { opacity:0; transform:scale(0.94) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
+.ax-modal-title { font-size: 14px; font-weight: 800; color: #00AEEF; letter-spacing: 1px; margin-bottom: 12px; }
+.ax-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+.ax-btn-ghost {
+  padding: 9px 18px; background: transparent; border: 1px solid rgba(0,174,239,0.25);
+  color: #5a80a8; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700;
+}
+.ax-btn-ghost:hover { color: #c8d0e8; border-color: rgba(0,174,239,0.5); }
+.ax-btn-primary {
+  padding: 9px 18px; background: #0090cc; color: #fff; border: none;
+  border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700;
+}
+.ax-btn-primary:hover { background: #00AEEF; }
+.ax-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.ax-auth-err { display: none; font-size: 12px; color: #ff3344; padding: 6px 10px; background: rgba(255,51,68,0.08); border-radius: 6px; margin-top: 6px; }
+.ax-auth-err.visible { display: block; }
+
+/* Toast */
+#ax-toast {
+  position: fixed; bottom: 80px; right: 20px; z-index: 9500;
+  max-width: calc(100vw - 40px);
+}
+
+/* Founder bar in channel.html nav */
+.ax-founder-badge-nav {
+  padding: 3px 10px; border-radius: 12px;
+  background: rgba(57,255,20,0.1); border: 1px solid rgba(57,255,20,0.3);
+  color: #39FF14; font-size: 10px; font-weight: 800; letter-spacing: 1px;
+}
+
+/* ── Studio pane (inside SNS) ── */
+.ax-ctrl-layout {
+  display: flex; flex-direction: column; min-height: 500px;
+  background: rgba(5,7,14,0.98);
+  border: 1px solid rgba(0,174,239,0.15);
+  border-radius: 12px; overflow: hidden;
+}
+@media (min-width: 768px) {
+  .ax-ctrl-layout { flex-direction: row; }
+}
+.ax-ctrl-sidebar {
+  width: 100%; flex-shrink: 0;
+  background: rgba(2,4,10,0.95);
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+  padding: 14px 10px;
+  display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
+}
+@media (min-width: 768px) {
+  .ax-ctrl-sidebar {
+    width: 200px; border-bottom: none;
+    border-right: 1px solid rgba(0,174,239,0.12);
+    min-height: 500px;
+  }
+}
+.ax-ctrl-content { flex: 1; overflow-y: auto; padding: 16px; min-width: 0; }
+.ax-ctrl-founder-badge {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 10px 12px; margin-bottom: 4px;
+  border-bottom: 1px solid rgba(0,174,239,0.1);
+}
+.ax-ctrl-founder-title { font-size: 13px; font-weight: 900; color: #00AEEF; letter-spacing: 0.08em; line-height: 1.2; }
+.ax-ctrl-founder-sub { font-size: 9px; color: #39FF14; letter-spacing: 0.5px; font-weight: 700; margin-top: 2px; }
+.ax-ctrl-section-label {
+  font-size: 9px; font-weight: 800; letter-spacing: 2px;
+  color: #3a5a7a; text-transform: uppercase;
+  padding: 10px 8px 4px; margin-top: 4px;
+}
+.ax-ctrl-nav-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border-radius: 7px;
+  background: transparent; border: none;
+  color: #5a80a8; font-size: 12px; font-weight: 600;
+  cursor: pointer; text-align: left;
+  transition: background 0.15s, color 0.15s;
+}
+.ax-ctrl-nav-btn:hover { background: rgba(0,174,239,0.08); color: #c8d0e8; }
+.ax-ctrl-nav-btn.active { background: rgba(0,174,239,0.12); color: #00AEEF; }
+.ax-ctrl-nav-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
+.ax-ctrl-exit-btn { color: #ff5577 !important; margin-top: auto; }
+.ax-ctrl-exit-btn:hover { background: rgba(255,51,102,0.08) !important; }
+.ax-ctrl-pane { display: none; }
+.ax-ctrl-pane.active { display: block; }
+.ax-ctrl-error {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 300px; gap: 12px; padding: 40px 24px; text-align: center;
+}
+.ax-ctrl-error-msg {
+  font-size: 13px; color: #5a80a8; line-height: 1.6; max-width: 480px;
+  background: rgba(0,174,239,0.05); border: 1px solid rgba(0,174,239,0.15);
+  border-radius: 8px; padding: 14px 18px;
+}
+
+/* ── Mobile adjustments ── */
+@media (max-width: 480px) {
+  .snx-tv-header { padding: 10px 12px 8px; }
+  .snx-tv-tab { padding: 6px 12px; font-size: 11px; }
+  .snx-tv-panel { padding: 0 10px 20px; }
+  .snx-tv-info-row { grid-template-columns: 1fr; }
+}
+</style>
+
+<div class="page" id="tvPage">
+  <!-- snx-ch-adapter.js renders everything into #snxTvApp -->
+  <div id="snxTvApp" style="min-height:200px;"></div>
+</div><!-- end tvPage -->
+
+<!-- ── Load 24-Hour TV adapter as ES module (no second Firebase init, no second login) ── -->
+<script type="module" src="snx-ch-adapter.js"></script>
 
 
 
@@ -21102,10 +21478,15 @@ function navTo(pageId) {
         // Load blocked users (Security tab might be active)
         if (typeof window.snxLoadBlockedUsers === 'function') window.snxLoadBlockedUsers();
     }
-    // Initialize 24-HOUR NEXUS when nexusPage or studioPage opens
+    // ── 24-Hour TV lifecycle hooks ──
+    if (pageId === 'tvPage') {
+        if (typeof window.snxTvInit === 'function') window.snxTvInit();
+    } else {
+        if (typeof window.snxTvTeardown === 'function') window.snxTvTeardown();
+    }
+    // Initialize 24-HOUR NEXUS when nexusPage or studioPage opens (legacy)
     if (pageId === 'nexusPage' || pageId === 'studioPage') {
         if (typeof window.snxNexusInit === 'function') window.snxNexusInit();
-        // Also kick off studio.js init for backend functions (tracks, playlists, queue)
         if (typeof window.snxStudioInit === 'function') window.snxStudioInit();
     }
     // Initialize Global Search when search page opens
@@ -31802,7 +32183,8 @@ function updateShadowCoreActive(pageId) {
         'administratorPage': ['navAdminOfficer', 'scNavAdm', 'ncmAdm'],
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
         'studioPage':        ['navNexus', 'scNavNexus', 'ncmNexus'],
-        'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus']
+        'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
+        'tvPage':            ['navNexus', 'scNavNexus', 'ncmNexus']
     };
 
     var ids = map[pageId] || [];

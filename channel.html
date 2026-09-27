@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#02040a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="24-Hour Channel — Shadow Nexus Social">
+<meta name="description" content="Shadow Nexus Social — 24-Hour Channel. The broadcast never stops.">
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<title>24-Hour Channel — Shadow Nexus Social</title>
+
+<!-- SNX Channel visual system -->
+<link rel="stylesheet" href="snx-channel.css">
+
+<style>
+/* ── Override Aurenix particle canvas opacity for SNS look ── */
+#ax-particles { opacity: 0.30; }
+.ax-ambient::before { background: radial-gradient(circle, rgba(0,100,255,0.07) 0%, transparent 70%); }
+.ax-ambient::after  { background: radial-gradient(circle, rgba(57,255,20,0.04) 0%, transparent 70%); }
+
+/* ── SNS Back button ── */
+.snx-back-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 44px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: rgba(2,4,10,0.92);
+  border-bottom: 1px solid rgba(0,174,239,0.14);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  gap: 14px;
+}
+.snx-back-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: none; color: #00AEEF;
+  font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+  cursor: pointer; padding: 4px 0; text-decoration: none;
+}
+.snx-back-btn:hover { color: #33c8ff; }
+.snx-back-bar-title {
+  font-size: 12px; font-weight: 800; letter-spacing: 3px;
+  color: #c8d0e8; text-transform: uppercase;
+}
+.snx-back-bar-badge {
+  margin-left: auto; display: flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 800; letter-spacing: 2px;
+  color: #ff3344; padding: 3px 10px; border-radius: 14px;
+  border: 1px solid rgba(255,51,68,0.40); background: rgba(255,51,68,0.08);
+}
+.snx-back-bar-badge-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #ff3344;
+  animation: snxBackDot 2s ease-in-out infinite;
+}
+@keyframes snxBackDot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+
+/* ── Push content below back bar and above nav bar ── */
+#ax-nav { top: 44px !important; }
+#ax-app { padding-top: calc(44px + 58px) !important; }
+
+/* ── Recolor the channel nav to SNS palette ── */
+.ax-nav-logo-text { color: #c8d0e8 !important; }
+.ax-nav-logo-text span { color: #00AEEF !important; }
+.ax-nav-btn { color: #00AEEF !important; border-color: rgba(0,174,239,0.35) !important; background: rgba(0,174,239,0.06) !important; }
+.ax-nav-btn:hover { background: rgba(0,174,239,0.14) !important; }
+.ax-founder-panel-btn { color: #39FF14 !important; border-color: rgba(57,255,20,0.35) !important; background: rgba(57,255,20,0.06) !important; }
+.ax-founder-panel-btn:hover { background: rgba(57,255,20,0.14) !important; }
+.ax-nav-avatar { border-color: rgba(0,174,239,0.45) !important; color: #00AEEF !important; }
+
+/* ── SNS palette overrides on channel UI ── */
+:root {
+  --blue:        #0090cc;
+  --blue-bright: #00AEEF;
+  --blue-glow:   rgba(0,174,239,0.40);
+  --blue-dim:    rgba(0,174,239,0.10);
+  --green:       #39FF14;
+  --rim:         rgba(0,174,239,0.16);
+  --rim-bright:  rgba(0,174,239,0.42);
+  --border:      rgba(0,174,239,0.13);
+  --border-hi:   rgba(0,174,239,0.32);
+}
+.ax-btn-primary { background: #0090cc !important; }
+.ax-btn-primary:hover { background: #00AEEF !important; }
+.ax-ctrl-btn.primary { background: rgba(0,174,239,0.18) !important; color: #00AEEF !important; border-color: rgba(0,174,239,0.35) !important; }
+.ax-live-dot { background: #39FF14 !important; box-shadow: 0 0 8px rgba(57,255,20,0.60) !important; }
+.ax-nav-live-badge { color: #39FF14 !important; border-color: rgba(57,255,20,0.40) !important; background: rgba(57,255,20,0.06) !important; }
+.ax-progress-fill { background: linear-gradient(90deg, #00AEEF, #39FF14) !important; }
+.ax-fs-progress-fill { background: linear-gradient(90deg, #00AEEF, #39FF14) !important; }
+.ax-channel-btn.active { border-left-color: #00AEEF !important; }
+.ax-ch-status.live { background: #39FF14 !important; box-shadow: 0 0 6px rgba(57,255,20,0.60) !important; }
+</style>
+</head>
+<body>
+
+<!-- Ambient background -->
+<div class="ax-ambient" aria-hidden="true"></div>
+<canvas id="ax-particles" aria-hidden="true"></canvas>
+
+<!-- SNS Back bar -->
+<div class="snx-back-bar" role="navigation" aria-label="Back to Shadow Nexus Social">
+  <a class="snx-back-btn" href="index.html" aria-label="Back to Shadow Nexus Social">
+    ← <span>Shadow Nexus Social</span>
+  </a>
+  <div class="snx-back-bar-title">24-HOUR CHANNEL</div>
+  <div class="snx-back-bar-badge">
+    <div class="snx-back-bar-badge-dot"></div>
+    ON AIR
+  </div>
+</div>
+
+<!-- Navigation (populated by snx-ch-broadcast.js; hidden until authenticated) -->
+<nav id="ax-nav" role="navigation" aria-label="24-Hour Channel" style="display:none;"></nav>
+
+<!-- Main app shell (populated by snx-ch-broadcast.js) -->
+<div id="ax-app" role="main"></div>
+
+<!-- Founder control center (populated lazily by snx-ch-control.js) -->
+<div id="ax-control" aria-label="24-Hour Channel Studio"></div>
+
+<!-- Toast -->
+<div id="ax-toast" role="status" aria-live="polite"></div>
+
+<!-- Initialize SNS Firebase auth so snx-ch-auth-bridge.js can proxy it.
+     This mirrors what index.html does — same project, same session. -->
+<script type="module">
+  import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
+  import { getAuth, onAuthStateChanged, browserLocalPersistence, setPersistence } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+  const _snsCfg = {
+    apiKey:            'AIzaSyByZRmp6R9HY17T2_WdJUFWeeaLNOP6y2Y',
+    authDomain:        'horr-a08f4.firebaseapp.com',
+    databaseURL:       'https://horr-a08f4-default-rtdb.firebaseio.com',
+    projectId:         'horr-a08f4',
+    storageBucket:     'horr-a08f4.firebasestorage.app',
+    messagingSenderId: '933810617818',
+    appId:             '1:933810617818:web:efb24f123337dd987c14e3',
+  };
+  const _snsApp  = getApps().length ? getApp() : initializeApp(_snsCfg);
+  const _snsAuth = getAuth(_snsApp);
+  await setPersistence(_snsAuth, browserLocalPersistence).catch(() => {});
+  window._snxAuth        = _snsAuth;
+  window._snxCurrentUser = _snsAuth.currentUser;
+  // Keep _snxCurrentUser in sync for the broadcast engine
+  onAuthStateChanged(_snsAuth, (user) => {
+    window._snxCurrentUser   = user;
+    window._snxAuthResolved  = true;
+    if (!user) window.dispatchEvent(new CustomEvent('snxAuthSignOut'));
+  });
+</script>
+
+<!-- SNX Channel Broadcast Engine (ES module) -->
+<script type="module">
+  // Small delay so the SNS auth script above has time to set window._snxAuth
+  await new Promise(r => setTimeout(r, 50));
+  try {
+    const { initBroadcast } = await import('./snx-ch-broadcast.js');
+    initBroadcast();
+  } catch (err) {
+    console.error('[SNX-CHANNEL] Fatal startup error:', err);
+    const app = document.getElementById('ax-app');
+    if (app) {
+      app.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px;padding:40px 24px;text-align:center;';
+      app.innerHTML = `
+        <div style="font-size:clamp(22px,4vw,44px);font-weight:900;letter-spacing:0.15em;color:#c8d0e8;">
+          24-HOUR <span style="color:#00AEEF">CHANNEL</span>
+        </div>
+        <div style="font-size:11px;letter-spacing:4px;color:#5a80a8;text-transform:uppercase;margin-bottom:8px;">
+          SHADOW NEXUS SOCIAL
+        </div>
+        <div style="background:#071428;border:1px solid rgba(255,51,68,0.35);border-radius:8px;padding:20px 28px;max-width:480px;color:#ff3344;font-size:13px;line-height:1.7;">
+          <strong>Startup Error</strong><br>
+          ${err?.message ? err.message.replace(/</g,'&lt;') : 'An unexpected error prevented the channel from loading.'}<br>
+          <span style="color:#5a80a8;font-size:11px;">Check the browser console for details, then refresh the page.</span>
+        </div>
+        <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;justify-content:center;">
+          <button onclick="location.reload()" style="padding:10px 28px;background:#0090cc;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700;letter-spacing:1px;">
+            RETRY
+          </button>
+          <a href="index.html" style="padding:10px 28px;background:#071428;color:#00AEEF;border:1px solid rgba(0,174,239,0.35);border-radius:6px;font-size:13px;font-weight:700;letter-spacing:1px;text-decoration:none;display:inline-block;">
+            ← BACK TO SHADOW NEXUS
+          </a>
+        </div>`;
+    }
+  }
+</script>
+
+</body>
+</html>

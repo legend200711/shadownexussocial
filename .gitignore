@@ -1,0 +1,11 @@
+# Source archives (not deployed)
+*.zip
+_extract/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
