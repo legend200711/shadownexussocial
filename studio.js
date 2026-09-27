@@ -2421,8 +2421,14 @@ window.snxCSMusicRemoveSchedule = function(idx) {
 };
 
 function _csMusicPushScheduleToWorker() {
-  if (!_state.cloudStreamId || !_state.user) return;
-  _cloudStreamRPC({ action: 'setSchedule', schedule: _csMusic.schedule });
+  // Studio saves schedule to Firestore; cloud-stream.js reads and executes it.
+  if (!_state.user || !window._snxFirestore) return;
+  var fs  = window._snxFirestore;
+  var uid = _state.user.uid;
+  fs.setDoc(fs.doc(fs.db, 'studioSettings', uid), {
+    playlistSchedule: _csMusic.schedule,
+    updatedAt:        fs.serverTimestamp()
+  }, { merge: true }).catch(function() {});
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -4015,20 +4021,15 @@ function _renderSchedule() {
 }
 
 function _saveScheduleToWorker() {
-  if (!_state.user || !_state.cloudStreamId) return;
-  var schedBody = JSON.stringify({
-    streamId:  _state.cloudStreamId,
-    uid:       _state.user.uid,
-    action:    'setSchedule',
-    schedule:  _music.schedule
-  });
-  _snxWorkerHeaders().then(function(headers) {
-    return fetch(CLOUDSTREAM_WORKER_URL + '/api/stream/control', {
-      method: 'POST',
-      headers: headers,
-      body: schedBody
-    });
-  }).catch(function() {});
+  // Studio saves the broadcast schedule to Firestore only.
+  // cloud-stream.js / cloudstream-worker.js reads and executes the schedule.
+  if (!_state.user || !window._snxFirestore) return;
+  var fs  = window._snxFirestore;
+  var uid = _state.user.uid;
+  fs.setDoc(fs.doc(fs.db, 'studioSettings', uid), {
+    broadcastSchedule: _music.schedule,
+    updatedAt:         fs.serverTimestamp()
+  }, { merge: true }).catch(function() {});
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -4133,15 +4134,16 @@ function _snxWorkerHeaders(extraHeaders) {
 /* ═══════════════════════════════════════════════════════
    30. STUDIO QUEUE (_sq) — Permanent Always-On Queue
    ─────────────────────────────────────────────────────
-   A simplified music queue that feeds directly into the
-   cloud-stream infrastructure without requiring a playlist.
+   A simplified music queue for content preparation.
 
    Firestore path:
      studioQueue/{uid}
        { uid, queue:[{id,title,artist,url,duration,addedAt}],
          queueIndex, playing, updatedAt }
 
-   Cloud stream: uses the same /api/stream/music/set endpoint.
+   Studio saves the queue to Firestore only.
+   cloud-stream.js imports the queue when the creator opens Cloud Stream.
+   The canonical Cloud Stream engine sends broadcast commands to the worker.
 ═══════════════════════════════════════════════════════ */
 
 var _sq = {
@@ -4821,36 +4823,8 @@ window.snxsStartStream = function() {
   window.location.href = 'cloud-stream.html';
 };
 
-/* ── Patch _handoffComplete to update simplified UI on success ── */
-var _origHandoffComplete = window._snxHandoffComplete || null;
-// Intercept handoff completion by patching the post-handoff state check
-// (studio.js runs _handoffComplete → sets _state.cloudStatus = 'active')
-// We poll for this state change after start is clicked.
-(function() {
-  var _handoffPoll = null;
-  function _watchHandoff() {
-    if (_handoffPoll) clearInterval(_handoffPoll);
-    _handoffPoll = setInterval(function() {
-      var st = _state.cloudStatus;
-      if (st === 'active') {
-        clearInterval(_handoffPoll);
-        _snxsOnStreamActive();
-      } else if (st === 'failed' || st === 'stopped') {
-        clearInterval(_handoffPoll);
-        _snxsOnStreamStopped();
-      }
-    }, 500);
-    // Stop polling after 90 seconds regardless
-    setTimeout(function() { if (_handoffPoll) clearInterval(_handoffPoll); }, 90000);
-  }
-
-  // Monkey-patch snxsStartStream to also start the poll
-  var _origStart = window.snxsStartStream;
-  window.snxsStartStream = function() {
-    _origStart();
-    setTimeout(_watchHandoff, 1000);
-  };
-})();
+/* snxsStartStream redirects to cloud-stream.html — the user leaves Studio immediately.
+   No handoff polling is needed here; broadcast state is owned by cloud-stream.js. */
 
 function _snxsOnStreamActive() {
   _snxsUpdateStatus('live');
