@@ -123,6 +123,9 @@
   <div id="csrEngineStatus" class="csr-engine-status csr-engine-warn" aria-live="polite">
     ⚡ CLOUD ENGINE: CONNECTING…
   </div>
+  <!-- ── SERVER SCHEDULER STATUS ── -->
+  <div id="csrSchedulerStatus" class="csr-scheduler-status" aria-live="polite" style="display:none;">
+  </div>
 
   <!-- ── ACTIVE BANNER (admin) ── -->
   <div id="csrActiveBanner" class="csr-active-banner" style="display:none;" role="alert">
@@ -680,11 +683,17 @@
       </div>
       <div class="csr-form-group">
         <label class="csr-label">Media Type</label>
-        <select class="csr-input csr-select" id="csrLibType">
+        <select class="csr-input csr-select" id="csrLibType" onchange="csrLibTypeChanged(this.value)">
           <option value="music">🎵 Audio / Music</option>
           <option value="video">🎬 Video</option>
           <option value="picture">🖼 Image / Picture</option>
         </select>
+      </div>
+      <!-- Image display duration (shown only for picture type) -->
+      <div class="csr-form-group" id="csrLibImageDurationRow" style="display:none;">
+        <label class="csr-label">Display Duration <span class="csr-optional">seconds</span></label>
+        <input class="csr-input" type="number" id="csrLibImageDuration" min="5" max="3600" value="30" placeholder="30">
+        <div class="csr-hint">How long to display this image in the stream (default 30 seconds)</div>
       </div>
       <div class="csr-form-group">
         <label class="csr-label">Media File</label>

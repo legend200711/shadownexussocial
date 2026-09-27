@@ -77,14 +77,14 @@ function _setEngineStatus(connected) {
     el.textContent = '⚡ CLOUD ENGINE: CONNECTED';
     el.className = 'csr-engine-status csr-engine-ok';
   } else {
-    el.textContent = '⚡ CLOUD ENGINE: RECONNECTING…';
-    el.className = 'csr-engine-status csr-engine-warn';
+    el.textContent = '⚡ CLOUD ENGINE: DISCONNECTED';
+    el.className = 'csr-engine-status csr-engine-error';
   }
 }
 
 async function _pingEngine() {
   try {
-    const r = await fetch(WORKER_URL + '/health', { signal: AbortSignal.timeout(5000) });
+    const r = await fetch(WORKER_URL + '/health', { signal: AbortSignal.timeout(8000) });
     _setEngineStatus(r.ok);
   } catch {
     _setEngineStatus(false);
@@ -426,6 +426,7 @@ function _startHealthMonitor() {
   if (_creator.healthInterval) clearInterval(_creator.healthInterval);
   _creator.healthInterval = setInterval(_checkHealth, 30000);
   _checkHealth();
+  _checkSchedulerStatus(); // immediate scheduler poll
 }
 function _stopHealthMonitor() {
   if (_creator.healthInterval) { clearInterval(_creator.healthInterval); _creator.healthInterval = null; }
@@ -433,7 +434,9 @@ function _stopHealthMonitor() {
 async function _checkHealth() {
   if (!_streamId) return;
   try {
-    const r    = await fetch(WORKER_URL + '/api/stream/health/' + _streamId);
+    const r    = await fetch(WORKER_URL + '/api/stream/health/' + _streamId,
+      { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
     if (data.success) {
       if (_streamData) { _streamData.status = data.status; _streamData.viewerCount = data.viewerCount || 0; }
@@ -448,7 +451,47 @@ async function _checkHealth() {
       }
     }
     if (_streamData && _streamData.expiresAt && _streamData.expiresAt - Date.now() <= 0) _streamExpired();
-  } catch(_) {}
+    _setEngineStatus(true);
+    // Also refresh scheduler status every health check
+    _checkSchedulerStatus();
+  } catch(e) {
+    console.warn('[CSR] health check failed:', e.message);
+    _setEngineStatus(false);
+    _setSchedulerStatus(false, null, null);
+  }
+}
+
+/* ── Scheduler status — shows DO alarm state in creator dashboard ── */
+async function _checkSchedulerStatus() {
+  if (!_streamId) return;
+  try {
+    const r = await fetch(WORKER_URL + '/api/stream/scheduler-status/' + _streamId,
+      { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) { _setSchedulerStatus(false, null, null); return; }
+    const d = await r.json();
+    if (d.success) {
+      _setSchedulerStatus(d.schedulerActive, d.nextTransitionIn, d.musicStatus);
+    }
+  } catch(e) {
+    _setSchedulerStatus(false, null, null);
+  }
+}
+
+function _setSchedulerStatus(active, nextTransitionIn, musicStatus) {
+  const el = _el('csrSchedulerStatus');
+  if (!el) return;
+  el.style.display = '';
+  if (active) {
+    const nextStr = nextTransitionIn != null ? _fmtDur(nextTransitionIn) : '—';
+    el.textContent = '⚙ SERVER SCHEDULER: ACTIVE · NEXT TRANSITION: ' + nextStr;
+    el.className = 'csr-scheduler-status csr-scheduler-ok';
+  } else if (musicStatus === 'paused') {
+    el.textContent = '⏸ SERVER SCHEDULER: PAUSED (alarm cancelled)';
+    el.className = 'csr-scheduler-status csr-scheduler-warn';
+  } else {
+    el.textContent = '⚠ SERVER SCHEDULER: UNAVAILABLE — channel may not auto-advance';
+    el.className = 'csr-scheduler-status csr-scheduler-error';
+  }
 }
 
 function _updatePauseResumeBtn(paused) {
@@ -1017,17 +1060,21 @@ function _activateVideoMode(url, dur) {
   _player.video = video;
 
   // Remove old handlers before setting new src
-  video.onended  = null;
-  video.onerror  = null;
+  video.onended      = null;
+  video.onerror      = null;
+  video.onloadedmetadata = null;
 
   video.volume = _player.volume;
   video.src    = url;
   video.load();
 
   video.onended = () => {
+    // DO NOT advance the authoritative queue from the browser.
+    // The Durable Object alarm is the authoritative controller.
+    // onended is a signal to RESYNC from the server.
     _stopProgressRaf();
-    _player._audioStallAt = Date.now(); // triggers watchdog to advance
     _setPlayBtn(false);
+    _resyncFromServer();
   };
   video.onerror = () => {
     console.warn('[CSR] video error for url:', url);
@@ -1037,11 +1084,32 @@ function _activateVideoMode(url, dur) {
 
   const tapOverlay = _el('csrTapOverlay');
   const tapVisible = tapOverlay && tapOverlay.style.display !== 'none';
+
   if (_player.playing && !tapVisible) {
-    video.play().catch(err => {
-      if (err.name === 'NotAllowedError') { _player.playing = false; _showTapOverlay(); }
-    });
-    _startProgressRaf();
+    // Black screen protection: seek to authoritative position BEFORE playing.
+    // Wait for loadedmetadata so seek is valid, then canplaythrough before play().
+    video.addEventListener('loadedmetadata', function _onVidMeta() {
+      video.removeEventListener('loadedmetadata', _onVidMeta);
+
+      // Seek to authoritative server position
+      const elapsed = Math.max(0, (Date.now() - _player.trackStartedAt) / 1000);
+      if (elapsed > 2 && dur > 0 && elapsed < dur - 2 && isFinite(video.duration)) {
+        try { video.currentTime = Math.min(elapsed, video.duration - 1); } catch (_) {}
+      }
+
+      // Attempt play after seek
+      const p = video.play();
+      if (p) p.catch(err => {
+        if (err.name === 'NotAllowedError') {
+          _player.playing = false;
+          _showTapOverlay();
+        } else {
+          _player._audioStallAt = _player._audioStallAt || Date.now();
+        }
+      });
+      _startProgressRaf();
+      _setPlayBtn(true);
+    }, { once: true });
   }
   _setPlayBtn(_player.playing && !tapVisible);
   _show('csrProgressFill', true);
@@ -1141,10 +1209,64 @@ function _loadAndPlayAudio(url, dur) {
 }
 
 function _onAudioEnded() {
+  // DO NOT advance the authoritative queue from the browser.
+  // The Durable Object alarm controls all track advancement.
+  // onended fires when local media finishes — resync to see if server has already advanced.
   _stopProgressRaf();
-  _player._audioStallAt = Date.now();
   _setPlayBtn(false);
   _vizStop();
+  _resyncFromServer();
+}
+
+/* ── Resync from server after media ends or stalls ──
+   Fetches authoritative state. If server has advanced, loads new media.
+   If server is still transitioning, waits briefly and retries.
+*/
+async function _resyncFromServer() {
+  const streamId = _player._streamId;
+  if (!streamId) return;
+
+  // Small delay to allow server alarm to fire and advance state
+  await _sleep(800);
+
+  try {
+    const r = await fetch(WORKER_URL + '/api/stream/sync/' + streamId,
+      { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.success) return;
+
+    // If server has already advanced to a new track, load it
+    if (d.currentMusicUrl && d.currentMusicUrl !== _player.trackUrl) {
+      const serverSeekSecs = typeof d.seekPosition === 'number' ? d.seekPosition : 0;
+      _player.trackStartedAt = Date.now() - serverSeekSecs * 1000;
+      _syncToNowPlaying({
+        currentTitle:    d.currentMusicTitle  || '',
+        currentArtist:   d.currentMusicArtist || '',
+        currentTrackUrl: d.currentMusicUrl,
+        currentTrackId:  d.currentMusicId     || '',
+        currentDuration: d.currentMusicDuration || 0,
+        artworkUrl:      d.artworkUrl          || '',
+        mediaType:       d.mediaType           || 'music',
+        nextTitle:       d.nextMusicTitle      || '',
+        nextArtist:      d.nextMusicArtist     || '',
+        status:          d.musicStatus         || 'playing',
+        seekPosition:    d.seekPosition        || 0,
+        updatedAt:       { toMillis: () => _player.trackStartedAt },
+      });
+      return;
+    }
+
+    // Server is still on same track or transitioning — wait and try again
+    if (_player.trackUrl && d.currentMusicUrl === _player.trackUrl) {
+      // Server hasn't advanced yet; the DO alarm will fire shortly.
+      // Set stall marker so watchdog can also catch this.
+      if (!_player._audioStallAt) _player._audioStallAt = Date.now();
+    }
+  } catch (e) {
+    console.warn('[CSR] resyncFromServer failed:', e.message);
+    if (!_player._audioStallAt) _player._audioStallAt = Date.now();
+  }
 }
 
 function _stopAudio() {
@@ -2330,6 +2452,9 @@ function _libRender() {
     const thumbHtml = item.artworkUrl
       ? `<img src="${_esc(item.artworkUrl)}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : icon;
+    const durLabel = item.durationUnknown
+      ? `<span style="color:#ff9900;font-size:10px" title="Duration unknown — scheduler will use 240s fallback">⚠ ?:??</span>`
+      : `<span>${_fmtDur(item.duration || 0)}</span>`;
     return `<div class="csr-lib-item${isSel ? ' selected' : ''}" onclick="csrLibToggleSelect('${_esc(item.id)}')">
       <div class="csr-lib-check">${isSel ? '✓' : ''}</div>
       <div class="csr-lib-thumb">${thumbHtml}</div>
@@ -2337,7 +2462,7 @@ function _libRender() {
         <div class="csr-lib-title">${_esc(item.title || 'Untitled')}</div>
         <div class="csr-lib-meta">${icon} ${_esc(item.mediaType || 'music')}${item.artist ? ' · ' + _esc(item.artist) : ''}</div>
       </div>
-      <div class="csr-lib-dur">${_fmtDur(item.duration || 0)}</div>
+      <div class="csr-lib-dur">${durLabel}</div>
       <button class="csr-lib-delete" onclick="event.stopPropagation();csrLibDelete('${_esc(item.id)}')" title="Delete" aria-label="Delete ${_esc(item.title || 'item')}">🗑</button>
     </div>`;
   }).join('');
@@ -2369,40 +2494,33 @@ window.csrLibLoad = function() { _libLoad(); };
 
 window.csrLibDelete = async function(id) {
   if (!_user) return;
-  if (!confirm('Delete this item from your library?')) return;
 
-  // Safety check: don't delete if it's the currently playing track
-  const item = _lib.items.find(i => i.id === id);
-  if (item && _player.trackUrl && item.url && item.url === _player.trackUrl) {
-    if (!confirm('This item is currently playing. Delete anyway?')) return;
-  }
+  if (!confirm('Delete this item from your library?\n\nThe file will be permanently removed from storage.')) return;
 
   try {
     const idToken = await _user.getIdToken(true);
 
-    // 1. Delete metadata from Worker KV
-    try {
-      await fetch(WORKER_URL + `/api/media/delete/${_user.uid}/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': 'Bearer ' + idToken },
-      });
-    } catch (_) {}
+    // ── Server-side authenticated deletion ──────────────────────────────────────
+    // The server verifies Firebase token, checks active stream protection,
+    // removes from running queue if needed, deletes R2 objects, and removes KV metadata.
+    // The browser NEVER directly deletes R2 objects.
+    const r = await fetch(WORKER_URL + `/api/media/delete/${_user.uid}/${id}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': 'Bearer ' + idToken },
+    });
+    const d = await r.json().catch(() => ({}));
 
-    // 2. Delete the R2 file if we have an r2Key
-    if (item && (item.r2Key || item.url)) {
-      const r2Key = item.r2Key || (item.url ? item.url.replace(R2_UPLOAD_URL + '/', '') : null);
-      if (r2Key) {
-        try {
-          await fetch(R2_UPLOAD_URL + '/' + r2Key, {
-            method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + idToken },
-          });
-        } catch (_) {}
-      }
+    if (r.status === 409) {
+      // Server blocked deletion — media is currently playing
+      _toast('⚠ ' + (d.error || 'Media is currently playing. Skip the track first.'), 'error');
+      return;
+    }
+    if (!r.ok) {
+      throw new Error(d.error || 'Server delete failed (HTTP ' + r.status + ')');
     }
 
-    // 3. Delete from Firestore (legacy compatibility)
-    await deleteDoc(doc(_db, 'cloudStreamTracks', _user.uid, 'tracks', id));
+    // Also remove from Firestore for legacy compatibility
+    await deleteDoc(doc(_db, 'cloudStreamTracks', _user.uid, 'tracks', id)).catch(() => {});
 
     _lib.items = _lib.items.filter(i => i.id !== id);
     _lib.selected.delete(id);
@@ -2412,6 +2530,12 @@ window.csrLibDelete = async function(id) {
   } catch(e) {
     _toast('Could not delete: ' + e.message, 'error');
   }
+};
+
+/* ── Media type change handler — shows image duration row for pictures ── */
+window.csrLibTypeChanged = function(type) {
+  const row = _el('csrLibImageDurationRow');
+  if (row) row.style.display = type === 'picture' ? '' : 'none';
 };
 
 /* ── File selection ── */
@@ -2426,9 +2550,9 @@ window.csrLibHandleFile = function(evt) {
   // Auto-detect type
   const type = _el('csrLibType');
   if (type) {
-    if (file.type.startsWith('video/')) type.value = 'video';
-    else if (file.type.startsWith('image/')) type.value = 'picture';
-    else type.value = 'music';
+    if (file.type.startsWith('video/')) { type.value = 'video'; window.csrLibTypeChanged('video'); }
+    else if (file.type.startsWith('image/')) { type.value = 'picture'; window.csrLibTypeChanged('picture'); }
+    else { type.value = 'music'; window.csrLibTypeChanged('music'); }
   }
   // Auto-fill title from filename if empty
   const titleEl = _el('csrLibTitle');
@@ -2526,19 +2650,48 @@ window.csrLibUpload = async function() {
       xhr.send(form);
     });
 
-    // Duration detection for audio/video (use local blob — accurate, no extra request)
+    // Duration detection for audio/video — use local blob for accuracy
+    // For images, use creator-specified duration (or default 30s).
+    // If duration cannot be determined for audio/video, flag as durationUnknown.
     let duration = 0;
-    if (mediaType !== 'picture') {
+    let durationUnknown = false;
+
+    if (mediaType === 'picture') {
+      // Image duration: creator can specify in the upload form (default 30s)
+      const durInput = _el('csrLibImageDuration');
+      const parsedDur = durInput ? parseInt(durInput.value, 10) : 0;
+      duration = (parsedDur > 0 && parsedDur <= 3600) ? parsedDur : 30;
+    } else {
+      // Audio/Video: extract from metadata via local blob element
       try {
-        duration = await new Promise(resolve => {
+        const rawDur = await new Promise(resolve => {
           const el = mediaType === 'video' ? document.createElement('video') : document.createElement('audio');
           const blobUrl = URL.createObjectURL(_lib.uploadFile);
           el.src = blobUrl;
-          el.onloadedmetadata = () => { URL.revokeObjectURL(blobUrl); resolve(Math.round(el.duration) || 0); };
+          el.onloadedmetadata = () => {
+            URL.revokeObjectURL(blobUrl);
+            const d = el.duration;
+            resolve(isFinite(d) && d > 0 ? Math.round(d) : 0);
+          };
           el.onerror = () => { URL.revokeObjectURL(blobUrl); resolve(0); };
-          setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch(_) {} resolve(0); }, 8000);
+          setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch(_) {} resolve(0); }, 10000);
         });
-      } catch(_) {}
+        if (rawDur > 0) {
+          duration = rawDur;
+        } else {
+          // Could not determine duration — flag it; do NOT silently default to 240s
+          durationUnknown = true;
+          duration = 0;
+          console.warn('[CSR Library] Could not determine duration for:', _lib.uploadFile.name);
+        }
+      } catch(_) {
+        durationUnknown = true;
+      }
+    }
+
+    if (durationUnknown) {
+      _libStep(2, '⚠ Duration unknown — the Durable Object scheduler will use its fallback. You may update duration after upload.');
+      await _sleep(2000);
     }
 
     _libStep(2, 'Uploading artwork…');
@@ -2569,6 +2722,7 @@ window.csrLibUpload = async function() {
       url: mediaUrl,         // alias used by queue system
       artworkUrl,
       duration,
+      durationUnknown,
       fileSize: _lib.uploadFile.size || 0,
       uploadStatus: 'ready',
     };
@@ -2584,7 +2738,8 @@ window.csrLibUpload = async function() {
       id: trackId, ownerUid: uid,
       title, artist, mediaType,
       url: mediaUrl, artworkUrl, r2Key,
-      duration, fileSize: _lib.uploadFile.size || 0,
+      duration, durationUnknown,
+      fileSize: _lib.uploadFile.size || 0,
       createdAt: serverTimestamp(),
     };
     await setDoc(doc(_db, 'cloudStreamTracks', uid, 'tracks', trackId), trackData);

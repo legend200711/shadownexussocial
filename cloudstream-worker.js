@@ -99,8 +99,12 @@ export default {
 
       // Media library metadata (stored in KV, files live in R2)
       if (method === 'POST'   && path === '/api/media/save')    return handleMediaSave(request, env, cors);
+      // Media delete — fully server-side: verifies auth, checks active queue, deletes R2 objects
       if (method === 'DELETE' && path.startsWith('/api/media/delete/')) return handleMediaDelete(request, env, url, cors);
       if (method === 'GET'    && path.startsWith('/api/media/library/')) return handleMediaLibrary(request, env, url, cors);
+
+      // Scheduler status — creator dashboard shows DO alarm state
+      if (method === 'GET' && path.startsWith('/api/stream/scheduler-status/')) return handleSchedulerStatus(request, env, url, cors);
 
       if (method === 'GET' && path === '/health') return jsonOK({ ok: true, worker: 'cloudstream', v: '2.0.0' }, cors);
 
@@ -985,29 +989,159 @@ async function handleMediaLibrary(request, env, url, cors) {
    DELETE /api/media/delete/:uid/:mediaId
 ═══════════════════════════════════════════════════════ */
 async function handleMediaDelete(request, env, url, cors) {
+  // ── 1. Authentication ────────────────────────────────────────────────────────
   const parts   = url.pathname.replace('/api/media/delete/', '').split('/');
   const uid     = parts[0];
   const mediaId = parts[1];
   if (!uid || !mediaId) return jsonErr('uid and mediaId required', 400, cors);
 
   const idToken = _extractBearerToken(request);
-  if (idToken) {
-    try {
-      const verified = await verifyFirebaseIdToken(idToken, env);
-      if (verified && verified.uid !== uid) return jsonErr('Unauthorized: token UID mismatch', 403, cors);
-    } catch (e) { return jsonErr('Unauthorized: ' + e.message, 401, cors); }
-  } else if (env.FIREBASE_PROJECT_ID && env.FIREBASE_API_KEY) {
-    return jsonErr('Unauthorized: Authorization header required', 401, cors);
-  }
+  if (!idToken) return jsonErr('Unauthorized: Authorization header required', 401, cors);
+
+  let verified;
+  try {
+    verified = await verifyFirebaseIdToken(idToken, env);
+  } catch (e) { return jsonErr('Unauthorized: ' + e.message, 401, cors); }
+  if (!verified || verified.uid !== uid) return jsonErr('Unauthorized: token UID mismatch', 403, cors);
 
   if (!env.cloudStreamKV) return jsonErr('KV not configured', 503, cors);
 
+  // ── 2. Load media metadata ───────────────────────────────────────────────────
   const kvKey  = `media:${uid}:${mediaId}`;
   const record = await env.cloudStreamKV.get(kvKey, { type: 'json' });
   if (!record) return jsonErr('Media not found', 404, cors);
 
+  // Verify ownership (belt-and-suspenders)
+  if (record.ownerUid && record.ownerUid !== uid) return jsonErr('Forbidden: media does not belong to you', 403, cors);
+
+  // ── 3. Active media protection ───────────────────────────────────────────────
+  // Scan all active streams owned by this user and check if this media is currently playing
+  const streamListResult = await env.cloudStreamKV.list({ prefix: 'stream:' });
+  for (const key of (streamListResult.keys || [])) {
+    const streamRec = await env.cloudStreamKV.get(key.name, { type: 'json' });
+    if (!streamRec || streamRec.uid !== uid) continue;
+    if (!['active', 'starting', 'recovering'].includes(streamRec.status)) continue;
+
+    const streamId = key.name.replace('stream:', '');
+    const musicState = await env.cloudStreamKV.get(`music:${streamId}`, { type: 'json' });
+    if (!musicState || !musicState.queue || !musicState.queue.length) continue;
+
+    const currentIdx = musicState.queueIndex || 0;
+    const currentTrack = musicState.queue[currentIdx];
+
+    // Block if currently playing
+    if (currentTrack && currentTrack.id === mediaId) {
+      return jsonErr('Media is currently playing in an active Cloud Stream. Stop or skip the track before deleting.', 409, cors);
+    }
+
+    // ── 4. Queued media — remove from queue and recalculate indexes ────────────
+    const queuedIdx = musicState.queue.findIndex((t, i) => i !== currentIdx && t.id === mediaId);
+    if (queuedIdx !== -1) {
+      // Remove the item from the queue
+      musicState.queue.splice(queuedIdx, 1);
+
+      // Recalculate currentIndex if the removed item was before the current playing position
+      if (queuedIdx < currentIdx) {
+        musicState.queueIndex = Math.max(0, currentIdx - 1);
+      }
+      // Regenerate shuffle order if needed (queue length changed)
+      if (musicState.shuffle && musicState.queue.length > 0) {
+        musicState.shuffleOrder = _generateShuffleOrder(musicState.queue.length);
+      }
+
+      const ttl = (streamRec.durationMinutes + 60) * 60;
+      await env.cloudStreamKV.put(`music:${streamId}`, JSON.stringify(musicState), { expirationTtl: ttl });
+      // Push updated queue to Firestore so viewers see the change
+      await pushNowPlayingToFirestore(env, streamId, musicState).catch(() => {});
+      await logStreamEvent(env, streamId, 'queue_item_removed', { mediaId, title: record.title || '' });
+    }
+  }
+
+  // ── 5. Delete R2 objects server-side via upload-worker ──────────────────────
+  // The R2 bucket is owned by the upload-worker. We proxy the delete through
+  // its authenticated /r2/delete endpoint rather than holding a direct R2 binding.
+  const UPLOAD_WORKER_URL = 'https://yellow-term-11e6.nthntjrn.workers.dev';
+  const _r2DeleteKey = async (r2Key) => {
+    try {
+      const res = await fetch(`${UPLOAD_WORKER_URL}/r2/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken, r2Key, ownerId: uid }),
+      });
+      if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        console.warn('[MediaDelete] Upload-worker R2 delete HTTP', res.status, err.slice(0, 100));
+      }
+    } catch (e) {
+      console.warn('[MediaDelete] R2 delete call failed:', e.message);
+    }
+  };
+  if (record.r2Key)        await _r2DeleteKey(record.r2Key);
+  if (record.artworkR2Key) await _r2DeleteKey(record.artworkR2Key);
+
+  // ── 6. Remove KV metadata ────────────────────────────────────────────────────
   await env.cloudStreamKV.delete(kvKey);
-  return jsonOK({ success: true, r2Key: record.r2Key, artworkR2Key: record.artworkR2Key || null }, cors);
+
+  return jsonOK({ success: true, deleted: true, mediaId }, cors);
+}
+
+/* ═══════════════════════════════════════════════════════
+   SCHEDULER STATUS — reports DO alarm state to creator dashboard
+   GET /api/stream/scheduler-status/:streamId
+═══════════════════════════════════════════════════════ */
+async function handleSchedulerStatus(request, env, url, cors) {
+  const streamId = url.pathname.replace('/api/stream/scheduler-status/', '');
+  if (!streamId) return jsonErr('streamId required', 400, cors);
+
+  // Anyone can query status; result contains no secrets
+  let musicState = null;
+  let stream = null;
+
+  if (env.cloudStreamKV) {
+    [stream, musicState] = await Promise.all([
+      env.cloudStreamKV.get(`stream:${streamId}`, { type: 'json' }),
+      env.cloudStreamKV.get(`music:${streamId}`, { type: 'json' }),
+    ]);
+  }
+
+  if (!stream) return jsonErr('Stream not found', 404, cors);
+
+  const serverNow = Date.now();
+  let schedulerActive = false;
+  let nextTransitionAt = null;
+  let nextTransitionIn = null;
+
+  if (musicState && musicState.status === 'playing') {
+    const currentTrack = (musicState.queue || [])[musicState.queueIndex || 0] || {};
+    const trackDur = (currentTrack.duration || 240);
+    const trackStart = musicState.lastAdvancedAt || musicState.startedAt || serverNow;
+    const elapsed = Math.max(0, (serverNow - trackStart) / 1000);
+    const remaining = Math.max(0, trackDur - elapsed);
+
+    schedulerActive = true;
+    nextTransitionAt = serverNow + remaining * 1000;
+    nextTransitionIn = Math.round(remaining);
+  } else if (musicState && musicState.status === 'paused') {
+    schedulerActive = false; // alarm is cancelled while paused
+  }
+
+  const doConnected = !!env.CloudStreamDO;
+
+  return jsonOK({
+    success: true,
+    streamId,
+    streamStatus: stream.status || 'unknown',
+    schedulerActive,
+    doConnected,
+    serverNow,
+    nextTransitionAt,
+    nextTransitionIn,
+    musicStatus: musicState ? (musicState.status || 'unknown') : 'no_state',
+    currentTrack: musicState && musicState.queue
+      ? ((musicState.queue[musicState.queueIndex || 0] || {}).title || '')
+      : '',
+    queueLength: musicState && musicState.queue ? musicState.queue.length : 0,
+  }, cors);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -1272,22 +1406,27 @@ export class CloudStreamScheduler {
     }
 
     // ── Channel recovery: check if we're behind (DO restarted) ──────────────
-    // If the alarm fires late, we may need to skip multiple tracks
-    const now         = Date.now();
-    let queueIndex    = musicState.queueIndex || 0;
-    let lastAdvanced  = musicState.lastAdvancedAt || now;
-    const q           = musicState.queue;
-    const qLen        = q.length;
+    // If the alarm fires late, we may need to skip multiple tracks.
+    // We ALSO calculate the offset WITHIN the correct current track, so
+    // seek position is accurate rather than always starting at 0.
+    //
+    // Example: Track A=60s, Track B=60s, Track C=60s, DO was 150s late.
+    // Result: Track C, approximately 30s in (not 0s).
+    const now        = Date.now();
+    let queueIndex   = musicState.queueIndex || 0;
+    let lastAdvanced = musicState.lastAdvancedAt || now;
+    const q          = musicState.queue;
+    const qLen       = q.length;
 
-    // Catch up: if more than one track-duration has passed since lastAdvanced, skip forward
+    // Advance through all tracks whose full duration has already elapsed
     let catchupSafe = 0;
     while (catchupSafe < qLen) {
       const candidateTrack = q[queueIndex];
       const candidateDur   = (candidateTrack && candidateTrack.duration ? candidateTrack.duration : 240) * 1000;
-      if (now - lastAdvanced < candidateDur) break; // we're within the current track
+      if (now - lastAdvanced < candidateDur) break; // still within this track's window
 
-      // This track should already have ended — skip it
-      lastAdvanced = lastAdvanced + candidateDur;
+      // This track has already fully elapsed — advance lastAdvanced by its full duration
+      lastAdvanced += candidateDur;
       const nextIdx = _computeNextIndexFromState(queueIndex, musicState.shuffle, musicState.shuffleOrder, musicState.repeat, qLen);
       if (nextIdx === null) {
         musicState.status = 'ended';
@@ -1299,12 +1438,30 @@ export class CloudStreamScheduler {
       catchupSafe++;
     }
 
+    // Calculate how far into the current (now-correct) track we are.
+    // lastAdvanced now represents when the current track started (per wall clock).
+    const trackElapsedMs  = Math.max(0, now - lastAdvanced);
+    const curTrackForCalc = q[queueIndex];
+    const curTrackDurMs   = (curTrackForCalc && curTrackForCalc.duration
+      ? curTrackForCalc.duration : 240) * 1000;
+    // Clamp: don't overshoot
+    const clampedElapsedMs      = Math.min(trackElapsedMs, Math.max(0, curTrackDurMs - 1000));
+    // lastAdvancedAt is set to (now - elapsed) so seekPosition computations stay accurate
+    const adjustedLastAdvancedAt = now - clampedElapsedMs;
+
     musicState.queueIndex     = queueIndex;
-    musicState.lastAdvancedAt = now;
-    musicState.startedAt      = now;
+    musicState.lastAdvancedAt = adjustedLastAdvancedAt;
+    musicState.startedAt      = adjustedLastAdvancedAt;
     musicState.status         = 'playing';
     musicState.pausedPosition = 0;
     musicState.pausedAt       = null;
+
+    if (catchupSafe > 0) {
+      await logStreamEvent(this.env, streamId, 'music_catchup', {
+        skipped: catchupSafe, newIndex: queueIndex,
+        elapsedInTrackSecs: Math.round(clampedElapsedMs / 1000),
+      });
+    }
 
     // Compute next index for scheduling purposes
     const nextIdx = _computeNextIndexFromState(queueIndex, musicState.shuffle, musicState.shuffleOrder, musicState.repeat, qLen);
@@ -1312,9 +1469,11 @@ export class CloudStreamScheduler {
     if (nextIdx === null && musicState.repeat === 'off') {
       // Advance to last track, play it, then end
       await this.env.cloudStreamKV.put(`music:${streamId}`, JSON.stringify(musicState));
-      const curTrack = q[queueIndex] || {};
-      const curDur   = Math.max(5000, Math.min((curTrack.duration || 240) * 1000, 6 * 3600 * 1000));
-      await this.state.storage.setAlarm(now + curDur);
+      const curTrack    = q[queueIndex] || {};
+      const curDurMs    = Math.max(5000, Math.min((curTrack.duration || 240) * 1000, 6 * 3600 * 1000));
+      // Schedule for remaining portion, not full duration (catch-up aware)
+      const remainingMs = Math.max(5000, curDurMs - clampedElapsedMs);
+      await this.state.storage.setAlarm(now + remainingMs);
       await pushNowPlayingToFirestore(this.env, streamId, musicState);
       return;
     }
@@ -1343,11 +1502,17 @@ export class CloudStreamScheduler {
     const playingTrack = q[finalIndex] || {};
     await logStreamEvent(this.env, streamId, 'track_advanced', {
       title: playingTrack.title || '', artist: playingTrack.artist || '', index: finalIndex,
+      elapsedSecs: Math.round(clampedElapsedMs / 1000),
     });
 
-    const rawDur  = playingTrack.duration ? playingTrack.duration * 1000 : 240000;
-    const nextDur = Math.max(5000, Math.min(rawDur, 6 * 3600 * 1000));
-    await this.state.storage.setAlarm(now + nextDur);
+    const rawDurMs    = playingTrack.duration ? playingTrack.duration * 1000 : 240000;
+    const fullDurMs   = Math.max(5000, Math.min(rawDurMs, 6 * 3600 * 1000));
+    // If this is the same track we were already mid-way through (no skip occurred),
+    // schedule for remaining time; otherwise schedule for full track duration.
+    const alarmMs = (catchupSafe === 0)
+      ? Math.max(5000, fullDurMs - clampedElapsedMs)
+      : fullDurMs;
+    await this.state.storage.setAlarm(now + alarmMs);
   }
 
   async _handleSceneAlarm() {

@@ -1,18 +1,35 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
 
-  // Shadow Nexus Social — CloudStream Worker  (Stage 2)
+  // ════════════════════════════════════════════════════════════════════════════
+  // Shadow Nexus Social — CloudStream Worker  (Stage 2 Hardened)
   // Provides server-side 24-hour broadcast scheduling and control
   //
-  // Deploy: npx wrangler deploy --config wrangler-studio.jsonc
+  // ── DEPLOYMENT ──────────────────────────────────────────────────────────────
+  // Deploy this Worker + Durable Object with:
   //
-  // Required secrets (set once via wrangler CLI):
-  //   npx wrangler secret put FIREBASE_API_KEY  --config wrangler-studio.jsonc
-  //   npx wrangler secret put STREAM_SECRET     --config wrangler-studio.jsonc
+  //   npx wrangler deploy --config wrangler-studio.jsonc
   //
-  // Required wrangler kv namespace (create once):
-  //   npx wrangler kv namespace create cloudStreamKV
-  //   Then update the "id" field below with the printed namespace ID.
+  // NOTE: GitHub Actions / Firebase Hosting does NOT deploy Cloudflare Workers.
+  //       You must run the above command manually or via a dedicated CF deploy
+  //       step whenever cloudstream-worker.js changes.
+  //
+  // ── FIRST-TIME SETUP ────────────────────────────────────────────────────────
+  // 1. Set secrets (once per environment, not committed to git):
+  //      npx wrangler secret put FIREBASE_API_KEY  --config wrangler-studio.jsonc
+  //      npx wrangler secret put STREAM_SECRET     --config wrangler-studio.jsonc
+  //
+  // 2. If the KV namespace does not yet exist:
+  //      npx wrangler kv namespace create cloudStreamKV --config wrangler-studio.jsonc
+  //    Then update the "id" field below with the printed namespace ID.
+  //
+  // ── REQUIRED BINDINGS ───────────────────────────────────────────────────────
+  //   cloudStreamKV  — KV namespace (stream state, music state, media metadata, viewer presence)
+  //   CloudStreamDO  — Durable Object (CloudStreamScheduler class)
+  //   FIREBASE_API_KEY  (secret) — Firebase Web API key for server-side token verification
+  //   STREAM_SECRET     (secret) — Optional signing secret for stream tokens
+  //
+  // ════════════════════════════════════════════════════════════════════════════
 
   "name": "snx-cloudstream",
   "main": "cloudstream-worker.js",
@@ -42,8 +59,10 @@
   },
 
   // ── Migrations ──
-  // Stage 2: keep same tag v1 if CloudStreamScheduler already deployed.
-  // If deploying fresh, this creates the SQLite-backed DO class.
+  // IMPORTANT: Do NOT add new migration tags after v1 has been deployed.
+  // v1 is the production Durable Object class for CloudStreamScheduler.
+  // Adding a new tag would create a NEW DO class and lose all active channel state.
+  // Only add a new migration tag if you are intentionally creating a new DO class name.
   "migrations": [
     {
       "tag": "v1",
@@ -63,6 +82,6 @@
   //   STREAM_SECRET    — optional signing secret for stream tokens
   //   FIREBASE_API_KEY — Firebase Web API key for server-side REST (accounts:signUp, accounts:lookup)
   //
-  // The upload-worker (wrangler.jsonc / yellow-term-11e6) handles R2 file serving.
-  // The cloudstream worker reads R2 public URLs stored in KV media metadata.
+  // The upload-worker (wrangler.jsonc / yellow-term-11e6) owns the R2 BUCKET binding.
+  // Media R2 deletions are proxied through the upload-worker's /r2/delete endpoint.
 }
