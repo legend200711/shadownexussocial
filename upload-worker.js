@@ -407,7 +407,6 @@ async function handleUploadComplete(request, env, cors, sec) {
     `music/${verifiedUid}/`,
     `posts/${verifiedUid}/`,
     `radio/${verifiedUid}/`,
-    `cloud-stream/${verifiedUid}/`,
     `themes/${verifiedUid}/`,
     `users/${verifiedUid}/`,
   ];
@@ -1183,7 +1182,6 @@ async function handleR2Delete(request, env, cors, sec) {
                || safeKey.startsWith(`music/${safeOwnerId}/`)
                || safeKey.startsWith(`posts/${safeOwnerId}/`)
                || safeKey.startsWith(`radio/${safeOwnerId}/`)
-               || safeKey.startsWith(`cloud-stream/${safeOwnerId}/`)
                || safeKey.startsWith(`themes/${safeOwnerId}/`)
                || safeKey.startsWith(`users/${safeOwnerId}/`);
   if (!ownsKey) {
@@ -1257,7 +1255,6 @@ async function handleR2Delete(request, env, cors, sec) {
         `profiles/${musicUid}/music/`,
         `music/${musicUid}/`,
         `radio/${musicUid}/`,
-        `cloud-stream/${musicUid}/`,
         `users/${musicUid}/`,
         `themes/${musicUid}/`,
         `posts/${musicUid}/`,
@@ -1336,7 +1333,6 @@ async function handleR2Delete(request, env, cors, sec) {
                           || key.startsWith(`music/${deleteUid}/`)
                           || key.startsWith(`posts/${deleteUid}/`)
                           || key.startsWith(`radio/${deleteUid}/`)
-                          || key.startsWith(`cloud-stream/${deleteUid}/`)
                           || key.startsWith(`themes/${deleteUid}/`)
                           || key.startsWith(`users/${deleteUid}/`);
       if (!deleteKeyOwned) {
@@ -1544,7 +1540,6 @@ async function handleR2Delete(request, env, cors, sec) {
         `music/${userUid}/`,
         `posts/${userUid}/`,
         `radio/${userUid}/`,
-        `cloud-stream/${userUid}/`,
         `themes/${userUid}/`,
         `users/${userUid}/`,
       ];

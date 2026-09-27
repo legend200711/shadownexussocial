@@ -35,14 +35,6 @@
     ],
     "rewrites": [
       {
-        "source": "/cloud-stream",
-        "destination": "/cloud-stream.html"
-      },
-      {
-        "source": "/cloud-stream/**",
-        "destination": "/cloud-stream.html"
-      },
-      {
         "source": "**",
         "destination": "/index.html"
       }

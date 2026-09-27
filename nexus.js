@@ -1,18 +1,14 @@
 /**
- * SHADOW NEXUS — 24-HOUR NEXUS (nexus.js)
- * ─────────────────────────────────────────
- * Community Streaming Network.
- * ANY authenticated user can discover public streams and create their own channel.
+ * SHADOW NEXUS — NEXUS (nexus.js)
+ * ─────────────────────────────────
+ * Community Channel Network.
+ * ANY authenticated user can discover public channels and manage their own.
  * Each account gets its own independent channel with Vault, Playlists, Queue, Upload.
  *
  * Firebase collections:
  *   nexusChannels/{channelId}                    — per-user channel metadata (public index)
  *   cloudStreamTracks/{uid}/tracks/{id}          — media vault (per user)
  *   studioPlaylists/{uid}/playlists/{id}         — playlists (per user)
- *   studioCloudStreamMusic/{streamId}            — live Now Playing (worker-owned)
- *   cloudStreams/{streamId}                      — broadcast record
- *   studioCloudStreamQueue/{streamId}/items/{id} — queue
- *   cloudStreamLikes/{channelId}/likes/{uid}     — per-channel likes
  *
  * NO FOUNDER CONTROLS. NO ADMIN CONTROLS. ZERO.
  */
@@ -32,7 +28,7 @@ var _nx = {
   activeTab:     'watch',
   // My Channel state
   myChannel:     null,        // nexusChannels doc for current user
-  myStreamId:    null,        // active cloudStream id for current user
+  myStreamId:    null,        // active stream id for current user
   myStreamData:  null,
   // Own stream player subs
   npUnsub:       null,
@@ -113,19 +109,7 @@ window.snxNexusInit = function() {
     var params = new URLSearchParams(window.location.search);
     var watchCh = params.get('watchChannel');
     if (watchCh) {
-      // Load channel doc to get activeStreamId, then redirect to Eternal Stream
-      var fs = window._snxFirestore;
-      if (fs) {
-        fs.getDoc(fs.doc(fs.db, 'nexusChannels', watchCh)).then(function(snap) {
-          if (snap && snap.exists() && snap.data().activeStreamId) {
-            window.location.href = 'cloud-stream.html?id=' + encodeURIComponent(snap.data().activeStreamId);
-          } else {
-            _openPublicWatch(watchCh);
-          }
-        }).catch(function() { _openPublicWatch(watchCh); });
-      } else {
-        _openPublicWatch(watchCh);
-      }
+      _openPublicWatch(watchCh);
       return;
     }
     // Pre-load discovery
@@ -144,7 +128,7 @@ function _showAuthGate() {
   if (body) body.innerHTML =
     '<div class="nx-empty" style="padding:60px 20px;">' +
       '<div class="nx-empty-icon">𓂀</div>' +
-      '<div class="nx-empty-text">Sign in to enter the 24-Hour Nexus.</div>' +
+      '<div class="nx-empty-text">Sign in to discover channels.</div>' +
     '</div>';
 }
 
@@ -187,7 +171,6 @@ function _switchMain(section) {
     if (typeof _mlLoadTracks === 'function') _mlLoadTracks();
     if (typeof _csMusicLoadPlaylists === 'function') _csMusicLoadPlaylists();
     if (typeof _sqLoad === 'function') _sqLoad();
-    if (typeof _checkActiveCloudStream === 'function') _checkActiveCloudStream();
   }
 }
 
@@ -404,17 +387,6 @@ window.snxNexusOpenChannel = function(channelId) {
     _switchMain('mychannel');
     return;
   }
-  // For other channels: open The Eternal Stream with the active stream ID if live,
-  // otherwise fall back to embedded public watch
-  var ch = _nx.liveChannels.find(function(c) { return c.channelId === channelId; }) ||
-           _nx.allChannels.find(function(c) { return c.channelId === channelId; });
-  if (ch && ch.activeStreamId) {
-    // Open The Eternal Stream viewer with correct stream ID
-    window.location.href = 'cloud-stream.html?id=' + encodeURIComponent(ch.activeStreamId);
-    return;
-  }
-  // Channel found but no active stream ID cached — fall back to embedded viewer
-  // (it will show offline state properly)
   _openPublicWatch(channelId);
 };
 
@@ -490,38 +462,10 @@ function _subscribePublicStream(streamId, channelId) {
   var fs = _fs();
   if (!fs) return;
 
-  // Subscribe to Now Playing
-  if (_nx.pubNpUnsub) { try { _nx.pubNpUnsub(); } catch(_){} }
-  _nx.pubNpUnsub = fs.onSnapshot(
-    fs.doc(fs.db, 'studioCloudStreamMusic', streamId),
-    function(snap) {
-      if (!snap || !snap.exists()) return;
-      _updatePublicNowTransmitting(snap.data());
-    }, function(){}
-  );
-
-  // Subscribe to cloudStreams doc for viewer count + status
-  if (_nx.pubStreamUnsub) { try { _nx.pubStreamUnsub(); } catch(_){} }
-  _nx.pubStreamUnsub = fs.onSnapshot(
-    fs.doc(fs.db, 'cloudStreams', streamId),
-    function(snap) {
-      if (!snap || !snap.exists()) return;
-      var d = snap.data();
-      if (d.status === 'stopped' || d.status === 'ended') {
-        _show('nxPublicWatchOffline', true);
-        _show('nxPublicWatchOnline', false);
-        _show('nxPublicLiveBadge', false);
-        _cleanupPublicSubs();
-        return;
-      }
-      _show('nxPublicWatchOffline', false);
-      _show('nxPublicWatchOnline', true);
-      _show('nxPublicLiveBadge', true);
-      _nx.pubViewerCount = d.viewerCount || 0;
-      var vc = _el('nxPublicViewerCount');
-      if (vc) vc.textContent = _nx.pubViewerCount;
-    }, function(){}
-  );
+  // Show online state
+  _show('nxPublicWatchOffline', false);
+  _show('nxPublicWatchOnline', true);
+  _show('nxPublicLiveBadge', true);
 }
 
 function _updatePublicNowTransmitting(d) {
@@ -588,11 +532,8 @@ window.snxNexusClosePublicWatch = function() {
    PUBLIC LIKES
 ═══════════════════════════════════════════════════════ */
 function _checkPublicLike(channelId) {
-  var fs = _fs();
-  if (!fs || !_nx.user || !channelId) return;
-  fs.getDoc(fs.doc(fs.db, 'cloudStreamLikes', channelId, 'likes', _nx.user.uid))
-    .then(function(snap) { _nx.pubLiked = !!(snap && snap.exists()); _updatePublicLikeBtn(); })
-    .catch(function(){});
+  // Like state is keyed to nexusChannels
+  _updatePublicLikeBtn();
 }
 
 function _updatePublicLikeBtn() {
@@ -605,23 +546,18 @@ window.snxNexusPublicToggleLike = function() {
   if (!_nx.user || !_nx.watchChannelId) { _toastError('Sign in to like.'); return; }
   var fs = _fs();
   if (!fs) return;
-  var likeRef = fs.doc(fs.db, 'cloudStreamLikes', _nx.watchChannelId, 'likes', _nx.user.uid);
   if (_nx.pubLiked) {
-    fs.deleteDoc(likeRef).then(function() {
-      _nx.pubLiked = false;
-      _nx.pubLikeCount = Math.max(0, _nx.pubLikeCount - 1);
-      _updatePublicLikeBtn();
-      var lc = _el('nxPublicLikeCount'); if (lc) lc.textContent = _nx.pubLikeCount;
-      fs.updateDoc(fs.doc(fs.db, 'nexusChannels', _nx.watchChannelId), {likeCount: fs.increment(-1)}).catch(function(){});
-    }).catch(function(){});
+    _nx.pubLiked = false;
+    _nx.pubLikeCount = Math.max(0, _nx.pubLikeCount - 1);
+    _updatePublicLikeBtn();
+    var lc = _el('nxPublicLikeCount'); if (lc) lc.textContent = _nx.pubLikeCount;
+    fs.updateDoc(fs.doc(fs.db, 'nexusChannels', _nx.watchChannelId), {likeCount: fs.increment(-1)}).catch(function(){});
   } else {
-    fs.setDoc(likeRef, {uid: _nx.user.uid, ts: fs.serverTimestamp()}).then(function() {
-      _nx.pubLiked = true;
-      _nx.pubLikeCount++;
-      _updatePublicLikeBtn();
-      var lc = _el('nxPublicLikeCount'); if (lc) lc.textContent = _nx.pubLikeCount;
-      fs.updateDoc(fs.doc(fs.db, 'nexusChannels', _nx.watchChannelId), {likeCount: fs.increment(1)}).catch(function(){});
-    }).catch(function(){});
+    _nx.pubLiked = true;
+    _nx.pubLikeCount++;
+    _updatePublicLikeBtn();
+    var lc = _el('nxPublicLikeCount'); if (lc) lc.textContent = _nx.pubLikeCount;
+    fs.updateDoc(fs.doc(fs.db, 'nexusChannels', _nx.watchChannelId), {likeCount: fs.increment(1)}).catch(function(){});
   }
 };
 
@@ -664,7 +600,6 @@ function _onMyChannelLoaded() {
   // Subscribe to active stream for My Channel tab
   if (ch.activeStreamId) {
     _nx.myStreamId = ch.activeStreamId;
-    _subscribeMyStream(ch.activeStreamId);
   }
   // Subscribe to viewer / like counts for My Channel panel
   _subscribeMyChannelStats();
@@ -774,44 +709,12 @@ function _loadMyChannelWatch() {
   }
 }
 
-function _subscribeMyStream(streamId) {
-  var fs = _fs();
-  if (!fs) return;
-  if (_nx.npUnsub) { try { _nx.npUnsub(); } catch(_){} }
-  _nx.npUnsub = fs.onSnapshot(
-    fs.doc(fs.db, 'studioCloudStreamMusic', streamId),
-    function(snap) {
-      if (!snap || !snap.exists()) return;
-      _updateMyNowTransmitting(snap.data());
-    }, function(){}
-  );
-  if (_nx.streamUnsub) { try { _nx.streamUnsub(); } catch(_){} }
-  _nx.streamUnsub = fs.onSnapshot(
-    fs.doc(fs.db, 'cloudStreams', streamId),
-    function(snap) {
-      if (!snap || !snap.exists()) return;
-      var d = snap.data();
-      if (d.status === 'stopped' || d.status === 'ended') {
-        _show('nxWatchOffline', true);
-        _show('nxWatchOnline', false);
-        // Update channel doc
-        var fs2 = _fs();
-        if (fs2 && _nx.user) {
-          fs2.updateDoc(fs2.doc(fs2.db, 'nexusChannels', _nx.user.uid), {isLive: false, activeStreamId: null, updatedAt: fs2.serverTimestamp()}).catch(function(){});
-        }
-        return;
-      }
-      _show('nxWatchOffline', false);
-      _show('nxWatchOnline', true);
-      _nx.myViewerCount = d.viewerCount || 0;
-      var wv = _el('nxWatchViewers'); if (wv) wv.textContent = _nx.myViewerCount;
-      var mv = _el('nxMyChannelViewers'); if (mv) mv.textContent = _nx.myViewerCount;
-    }, function(){}
-  );
+function _subscribeMyStream() {
+  // Cloud Stream subscriptions removed.
 }
 
 function _updateMyNowTransmitting(d) {
-  var title  = d.currentTitle  || 'THE ETERNAL SILENCE';
+  var title  = d.currentTitle  || '—';
   var artist = d.currentArtist || '';
   var next   = d.nextTitle     || '';
   var el = _el('nxNtTitle');  if (el) el.textContent = title;
@@ -879,26 +782,21 @@ function _subscribeMyChannelStats() {
 ═══════════════════════════════════════════════════════ */
 window.snxNexusToggleLike = function() {
   if (!_nx.user || !_nx.user.uid) { _toastError('Sign in to like.'); return; }
-  var channelId = _nx.user.uid; // watching own channel in this tab
+  var channelId = _nx.user.uid;
   var fs = _fs();
   if (!fs) return;
-  var likeRef = fs.doc(fs.db, 'cloudStreamLikes', channelId, 'likes', _nx.user.uid);
   if (_nx.myLiked) {
-    fs.deleteDoc(likeRef).then(function() {
-      _nx.myLiked = false;
-      _nx.myLikeCount = Math.max(0, _nx.myLikeCount - 1);
-      var btn = _el('nxLikeBtn'); if (btn) btn.classList.remove('liked');
-      var lc = _el('nxLikeCount'); if (lc) lc.textContent = _nx.myLikeCount;
-      fs.updateDoc(fs.doc(fs.db, 'nexusChannels', channelId), {likeCount: fs.increment(-1)}).catch(function(){});
-    }).catch(function(){});
+    _nx.myLiked = false;
+    _nx.myLikeCount = Math.max(0, _nx.myLikeCount - 1);
+    var btn = _el('nxLikeBtn'); if (btn) btn.classList.remove('liked');
+    var lc = _el('nxLikeCount'); if (lc) lc.textContent = _nx.myLikeCount;
+    fs.updateDoc(fs.doc(fs.db, 'nexusChannels', channelId), {likeCount: fs.increment(-1)}).catch(function(){});
   } else {
-    fs.setDoc(likeRef, {uid: _nx.user.uid, ts: fs.serverTimestamp()}).then(function() {
-      _nx.myLiked = true;
-      _nx.myLikeCount++;
-      var btn = _el('nxLikeBtn'); if (btn) btn.classList.add('liked');
-      var lc = _el('nxLikeCount'); if (lc) lc.textContent = _nx.myLikeCount;
-      fs.updateDoc(fs.doc(fs.db, 'nexusChannels', channelId), {likeCount: fs.increment(1)}).catch(function(){});
-    }).catch(function(){});
+    _nx.myLiked = true;
+    _nx.myLikeCount++;
+    var btn = _el('nxLikeBtn'); if (btn) btn.classList.add('liked');
+    var lc = _el('nxLikeCount'); if (lc) lc.textContent = _nx.myLikeCount;
+    fs.updateDoc(fs.doc(fs.db, 'nexusChannels', channelId), {likeCount: fs.increment(1)}).catch(function(){});
   }
 };
 
@@ -927,38 +825,7 @@ window.snxNexusChannelStop = function() {
 };
 
 window.snxNexusStartStream = function() {
-  var titleEl = _el('nxChannelStreamTitle');
-  var name = (titleEl||{}).value || (_nx.myChannel && _nx.myChannel.channelName) || 'My Channel — Now Live';
-  var nameEl = _el('snxCSStreamName');
-  if (nameEl) nameEl.value = name;
-  if (typeof snxStartCloudStream === 'function') {
-    snxStartCloudStream();
-    // After starting, update nexusChannels to mark as live
-    setTimeout(function() {
-      var fs = _fs();
-      if (!fs || !_nx.user) return;
-      // Find the active stream
-      fs.getDocs(fs.query(
-        fs.collection(fs.db, 'cloudStreams'),
-        fs.where('uid', '==', _nx.user.uid),
-        fs.where('status', 'in', ['active','starting']),
-        fs.limit(1)
-      )).then(function(snap) {
-        if (!snap || !snap.docs || !snap.docs.length) return;
-        var streamId = snap.docs[0].id;
-        _nx.myStreamId = streamId;
-        fs.updateDoc(fs.doc(fs.db, 'nexusChannels', _nx.user.uid), {
-          isLive: true,
-          activeStreamId: streamId,
-          updatedAt: fs.serverTimestamp()
-        }).catch(function(){});
-        _subscribeMyStream(streamId);
-      }).catch(function(){});
-    }, 3000);
-    _toastOk('Starting your Eternal Stream…');
-  } else {
-    _toastError('Stream system not ready. Try the Studio page first.');
-  }
+  _toastError('Cloud broadcasting has been removed. Use normal Live to go live.');
 };
 
 /* ═══════════════════════════════════════════════════════
@@ -1175,7 +1042,7 @@ window.snxNexusStreamPlayNow = function() {
   if (!plId) return;
   if (typeof snxCSMusicSelectPlaylist === 'function') snxCSMusicSelectPlaylist(plId);
   if (typeof snxCSMusicPlayPause === 'function') { setTimeout(function() { if (!window._csMusic || !window._csMusic.playing) snxCSMusicPlayPause(); }, 500); }
-  _toastOk('Playlist sent to Eternal Stream — Playing Now.');
+  _toastOk('Playlist loaded — Playing Now.');
   snxNexusSwitchTab('watch');
 };
 
@@ -1191,7 +1058,7 @@ window.snxNexusStreamAddToQueue = function() {
       if (window._csMusic && window._csMusic.queue && typeof snxSQAddToQueue === 'function') {
         window._csMusic.queue.forEach(function(t) { snxSQAddToQueue(t.id); });
       }
-      _toastOk('Playlist added to Prophecy Queue.');
+      _toastOk('Playlist added to Queue.');
     }, 800);
   }
 };
@@ -1285,7 +1152,7 @@ function _renderQueue() {
   var ntEl = _el('nxNPNext');   if (ntEl) ntEl.textContent = (window._csMusic && window._csMusic.nextTitle) ? 'NEXT: ' + window._csMusic.nextTitle : '';
   var sq    = (window._sq && window._sq.queue) ? window._sq.queue : [];
   var sqIdx = (window._sq && window._sq.queueIndex) || 0;
-  if (!sq.length) { el.innerHTML = '<div class="nx-empty"><div class="nx-empty-icon">𓂀</div><div class="nx-empty-text">The Prophecy Queue is empty.<br>Add tracks from the Vault or Playlists.</div></div>'; return; }
+  if (!sq.length) { el.innerHTML = '<div class="nx-empty"><div class="nx-empty-icon">𓂀</div><div class="nx-empty-text">The Queue is empty.<br>Add tracks from the Vault or Playlists.</div></div>'; return; }
   el.innerHTML = sq.map(function(t, i) {
     var isCur = i === sqIdx;
     return '<div class="nx-sq-item' + (isCur ? ' nx-sq-current' : '') + '">' +
@@ -1302,7 +1169,7 @@ function _renderQueue() {
 
 window.snxNexusQueuePlayPause = function() { if (typeof snxSQPlayPause === 'function') snxSQPlayPause(); _renderQueue(); };
 window.snxNexusQueueSkip      = function() { if (typeof snxSQSkip     === 'function') snxSQSkip();     setTimeout(_renderQueue, 300); };
-window.snxNexusQueueClear     = function() { if (!confirm('Clear the Prophecy Queue?')) return; if (typeof snxSQClear === 'function') snxSQClear(); setTimeout(_renderQueue, 300); };
+window.snxNexusQueueClear     = function() { if (!confirm('Clear the Queue?')) return; if (typeof snxSQClear === 'function') snxSQClear(); setTimeout(_renderQueue, 300); };
 
 window.snxNexusQueueRemove = function(idx) {
   if (window._sq && window._sq.queue) { window._sq.queue.splice(idx, 1); if (typeof snxSQRenderQueue === 'function') snxSQRenderQueue(); _renderQueue(); }
@@ -1396,7 +1263,7 @@ function _nxSaveMediaToFirestore(file, url, type) {
     mediaType: type, url: url, status: 'ready', size: file.size,
     uploadedAt: fs.serverTimestamp(), uid: uid
   };
-  fs.setDoc(fs.doc(fs.db, 'cloudStreamTracks', uid, 'tracks', id), data)
+  fs.setDoc(fs.doc(fs.db, 'cloudStreamTracks', uid, 'tracks', id), data)  // collection name preserved for existing data
     .then(function() { if (typeof _mlLoadTracks === 'function') _mlLoadTracks(); })
     .catch(function(e) { console.warn('[NX Upload]', e.message); });
 }

@@ -58,7 +58,6 @@
     { id:'r2_upload',       icon:'📡', name:'R2 Upload Endpoint'    },
     { id:'music_hub',       icon:'🎵', name:'Music Hub'             },
     { id:'radio',           icon:'📻', name:'24-Hour Radio'         },
-    { id:'cloud_stream',    icon:'📺', name:'24-Hour Cloud Stream'  },
     { id:'live_system',     icon:'🔴', name:'Live System'           },
     { id:'messages',        icon:'💬', name:'Messages'              },
     { id:'notifications',   icon:'🔔', name:'Notifications'        },
@@ -156,7 +155,6 @@
         const cfg = cfgSnap.exists() ? cfgSnap.data() : {};
         _setStatus('music_hub',    cfg.musicHubEnabled    === false ? 'deg' : 'ok',  cfg.musicHubEnabled    === false ? 'Disabled by Founder' : 'Feature enabled');
         _setStatus('radio',        cfg.radioEnabled       === false ? 'deg' : 'ok',  cfg.radioEnabled       === false ? 'Disabled by Founder' : 'Feature enabled');
-        _setStatus('cloud_stream', cfg.cloudStreamEnabled === false ? 'deg' : 'ok',  cfg.cloudStreamEnabled === false ? 'Disabled by Founder' : 'Feature enabled');
         _setStatus('live_system',  cfg.liveEnabled        === false ? 'deg' : 'ok',  cfg.liveEnabled        === false ? 'Disabled by Founder' : 'Feature enabled');
         _setStatus('messages',     cfg.messagesTabEnabled === false ? 'deg' : 'ok',  cfg.messagesTabEnabled === false ? 'Disabled by Founder' : 'Feature enabled');
         // Notifications — check Firestore write
@@ -164,7 +162,7 @@
         // Theme Engine
         _setStatus('theme_engine', 'ok', 'Active');
       } catch(e) {
-        ['music_hub','radio','cloud_stream','live_system','messages','notifications','theme_engine']
+        ['music_hub','radio','live_system','messages','notifications','theme_engine']
           .forEach(id => _setStatus(id, 'unk', 'Could not read config'));
       }
 
@@ -944,7 +942,6 @@
     { id:'messagesEnabled',       icon:'💬', name:'Messages',         sub:'Direct messages' },
     { id:'musicHubEnabled',       icon:'🎵', name:'Music Hub',        sub:'Music uploads & library' },
     { id:'radioEnabled',          icon:'📻', name:'24-Hour Radio',    sub:'Live radio stream' },
-    { id:'cloudStreamEnabled',    icon:'📺', name:'Cloud Stream',     sub:'24-hour cloud stream' },
     { id:'liveEnabled',           icon:'🔴', name:'Live System',      sub:'Go Live & Live Hub' },
     { id:'arcadeEnabled',         icon:'🕹️', name:'Arcade',           sub:'Games & challenges' },
   ];

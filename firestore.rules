@@ -534,9 +534,8 @@ service cloud.firestore {
       //  - host can update anything in their own room (uid == doc key)
       //  - any signed-in user can increment viewers / likes (fields only)
       //  - host can update layout/size fields (guestLayout, guestBoxSize)
-      //  - any authenticated user (incl. anonymous) may mark a CloudStream ended:
-      //    only isLive=false + status=ended + updatedAt are written,
-      //    preventing stream activation via this path
+      //  - any authenticated user may mark a live room ended:
+      //    only isLive=false + status=ended + updatedAt are written
       allow update: if isSignedIn()
         && (
           resource.data.hostId == request.auth.uid
@@ -922,7 +921,7 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ─── 24-HOUR STUDIO — isolated collections ────────────────────────────────
+    // ─── STUDIO — isolated collections ────────────────────────────────────────
     //
     // None of these rules touch existing collections.
 
@@ -962,7 +961,7 @@ service cloud.firestore {
         && (resource.data.ownerUid == request.auth.uid || isFounder());
     }
 
-    // studioPlaylists/{uid}/playlists/{playlistId}  — CloudStream playlist subcollection
+    // studioPlaylists/{uid}/playlists/{playlistId}  — music playlist subcollection
     //   The document at /{uid} is the owner namespace document (not written directly).
     //   All real data lives in the /playlists/ subcollection, keyed by creator UID.
     match /studioPlaylists/{uid}/playlists/{playlistId} {
@@ -971,66 +970,6 @@ service cloud.firestore {
       allow create: if isOwner(uid);
       allow update: if isOwner(uid);
       allow delete: if isOwner(uid) || isFounder();
-    }
-
-    // cloudStreams/{streamId}  — cloud broadcast records
-    //   Created by the creator; updated by creator (status changes)
-    //   or by the cloud worker (which runs as an anonymous token).
-    //   Admin/Founder can read and update all records for monitoring.
-    match /cloudStreams/{streamId} {
-      // Creator reads their own streams; any signed-in user can read active streams
-      // (required for listener discovery via ?id=streamId URL).
-      // Founder reads all.
-      allow read: if isSignedIn()
-        && (
-          resource.data.uid == request.auth.uid
-          || resource.data.status in ['active', 'starting', 'recovering']
-          || isFounder()
-        );
-      // Creator creates their own stream record
-      allow create: if isSignedIn()
-        && request.resource.data.uid == request.auth.uid;
-      // Creator or Founder can update (status transitions, remote control).
-      // The CloudStream Worker (anonymous token) may also update a narrow set of
-      // stop/end fields so the record stays consistent when the browser is closed.
-      allow update: if isSignedIn()
-        && (
-          resource.data.uid == request.auth.uid
-          || isFounder()
-          // Worker lifecycle updates (anonymous token) — restricted to status + timing fields only.
-          // This allows the worker to confirm stream active (start), stop it (end/stop),
-          // or write the history record — but never change uid, streamName, or other data.
-          || request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly(['status', 'stoppedAt', 'stoppedBy', 'startedAt', 'expiresAt', 'updatedAt'])
-        );
-      // Only Founder can hard-delete
-      allow delete: if isFounder();
-    }
-
-    // cloudStreamHeartbeats/{streamId}  — health heartbeats (backend-written)
-    match /cloudStreamHeartbeats/{streamId} {
-      allow read: if isSignedIn()
-        && (resource.data.uid == request.auth.uid || isFounder());
-      allow create, update: if isSignedIn()
-        && (request.resource.data.uid == request.auth.uid || isFounder());
-      allow delete: if isFounder();
-    }
-
-    // cloudStreamEvents/{evtId}  — immutable event log
-    match /cloudStreamEvents/{evtId} {
-      allow read: if isSignedIn()
-        && (resource.data.uid == request.auth.uid || isFounder());
-      allow create: if isSignedIn();
-      allow update: if false;  // immutable
-      allow delete: if isFounder();
-    }
-
-    // cloudStreamLogs/{logId}  — worker logs (backend-written, Founder-readable)
-    match /cloudStreamLogs/{logId} {
-      allow read:   if isFounder();
-      allow create: if isSignedIn();
-      allow update: if false;
-      allow delete: if isFounder();
     }
 
     // cloudStreamTracks/{uid}/tracks/{trackId}  — creator music library
@@ -1050,68 +989,9 @@ service cloud.firestore {
       }
     }
 
-    // cloudStreamDestinations/{uid}/{destId}
-    //   Destination metadata (no stream keys — those stay in Cloudflare KV).
-    //   Only the owner reads/writes.
-    match /cloudStreamDestinations/{uid} {
-      allow read:  if isOwner(uid) || isFounder();
-      allow write: if false;
-
-      match /{destId} {
-        allow read:   if isOwner(uid) || isFounder();
-        allow create: if isOwner(uid);
-        allow update: if isOwner(uid);
-        allow delete: if isOwner(uid) || isFounder();
-      }
-    }
-
-    // studioCloudStreamMusic/{cloudStreamId} — server-side Now Playing state
-    //   Written by the creator (client push) and the CloudStream Worker (alarm-based).
-    //   Any signed-in user can read (viewers display Now Playing).
-    //   Create: any signed-in user (includes the creator's browser AND the CloudStream
-    //           Worker which signs in anonymously for its Firestore REST calls).
-    //           The cloudStreamId document key is only known to the stream owner so
-    //           create access does not expose other users' data.
-    //   Update: stream owner OR any authenticated user updating only the music fields —
-    //           this allows the CloudStream Worker (anonymous token) to advance tracks.
-    //   Delete: only the stream owner or Founder.
-    match /studioCloudStreamMusic/{cloudStreamId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn()
-        && (
-          resource.data.uid == request.auth.uid
-          || isFounder()
-          // CloudStream Worker updates (anonymous token) — restricted to music fields only
-          || request.resource.data.diff(resource.data)
-               .affectedKeys().hasOnly([
-                 'cloudStreamId', 'uid',
-                 'currentTrackId', 'currentTitle', 'currentArtist',
-                 'currentTrackUrl', 'currentDuration',
-                 'nextTrackId', 'nextTitle', 'nextArtist',
-                 'queueIndex', 'status', 'updatedAt'
-               ])
-        );
-      allow delete: if isSignedIn()
-        && (resource.data.uid == request.auth.uid || isFounder());
-    }
-
-    // cloudStreamHistory/{historyId}  — broadcast history records
-    //   Written by the creator's browser or the CloudStream Worker when a stream ends.
-    //   Creator can read their own history.  Founder reads all.  Immutable after creation.
-    match /cloudStreamHistory/{historyId} {
-      allow read: if isSignedIn()
-        && (resource.data.uid == request.auth.uid || isFounder());
-      // Creator or any signed-in user (includes CloudStream Worker anonymous token) may create
-      allow create: if isSignedIn();
-      allow update: if false;  // immutable history records
-      allow delete: if isFounder();
-    }
-
-    // studioQueue/{uid}  — permanent 24-hour Studio music queue (simplified always-on system)
+    // studioQueue/{uid}  — Studio music queue
     //   One document per user, keyed by uid.
     //   Only the owning user reads and writes their own queue.
-    //   No founder privilege needed — each creator manages their own queue independently.
     match /studioQueue/{uid} {
       allow read:   if isOwner(uid);
       allow create: if isOwner(uid)
@@ -1120,10 +1000,7 @@ service cloud.firestore {
       allow delete: if isOwner(uid);
     }
 
-    // ─── 24-HOUR STUDIO — Independent collections ──────────────────────────────
-    //
-    // These collections are SEPARATE from Regular Live infrastructure.
-    // They are owned by the 24-Hour Studio system only.
+    // ─── STUDIO — Independent collections ──────────────────────────────────────
     //
     //   studioLiveSessions/{sessionId}   — Studio live sessions (NOT liveRooms)
     //   studioSettings/{uid}             — per-creator studio preferences

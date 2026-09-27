@@ -51,9 +51,7 @@
 <link rel="stylesheet" href="realm.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Mobile responsive design layer ── -->
 <link rel="stylesheet" href="mobile.css?v=SNS-2026-ALBUM-PRIVACY-001">
-<!-- cloud-stream.css belongs to the standalone cloud-stream.html page only;
-     do NOT load it on the main app — it caused global style pollution. -->
-<!-- ── Shadow Nexus 24-Hour Studio — Music Library / Upload / Playlists / Queue ── -->
+<!-- ── Shadow Nexus Studio — Music Library / Upload / Playlists / Queue ── -->
 <link rel="stylesheet" href="studio.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Nexus Global Theme Engine ── -->
 <link rel="stylesheet" href="theme-engine.css?v=SNS-2026-ALBUM-PRIVACY-001">
@@ -6625,10 +6623,10 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">📡</span>
             <span class="sc-item-label">Go Live</span>
         </button>
-        <!-- 24-HOUR NEXUS (unified) -->
-        <button class="sc-item" id="scNavNexus" onclick="realmNavTo('nexusPage')" aria-label="24-HOUR NEXUS" style="color:#c5a41d;">
+        <!-- NEXUS (channel discovery) -->
+        <button class="sc-item" id="scNavNexus" onclick="realmNavTo('nexusPage')" aria-label="Nexus" style="color:#c5a41d;">
             <span class="sc-item-icon">𓂀</span>
-            <span class="sc-item-label">24-Hour Nexus</span>
+            <span class="sc-item-label">Nexus</span>
         </button>
         <!-- Arcade -->
         <button class="sc-item" id="scNavArcade" onclick="openArcadeHub()" aria-label="Arcade">
@@ -6736,7 +6734,7 @@ body.arcade-fs-ios body::after { display:none !important; }
         </div>
         <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('nexusPage');mobileNavTo('_close')" style="color:#c5a41d;">
             <div class="ncm-icon-wrap">𓂀</div>
-            <div class="ncm-label">24-Hour Nexus</div>
+            <div class="ncm-label">Nexus</div>
         </div>
         <div class="ncm-item" id="ncmArcade" onclick="mobileNavTo('_arcade')">
             <div class="ncm-icon-wrap">🕹️</div>
@@ -8983,7 +8981,6 @@ body.arcade-fs-ios body::after { display:none !important; }
     <button class="admin-tab" onclick="switchAdminTab('shadowbot')">🤖 Shadow Bot</button>
     <button class="admin-tab" onclick="switchAdminTab('liverooms')">🔴 Live Rooms</button>
     <button class="admin-tab" onclick="switchAdminTab('pages')">👁 Pages &amp; Controls</button>
-    <button class="admin-tab" onclick="switchAdminTab('cloudstreams');snxAdminLoadCloudStreams()">☁️ CloudStreams</button>
     <button class="admin-tab" onclick="switchAdminTab('r2storage');snxR2StatusOpen()">🗄️ R2 Storage</button>
     <button class="admin-tab" onclick="switchAdminTab('welcomemusic');snxwmOpen()">🎵 Welcome Music</button>
     <button class="admin-tab" onclick="switchAdminTab('themes');snxTCCOpen()">🎨 Theme Engine</button>
@@ -9329,7 +9326,6 @@ body.arcade-fs-ios body::after { display:none !important; }
             <option value="messagesEnabled">💬 Messages</option>
             <option value="musicHubEnabled">🎵 Music Hub</option>
             <option value="radioEnabled">📻 24-Hour Radio</option>
-            <option value="cloudStreamEnabled">📺 Cloud Stream</option>
             <option value="liveEnabled">🔴 Live System</option>
             <option value="arcadeEnabled">🕹️ Arcade</option>
         </select>
@@ -10149,28 +10145,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div>
 
 
-
-<!-- ══════════════════════════════════
-     TAB: CLOUDSTREAMS MONITOR
-══════════════════════════════════ -->
-<div class="admin-tab-content" id="adminTab-cloudstreams">
-    <div class="section-card">
-        <h3 style="margin:0 0 12px;font-size:13px;color:#00d4ff;text-transform:uppercase;letter-spacing:0.8px;">&#9925; Active CloudStreams</h3>
-        <p style="font-size:12px;color:#3a5a7a;margin:0 0 12px;">Monitor active cloud broadcasts. Only active, starting, recovering, and failed streams are shown.</p>
-        <button onclick="snxAdminLoadCloudStreams()" style="margin-bottom:12px;padding:7px 16px;border-radius:8px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.30);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">&#8635; Refresh</button>
-        <div id="snxAdminCloudStreamList">
-            <div style="text-align:center;padding:30px 0;color:#3a5a7a;font-size:13px;">Click Refresh to load active CloudStreams.</div>
-        </div>
-    </div>
-    <div class="section-card" style="margin-top:12px;">
-        <h3 style="margin:0 0 10px;font-size:13px;color:#00d4ff;text-transform:uppercase;letter-spacing:0.8px;">&#128202; CloudStream Worker</h3>
-        <div style="font-size:12px;color:#5a80a8;line-height:1.8;">
-            <div>Worker URL: <strong style="color:#d8eeff;">snx-cloudstream.shadownexussocial.online</strong></div>
-            <div>KV Namespace: <strong style="color:#d8eeff;">cloudStreamKV</strong></div>
-            <div>Collections: cloudStreams / cloudStreamEvents / cloudStreamLogs</div>
-        </div>
-    </div>
-</div><!-- end adminTab-cloudstreams -->
 
 <!-- ══════════════════════════════════
      TAB: CLOUDFLARE R2 STORAGE STATUS
@@ -11000,9 +10974,8 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 
 <!-- ══════════════════════════════════════════════════════════
-     24-HOUR STUDIO PAGE
+     STUDIO PAGE
      Music Library, Upload, Playlists, Queue, Now Playing.
-     The Eternal Stream (24-Hour Nexus) is now the canonical 24-hour streaming feature.
      ══════════════════════════════════════════════════════════ -->
 <div class="page" id="studioPage">
 
@@ -11011,13 +10984,10 @@ body.arcade-fs-ios body::after { display:none !important; }
    <div class="csr-header-center">
      <div class="csr-logo">&#9925;</div>
      <div>
-       <div class="csr-title">24-HOUR STUDIO</div>
+       <div class="csr-title">STUDIO</div>
        <div class="csr-subtitle">Music Library · Playlists · Queue</div>
      </div>
    </div>
-   <a href="cloud-stream.html" style="display:flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;background:rgba(197,164,29,0.12);border:1px solid rgba(197,164,29,0.30);color:#c5a41d;font-size:11px;font-weight:700;text-decoration:none;letter-spacing:0.8px;white-space:nowrap;">
-     𓂀 THE ETERNAL STREAM
-   </a>
  </header>
 
   <!-- ── Studio bottom tab bar ── -->
@@ -11032,7 +11002,6 @@ body.arcade-fs-ios body::after { display:none !important; }
     <button class="snx-studio-tab"         id="snxStudioTabBtn_playlists" onclick="snxStudioTabSwitch('playlists',this)" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#128203;<br>Playlists</button>
     <button class="snx-studio-tab"         id="snxStudioTabBtn_queue"    onclick="snxStudioTabSwitch('queue',this)"    style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127926;<br>Queue</button>
     <button class="snx-studio-tab"         id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#9654;&#65039;<br>Playing</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_stream"   onclick="window.location.href='cloud-stream.html'" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#c5a41d;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">𓂀<br>Nexus</button>
   </nav>
 
   <!-- ══════════════════════════════════════════════════════
@@ -11115,7 +11084,7 @@ body.arcade-fs-ios body::after { display:none !important; }
     <!-- Upload progress (reuses snxUploadDashboard — same element as music tab) -->
     <div style="font-size:12px;color:#4a7a9a;text-align:center;line-height:1.6;">
       After upload, songs appear immediately in your <strong style="color:#00AEEF;">Music Library</strong>.<br>
-      Add them to a playlist then start the 24-Hour Cloud Stream.
+      Add them to a playlist to build your queue.
     </div>
 
   </div><!-- end Upload tab -->
@@ -11186,26 +11155,13 @@ body.arcade-fs-ios body::after { display:none !important; }
   </div><!-- end Queue tab -->
 
   <!-- ══════════════════════════════════════════════════════
-       NOW PLAYING TAB — Server channel status + controls
+       NOW PLAYING TAB — Local playback status
   ═══════════════════════════════════════════════════════ -->
  <div id="snxStudioTab_nowplaying" style="display:none;padding:12px 14px 100px;">
 
-   <!-- Cloud Engine Status -->
-   <div id="snxNPEngineStatus" style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;background:rgba(0,174,239,0.06);border:1px solid rgba(0,174,239,0.18);margin-bottom:10px;font-size:11px;font-weight:700;letter-spacing:0.5px;">
-     <span id="snxNPEngineIcon" style="font-size:13px;">⚡</span>
-     <span id="snxNPEngineText" style="color:#5a80a8;">CLOUD ENGINE: CHECKING…</span>
-   </div>
-
-   <!-- Server Scheduler Status -->
-   <div id="snxNPSchedulerRow" style="display:none;padding:6px 12px;border-radius:8px;background:rgba(0,0,0,0.25);border:1px solid rgba(0,174,239,0.12);margin-bottom:10px;font-size:10px;color:#4a7a9a;font-weight:700;letter-spacing:0.5px;">
-   </div>
-
-   <!-- Channel Live/Offline Banner -->
-   <div id="snxNPChannelBanner" style="display:none;padding:8px 12px;border-radius:10px;margin-bottom:12px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-align:center;"></div>
-
    <!-- Now Playing Card -->
    <div id="snxNPCard" style="background:linear-gradient(135deg,rgba(0,174,239,0.06),rgba(0,174,239,0.03));border:1px solid rgba(0,174,239,0.18);border-radius:14px;padding:16px 14px;margin-bottom:12px;">
-     <div style="font-size:9px;letter-spacing:2px;color:#4a7a9a;margin-bottom:8px;font-weight:700;">NOW TRANSMITTING</div>
+     <div style="font-size:9px;letter-spacing:2px;color:#4a7a9a;margin-bottom:8px;font-weight:700;">NOW PLAYING</div>
 
      <!-- Artwork + Info -->
      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
@@ -11226,68 +11182,19 @@ body.arcade-fs-ios body::after { display:none !important; }
        <span id="snxNPDuration" style="font-size:10px;color:#4a7a9a;min-width:30px;text-align:right;">—</span>
      </div>
 
-     <!-- Viewer Count -->
-     <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;font-size:11px;color:#4a7a9a;">
-       <span>👁 <span id="snxNPViewers">0</span> WATCHING</span>
-       <span>❤ <span id="snxNPLikes">0</span></span>
-     </div>
-
      <!-- UP NEXT -->
      <div id="snxNPNextRow" style="display:none;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid rgba(0,174,239,0.10);font-size:11px;color:#4a7a9a;">
        UP NEXT: <span id="snxNPNextTitle" style="color:#7abadc;font-weight:700;"></span>
      </div>
    </div>
 
-   <!-- Prophecy Queue (upcoming tracks from server) -->
-   <div id="snxNPQueueSection" style="display:none;background:rgba(0,0,0,0.18);border:1px solid rgba(0,174,239,0.10);border-radius:12px;padding:10px 12px;margin-bottom:12px;"></div>
-
-   <!-- Server Controls -->
-   <div id="snxNPControls" style="display:none;">
-     <div style="font-size:10px;letter-spacing:1.5px;color:#3a5a7a;margin-bottom:8px;font-weight:700;">SERVER CONTROLS</div>
-     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-       <button id="snxNPPlayPauseBtn" onclick="snxNPPlayPause()" style="flex:1;min-width:80px;padding:10px;border-radius:10px;background:rgba(0,174,239,0.15);border:1px solid rgba(0,174,239,0.35);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">⏸ PAUSE</button>
-       <button onclick="snxNPPrev()" style="padding:10px 14px;border-radius:10px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.22);color:#5a80a8;font-size:12px;cursor:pointer;">⏮ PREV</button>
-       <button onclick="snxNPSkip()" style="padding:10px 14px;border-radius:10px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.22);color:#5a80a8;font-size:12px;cursor:pointer;">⏭ NEXT</button>
-     </div>
-     <button onclick="snxNPStopChannel()" style="width:100%;padding:10px;border-radius:10px;background:rgba(255,51,85,0.08);border:1px solid rgba(255,51,85,0.30);color:#ff3355;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:10px;">⛔ STOP CHANNEL</button>
-   </div>
-
-   <!-- Open Eternal Stream -->
-   <div style="text-align:center;margin-top:8px;">
-     <a href="cloud-stream.html" style="display:inline-block;padding:12px 28px;background:linear-gradient(135deg,rgba(197,164,29,0.20),rgba(197,164,29,0.10));border:1px solid rgba(197,164,29,0.40);color:#c5a41d;font-size:12px;font-weight:700;text-decoration:none;border-radius:10px;letter-spacing:1px;">
-       𓂀 OPEN ETERNAL STREAM
-     </a>
-   </div>
-
  </div><!-- end Now Playing tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       STREAM TAB — opens THE ETERNAL STREAM (cloud-stream.html)
-       This is the official 24-Hour Cloud Stream interface.
-  ═══════════════════════════════════════════════════════ -->
- <div id="snxStudioTab_stream" style="display:none;padding:32px 16px;text-align:center;">
-   <div style="background:rgba(197,164,29,0.07);border:1px solid rgba(197,164,29,0.25);border-radius:16px;padding:32px 20px;max-width:420px;margin:0 auto;">
-     <div style="font-size:32px;margin-bottom:12px;">𓂀</div>
-     <div style="font-size:15px;font-weight:800;color:#c5a41d;letter-spacing:1.5px;margin-bottom:6px;">THE ETERNAL STREAM</div>
-     <div style="font-size:12px;color:#8a7a5a;margin-bottom:20px;line-height:1.6;">
-       24-HOUR CLOUD TRANSMISSION · ALWAYS ON<br>
-       Start · Manage · Watch Your Channel
-     </div>
-     <a href="cloud-stream.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#c5a41d,#7a6010);border-radius:10px;color:#000;font-weight:800;font-size:13px;cursor:pointer;letter-spacing:1px;border:none;text-decoration:none;">
-       𓂀 OPEN THE ETERNAL STREAM
-     </a>
-     <div style="margin-top:16px;font-size:11px;color:#4a3a1a;">
-       VIEWER · CREATOR CONTROLS · CHANNEL<br>
-       NOW TRANSMITTING · PROPHECY QUEUE
-     </div>
-   </div>
- </div><!-- end snxStudioTab_stream -->
 
 </div><!-- end studioPage -->
 
 <!-- ████████████████████████████████████████████████████████
-     𓂀  SHADOW NEXUS — 24-HOUR NEXUS
-     Unified Eternal Stream + Studio in Egyptian/Horror theme
+     𓂀  SHADOW NEXUS — NEXUS
+     Channel discovery and management
      ████████████████████████████████████████████████████████ -->
 <div class="page" id="nexusPage">
 
@@ -11295,8 +11202,8 @@ body.arcade-fs-ios body::after { display:none !important; }
   <header class="nx-header">
     <div class="nx-header-eye" onclick="snxNexusSwitchTab('discover')" title="Discover">𓂀</div>
     <div class="nx-header-center">
-      <div class="nx-header-title">24-HOUR NEXUS</div>
-      <div class="nx-header-sub">DISCOVER ETERNAL STREAMS · SHADOW NEXUS</div>
+      <div class="nx-header-title">NEXUS</div>
+      <div class="nx-header-sub">DISCOVER CHANNELS · SHADOW NEXUS</div>
     </div>
     <div class="nx-viewers-badge">
       <div class="nx-viewers-dot"></div>
@@ -11362,7 +11269,7 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div id="nxLiveNowCount" class="nx-discover-count"></div>
       </div>
       <div id="nxLiveNowList" class="nx-channel-grid">
-        <div class="nx-discover-loading">𓂀 Scanning the Eternal Streams…</div>
+        <div class="nx-discover-loading">𓂀 Scanning live channels…</div>
       </div>
     </div>
 
@@ -11384,7 +11291,7 @@ body.arcade-fs-ios body::after { display:none !important; }
   ═══════════════════════════════════════════════════════════ -->
   <div class="nx-main-section" id="nxMyChannelSection" style="display:none;">
 
-    <!-- ── WATCH — The Eternal Stream (viewer for this channel) ── -->
+    <!-- ── WATCH — My Channel viewer ── -->
     <div class="nx-panel active" id="nxWatchPanel" data-nxtab="watch" style="padding:12px 14px 80px;">
 
       <!-- Portal -->
@@ -11396,7 +11303,7 @@ body.arcade-fs-ios body::after { display:none !important; }
         <!-- Offline state -->
         <div class="nx-watch-offline" id="nxWatchOffline">
           <div class="nx-watch-offline-eye">𓂀</div>
-          <div class="nx-watch-offline-msg">YOUR ETERNAL STREAM AWAITS<br><span style="font-size:10px;opacity:0.6;">Start your channel to go live</span></div>
+          <div class="nx-watch-offline-msg">YOUR CHANNEL AWAITS<br><span style="font-size:10px;opacity:0.6;">Start your channel to go live</span></div>
         </div>
         <!-- Online state overlay (hidden when offline) -->
         <div id="nxWatchOnline" style="display:none;position:absolute;bottom:8px;left:10px;">
@@ -11604,8 +11511,8 @@ body.arcade-fs-ios body::after { display:none !important; }
       <!-- CREATE CHANNEL (shown if no channel yet) -->
       <div id="nxCreateChannelCard" class="nx-card" style="display:none;">
         <div style="font-size:18px;text-align:center;margin-bottom:6px;">𓂀</div>
-        <div style="font-size:15px;font-weight:800;color:var(--nx-gold-text);text-align:center;margin-bottom:4px;letter-spacing:1px;">CREATE YOUR ETERNAL STREAM</div>
-        <div style="font-size:12px;color:var(--nx-text2);text-align:center;margin-bottom:16px;">Build your own 24-hour channel on Shadow Nexus</div>
+        <div style="font-size:15px;font-weight:800;color:var(--nx-gold-text);text-align:center;margin-bottom:4px;letter-spacing:1px;">CREATE YOUR CHANNEL</div>
+        <div style="font-size:12px;color:var(--nx-text2);text-align:center;margin-bottom:16px;">Build your own channel on Shadow Nexus</div>
         <div class="nx-form-group">
           <label class="nx-form-label">Channel Name</label>
           <input class="nx-input" id="nxNewChannelName" placeholder="e.g. Midnight Shadows" maxlength="60">
@@ -11662,7 +11569,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <!-- Start stream -->
         <div class="nx-card" id="nxChannelStartCard">
-          <div style="font-size:12px;font-weight:700;color:var(--nx-gold);margin-bottom:10px;">START YOUR ETERNAL STREAM</div>
+          <div style="font-size:12px;font-weight:700;color:var(--nx-gold);margin-bottom:10px;">START YOUR CHANNEL</div>
           <div class="nx-form-group">
             <label class="nx-form-label">Broadcast Title</label>
             <input class="nx-input" id="nxChannelStreamTitle" placeholder="My Channel — Now Live" maxlength="100">
@@ -11789,10 +11696,10 @@ body.arcade-fs-ios body::after { display:none !important; }
   <!-- TOAST -->
   <div id="nxToast" class="nx-toast"></div>
 
-  <!-- SEND TO STREAM MODAL -->
+  <!-- SEND TO QUEUE MODAL -->
   <div class="nx-stream-modal" id="nxStreamModal">
     <div class="nx-stream-modal-inner">
-      <div class="nx-stream-modal-title">▶ SEND TO YOUR ETERNAL STREAM</div>
+      <div class="nx-stream-modal-title">▶ SEND TO YOUR QUEUE</div>
       <button class="nx-stream-option" onclick="snxNexusStreamPlayNow()">
         <span class="nx-stream-option-icon">▶</span>
         <div><strong>PLAY NOW</strong><br><span style="font-size:11px;color:var(--nx-text2);">Start playing immediately on your stream</span></div>
@@ -11808,12 +11715,6 @@ body.arcade-fs-ios body::after { display:none !important; }
       <button class="nx-btn" style="width:100%;margin-top:8px;" onclick="snxNexusStreamModalClose()">Cancel</button>
     </div>
   </div>
-
-  <!-- Hidden: Studio fields needed by snxStartCloudStream -->
-  <input type="hidden" id="snxCSStreamName">
-  <input type="hidden" id="snxCSDescription">
-  <input type="hidden" id="snxCSCategory" value="Music">
-  <input type="hidden" id="snxCSDuration" value="1440">
 
 </div><!-- end nexusPage -->
 
@@ -11838,7 +11739,6 @@ body.arcade-fs-ios body::after { display:none !important; }
     appId: "1:933810617818:web:efb24f123337dd987c14e3"
   };
 
-  // Reuse existing app instance if cloud-stream.js (loaded first) already initialised it
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
@@ -12284,16 +12184,11 @@ body.arcade-fs-ios body::after { display:none !important; }
       const roomId   = _esc(room.roomId || '');
       const avatar   = room.hostAvatar || '';
       const initial  = (room.hostName || room.hostUsername || '?')[0].toUpperCase();
-      const isCloudStream    = room.type === '24hour_cloudstream';
       const isStudioLive     = room.type === '24hour_studio_live';
-      // Studio Live routes through the existing live.html viewer (same proven system).
-      // Cloud Stream uses the 24-Hour Cloud Stream standalone page.
-      const watchUrl = isCloudStream
-        ? 'cloud-stream.html?id=' + roomId
-        : 'live.html#watch=' + roomId;
+      const watchUrl = 'live.html#watch=' + roomId;
       const tsRaw    = room.createdAt ? (room.createdAt.toMillis ? room.createdAt.toMillis() : room.createdAt) : '';
-      const livePill = isCloudStream ? '☁️ CLOUDSTREAM' : isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
-      const watchBtnLabel = isCloudStream ? '▶ Watch CloudStream' : isStudioLive ? '▶ Join Studio' : '▶ Watch Live';
+      const livePill = isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
+      const watchBtnLabel = isStudioLive ? '▶ Join Studio' : '▶ Watch Live';
 
       const card = document.createElement('a');
       // V2: use neon-border card class + is-live animation
@@ -12454,8 +12349,7 @@ body.arcade-fs-ios body::after { display:none !important; }
     onAuthStateChanged(auth, user => {
       if (!user || _hubUnsub) return;
 
-      // Merge rooms from liveRooms (SNS Live + CloudStream) and
-      // studioLiveRooms (Studio Live) into a single rendered list.
+      // Merge rooms from liveRooms (SNS Live) and studioLiveRooms (Studio Live) into a single rendered list.
       let _snapshotSns    = [];
       let _snapshotStudio = [];
       let _hubStudioUnsub = null;
@@ -12546,13 +12440,8 @@ body.arcade-fs-ios body::after { display:none !important; }
         ? `<img class="flc-thumb-img" src="${escL(avatar)}" alt="${name}" loading="lazy">`
         : `<div class="flc-thumb-initial">${initial}</div>`;
 
-      // Studio Live routes through the existing live.html viewer (same proven system).
-      // Cloud Stream uses the 24-Hour Cloud Stream standalone page.
-      const isCloudStream = room.type === '24hour_cloudstream';
       const isStudioLive  = room.type === '24hour_studio_live';
-      const watchUrl      = isCloudStream
-        ? 'cloud-stream.html?id=' + roomId
-        : 'live.html#watch=' + roomId;
+      const watchUrl      = 'live.html#watch=' + roomId;
 
       const card = document.createElement('a');
       // V2: neon animated border on feed live cards
@@ -12561,8 +12450,8 @@ body.arcade-fs-ios body::after { display:none !important; }
       card.dataset.rid     = room.roomId;
       card.setAttribute('aria-label', `Watch ${name} live`);
 
-      const livePillLabel = isCloudStream ? '☁️ CLOUDSTREAM' : isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
-      const joinBtnLabel  = isCloudStream ? '▶ JOIN CLOUDSTREAM' : isStudioLive ? '▶ JOIN STUDIO' : '▶ JOIN LIVE';
+      const livePillLabel = isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
+      const joinBtnLabel  = isStudioLive ? '▶ JOIN STUDIO' : '▶ JOIN LIVE';
 
       card.innerHTML = `
         <div class="flc-thumb">
@@ -24847,7 +24736,7 @@ function _supportStopCanvas() {
 <!-- ── Shadow Nexus 24-Hour Studio — Music Library, Upload, Playlists, Queue ── -->
 <script src="studio.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
 
-<!-- ── Shadow Nexus 24-HOUR NEXUS — unified Eternal Stream + Studio ── -->
+<!-- ── Shadow Nexus NEXUS — channel discovery and management ── -->
 <script src="nexus.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
 
 <script>
@@ -32133,8 +32022,6 @@ document.addEventListener('click', function(e) {
 })(); // end IIFE
 </script>
 
-<!-- Cloud Stream SPA re-init hook removed — Eternal Stream is now a standalone page (cloud-stream.html). -->
-
 <!-- ════════════════════════════════════════════════════════
      SHADOW NEXUS BUILD VERSION, SW UPDATE-CHECK & DEBUG PANEL
      ════════════════════════════════════════════════════════ -->
@@ -32269,18 +32156,11 @@ document.addEventListener('click', function(e) {
                  window._snxAuthResolved ? 'snxd-ok' : 'snxd-warn');
     html += _row('Auth UID',            uid);
     html += _row('Firestore Ready',     fsReady ? 'YES' : 'NO', fsReady ? 'snxd-ok' : 'snxd-err');
-    html += _row('Studio Worker URL',   'snx-cloudstream.nthntjrn.workers.dev');
 
-    if (st.cloudStatus !== undefined) {
-      html += '<div class="snxd-title">☁️ CloudStream State</div>';
+    if (st.isLive !== undefined) {
+      html += '<div class="snxd-title">Studio State</div>';
       html += _row('Studio Session ID',  st.studioSessionId || '—');
-      html += _row('CloudStream ID',     st.cloudStreamId   || '—');
-      html += _row('CloudStream Status', st.cloudStatus     || '—',
-                   st.cloudStatus === 'active' ? 'snxd-ok' :
-                   st.cloudStatus === 'failed' ? 'snxd-err' : 'snxd-warn');
       html += _row('Studio Live Active', st.isLive ? 'YES' : 'NO', st.isLive ? 'snxd-ok' : '');
-      html += _row('Worker Mode',        st.workerMode || 'live');
-      html += _row('Viewer Count',       st.viewerCount != null ? String(st.viewerCount) : '—');
     }
 
     panel.innerHTML = html;

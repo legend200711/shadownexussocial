@@ -117,14 +117,6 @@
     },
 
     "presence": {
-      "cloudStream": {
-        "$streamId": {
-          ".read":  "auth != null",
-          "$sessionId": {
-            ".write": "auth != null"
-          }
-        }
-      },
       "$uid": {
         ".read":  "auth != null",
         ".write": "auth != null && auth.uid == $uid"

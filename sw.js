@@ -37,8 +37,6 @@ const SHELL_FILES = [
   'studio.css',
   'nexus.css',
   'nexus.js',
-  // cloud-stream.html / cloud-stream.js / cloud-stream.css are standalone-page assets
-  // and must NOT be precached in the main app shell.
   'manifest.json',
   'icon-192.png',
   'icon-512.png',

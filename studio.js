@@ -1,21 +1,17 @@
 /**
- * Shadow Nexus Social — 24-Hour Studio
- * studio.js  •  Production Streaming & CloudStream Controller
+ * Shadow Nexus Social — Studio
+ * studio.js  •  Music Library, Upload, Playlists, Queue
  *
  * Architecture:
  *   - Uses window._snxFirestore (Firestore), window._snxAuthResolved, auth
  *   - Integrates with existing liveRooms, feed, & notification systems
- *   - CloudStream state is owned by the Cloudflare Worker (server-side)
- *   - No privileged credentials in this file — all sensitive ops go via worker
  *
- * Collections created (isolated from existing data):
+ * Collections:
  *   studioSettings/{uid}      — per-creator studio preferences
  *   studioScenes/{sceneId}    — saved scenes (ownerUid, name, elements[])
  *   studioThemes/{uid}        — active theme selection
- *   studioPlaylists/{plId}    — cloud music playlists
- *   cloudStreams/{streamId}   — cloud broadcast records
- *   cloudStreamHeartbeats/{streamId} — health heartbeats
- *   cloudStreamEvents/{evtId} — event log
+ *   studioPlaylists/{plId}    — music playlists
+ *   cloudStreamTracks/{uid}/tracks/{id} — user music library (kept as-is)
  */
 
 'use strict';
@@ -32,31 +28,20 @@ var APP_BUILD_VERSION = 'SNS-2026-10-02-COSMIC-001';
 window.SNX_STUDIO_BUILD = APP_BUILD_VERSION;
 
 // Debug state accessor — used by the ?snxdebug=1 panel in index.html
-// Exposes only non-secret state; never exposes tokens or credentials.
 window._snxStudioDebugState = function() {
   return {
     buildVersion:     APP_BUILD_VERSION,
     liveEngine:       'live.html (existing SNX live system)',
     studioSessionId:  _state.studioSessionId,
-    cloudStreamId:    _state.cloudStreamId,
-    cloudStatus:      _state.cloudStatus,
     isLive:           _state.isLive,
-    workerMode:       _state.cloudStream ? _state.cloudStream.workerMode || 'live' : null,
-    startedAt:        _state.cloudStream ? _state.cloudStream.startedAt  || null : null,
-    viewerCount:      _state.cloudStream ? _state.cloudStream.viewerCount || 0   : 0,
-    // CloudStream Playlist
     musicPlaylistId:  _csMusic.selectedId,
-    musicQueueLen:    _csMusic.queue.length,
-    musicPlaying:     _csMusic.playing,
-    musicNowPlaying:  _csMusic.nowPlayingTitle
+    musicQueueLen:    _csMusic.queue ? _csMusic.queue.length : 0,
+    musicPlaying:     _csMusic.playing
   };
 };
 
-// CloudStream Worker endpoint
-var CLOUDSTREAM_WORKER_URL = 'https://snx-cloudstream.nthntjrn.workers.dev';
-
 // Studio modes — 'filters' is its own independent Studio mode, never Regular Live
-var MODES = ['live', 'filters', 'music', 'theme', 'effects', 'events', 'cloudstream'];
+var MODES = ['live', 'filters', 'music', 'theme', 'effects', 'events'];
 
 /* ─────────────────────────────────────────────────────────
    CAMERA FILTERS — applied via CSS filter on the <video> element
@@ -134,7 +119,7 @@ var SCENE_ELEMENTS = [
 var _state = {
   user:            null,
   userData:        null,
-  currentSection:  'main',     // 'main' | 'livestudio' | 'cloudstream'
+  currentSection:  'main',     // 'main' | 'livestudio'
   currentMode:     'live',
   currentTheme:    THEMES[0],
   currentFilter:   CAMERA_FILTERS[0],  // Studio-only filter — never touches regular Live
@@ -153,51 +138,43 @@ var _state = {
   musicVolume:     0.8,
   currentScene:    null,
   scenePlaylist:   [],
-  cloudStream:     null,       // Firestore cloudStreams document
-  cloudStreamId:   null,
-  cloudStatus:     'draft',    // draft|starting|active|recovering|stopping|stopped|failed
-  handoffStep:     0,
-  healthInterval:  null,
   visAnimId:       null,
   savedScenes:     [],
   effectsActive:   []
 };
 
 /* ───────────────────────────────────────────────────────
-   CloudStream Playlist State
-   Completely isolated from Regular Live music system.
-   Uses studioPlaylists / studioCloudStreamMusic paths only.
+   Studio Playlist State (local music management)
    ─────────────────────────────────────────────────────── */
 var _csMusic = {
   // Saved playlists (from Firestore studioPlaylists/{uid}/playlists/{id})
   playlists:       [],      // [{ id, name, trackIds[], createdAt }]
   selectedId:      null,    // currently selected playlist ID
 
-  // Active queue (track objects resolved from cloudStreamTracks)
+  // Active queue (track objects resolved from cloudStreamTracks collection)
   queue:           [],      // [{ id, title, artist, url, duration }]
   queueIndex:      0,       // pointer into queue[]
 
-  // Playback state (client-side preview while creator is present)
+  // Playback state (client-side preview)
   playing:         false,
   audio:           null,    // HTMLAudioElement for local preview
   progressTimer:   null,
 
-  // Server-side config pushed to worker
+  // Playback config
   shuffle:         false,
-  repeat:          true,    // default: loop forever
-  crossfade:       3,       // seconds (0 = disabled)
-  volume:          80,      // 0-100
+  repeat:          true,
+  crossfade:       3,
+  volume:          80,
 
-  // Now Playing (synced from worker health or Firestore)
+  // Now Playing (local)
   nowPlayingTitle: '',
   nowPlayingArtist:'',
   nextTitle:       '',
   nextArtist:      '',
 
-  // Schedule entries [{ playlistId, startHour, startMin, days[] }]
+  // Schedule entries
   schedule:        [],
 
-  // Firestore realtime unsub
   unsub:           null,
   musicSyncInterval: null
 };
@@ -210,7 +187,7 @@ window.snxStudioInit = function() {
     try {
       _state.user     = window._snxCurrentUser || null;
       _state.userData = window._snxUserData || null;
-      if (!_state.user) { _showStudioError('Please sign in to use 24-Hour Studio.'); return; }
+      if (!_state.user) { _showStudioError('Please sign in to use Studio.'); return; }
       _loadStudioSettings();
       _renderStatusBar();
       // Always start at main landing — user explicitly chooses Live Studio or Cloud Stream
@@ -231,9 +208,8 @@ window.snxStudioInit = function() {
 
 /* ═══════════════════════════════════════════════════════
    3A. TOP-LEVEL SECTION SWITCHING
-       'main'        — landing page (two cards)
+       'main'        — landing page
        'livestudio'  — Live Studio section (modes: live/filters/music/theme/effects/events)
-       'cloudstream' — 24-Hour Cloud Stream section (CS tabs)
 ═══════════════════════════════════════════════════════ */
 window.snxStudioSwitchSection = function(section) {
   _switchSection(section);
@@ -244,8 +220,7 @@ function _switchSection(section) {
 
   var sections = {
     main:        document.getElementById('snxSectionMain'),
-    livestudio:  document.getElementById('snxSectionLiveStudio'),
-    cloudstream: document.getElementById('snxSectionCloudStream')
+    livestudio:  document.getElementById('snxSectionLiveStudio')
   };
 
   Object.keys(sections).forEach(function(key) {
@@ -256,9 +231,8 @@ function _switchSection(section) {
   document.querySelectorAll('.sbn-item').forEach(function(it) {
     var sbn = it.dataset.sbn || '';
     var isActive = false;
-    if (section === 'main'        && sbn === 'home')         isActive = true;
-    if (section === 'cloudstream' && sbn === 'cloud')        isActive = true;
-    if (section === 'livestudio'  && sbn.indexOf('live-') === 0) isActive = (sbn === 'live-' + _state.currentMode) || (sbn === 'live-live' && _state.currentMode === 'live');
+    if (section === 'main'       && sbn === 'home')         isActive = true;
+    if (section === 'livestudio' && sbn.indexOf('live-') === 0) isActive = (sbn === 'live-' + _state.currentMode) || (sbn === 'live-live' && _state.currentMode === 'live');
     it.classList.toggle('active', isActive);
   });
 
@@ -268,60 +242,10 @@ function _switchSection(section) {
     // Check if creator is live and show control room (deferred so DOM is visible)
     setTimeout(_crCheckLiveStatus, 80);
   }
-  if (section === 'cloudstream') {
-    _renderCloudStreamPanel();
-    _renderCloudStatusBadge();
-    setTimeout(snxStudioLoadDestinations, 60);
-    if (!_csMusic.playlists.length) _csMusicLoadPlaylists();
-    // Show playlist panel on entry
-    var ppEl = document.getElementById('snxCSPlaylistPanel');
-    if (ppEl) { ppEl.style.display = ''; _renderCSPlaylistPanel(); }
-    // Broadcasting is managed by cloud-stream.html — hide the legacy stop button
-    var stopBtn = document.getElementById('snxCSStopBtn');
-    if (stopBtn) stopBtn.style.display = 'none';
-    // Populate the CS music library list — always try to load tracks on section enter
-    // so the library is available even on first visit (no active stream required).
-    if (_music.tracks.length) {
-      if (typeof _renderCSLibrary === 'function') { _renderCSLibrary(); }
-    } else if (_state.user && window._snxFirestore) {
-      _mlLoadTracks();
-    }
-    // Ensure the queue listener is active whenever the Cloud Stream section is entered
-    // (not just when a stream is active) so the queue renders for all users at all times.
-    if (!_sq.unsub) { _sqLoad(); }
-    _sqRenderQueue();
-  }
 }
 
-/* ═══════════════════════════════════════════════════════
-   3B. CLOUD STREAM TAB SWITCHING
-═══════════════════════════════════════════════════════ */
-window.snxCSSwitchTab = function(tab) {
-  // Update tab bar active state
-  document.querySelectorAll('.snx-cs-tab').forEach(function(t) {
-    t.classList.toggle('active', t.dataset.cstab === tab);
-  });
-  // Show/hide tab panels
-  document.querySelectorAll('.snx-cs-tab-panel').forEach(function(p) {
-    p.classList.toggle('active', p.dataset.cstab === tab);
-  });
-  // Tab-specific init
-  if (tab === 'dashboard')   _renderCloudStreamPanel();
-  if (tab === 'destinations') setTimeout(snxStudioLoadDestinations, 60);
-  if (tab === 'playback') {
-    if (!_csMusic.playlists.length) _csMusicLoadPlaylists();
-    var ppEl = document.getElementById('snxCSPlaylistPanel');
-    if (ppEl) { ppEl.style.display = ''; _renderCSPlaylistPanel(); }
-    // Ensure CS library tracks are loaded and rendered
-    if (_music.tracks.length) {
-      _renderCSLibrary();
-    } else if (_state.user && window._snxFirestore) {
-      _mlLoadTracks();
-    }
-  }
-  if (tab === 'analytics')   _renderCSAnalytics();
-  if (tab === 'sources')     _renderCSEventScenes();
-};
+/* Kept for compatibility — no-op since cloudstream section is removed */
+window.snxCSSwitchTab = function(tab) {};
 
 /* ═══════════════════════════════════════════════════════
    3C. LIVE STUDIO MODE SWITCHING
@@ -331,7 +255,6 @@ window.snxStudioSwitchMode = function(mode) {
 };
 
 function _switchMode(mode) {
-  // Only Live Studio modes — cloudstream mode is now a separate section
   var liveModes = ['live', 'filters', 'music', 'theme', 'effects', 'events'];
   if (!liveModes.includes(mode)) return;
   _state.currentMode = mode;
@@ -361,19 +284,8 @@ function _switchMode(mode) {
   if (mode === 'events')  _renderEventScenes();
 }
 
-/* ── CS Analytics panel renderer ── */
-function _renderCSAnalytics() {
-  var cs = _state.cloudStream || {};
-  var uptime = cs.startedAt ? Math.floor((Date.now() - cs.startedAt) / 60000) : 0;
-  var viewers  = document.getElementById('snxCSAnaViewers');
-  var uptimeEl = document.getElementById('snxCSAnaUptime');
-  var bitrateEl= document.getElementById('snxCSAnaBitrate');
-  var fpsEl    = document.getElementById('snxCSAnaFps');
-  if (viewers)   viewers.textContent  = cs.viewerCount || '—';
-  if (uptimeEl)  uptimeEl.textContent = _state.cloudStatus === 'active' ? uptime + 'm' : '—';
-  if (bitrateEl) bitrateEl.textContent= cs.bitrate ? cs.bitrate + 'k' : '—';
-  if (fpsEl)     fpsEl.textContent    = cs.fps || '—';
-}
+/* Kept as no-op — cloud stream analytics removed */
+function _renderCSAnalytics() {}
 
 /* ── CS Event Scenes (in Sources tab) ── */
 function _renderCSEventScenes() {
@@ -439,19 +351,12 @@ function _renderStatusBar() {
   var el = document.getElementById('snxStudioStatusBar');
   if (!el) return;
 
-  var statusDot  = _state.isLive ? 'live' : 'off';
-  var cloudDot   = _state.cloudStatus === 'active' ? 'cloud' :
-                   _state.cloudStatus === 'recovering' ? 'warn' :
-                   _state.cloudStatus === 'failed' ? 'off' : 'off';
-  var micDot     = _state.isMicOn ? 'ok' : 'off';
-  var viewerCount = _state.cloudStream && _state.cloudStream.viewerCount
-                    ? _state.cloudStream.viewerCount : 0;
+  var statusDot = _state.isLive ? 'live' : 'off';
+  var micDot    = _state.isMicOn ? 'ok' : 'off';
 
   el.innerHTML = [
     _pill(statusDot, 'STATUS', _state.isLive ? 'STUDIO LIVE' : 'OFFLINE'),
-    _pill(cloudDot,  'CLOUD',  _state.cloudStatus.toUpperCase()),
     _pill(micDot,    'MIC',    _state.isMicOn ? 'ON' : 'OFF'),
-    _pill('off',     '👁',      viewerCount + ' viewers'),
     _pill('off',     'THEME',  _state.currentTheme.name),
     _pill('off',     'FILTER', _state.currentFilter ? _state.currentFilter.name : 'Normal'),
     _pill('off',     'SCENE',  _state.currentScene ? _state.currentScene : '—')
@@ -1475,18 +1380,10 @@ window.snxCSMusicAddSingleTrack = function(playlistId, trackId) {
     _toast('Track added to playlist.');
     _renderCSLibrary();
     _renderCSPlaylistPanel();
-    // If stream is active, push updated queue
-    if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-      _csMusicResolveQueue(pl.trackIds, function(tracks) {
-        _csMusic.queue = tracks;
-        _csMusicPushToWorker();
-        _csMusicPushToFirestore();
-      });
-    }
   }).catch(function(e) { _toastError('Could not add track: ' + e.message); });
 };
 
-/* ── Click a CS library track to make it the active cloud stream track ── */
+/* ── Click a library track to make it active in the local player ── */
 window.snxCSMusicPlayTrack = function(trackId) {
   // If no active playlist, add to queue directly and play
   if (!_csMusic.selectedId) {
@@ -1502,10 +1399,6 @@ window.snxCSMusicPlayTrack = function(trackId) {
     _csMusicStartLocalPreview();
     _renderCSPlaylistPanel();
     _patchNowPlayingButtons();
-    if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-      _csMusicPushToWorker();
-      _csMusicPushToFirestore();
-    }
     _toast('Playing: ' + (track.title || 'Untitled'));
     _renderCSLibrary();
     return;
@@ -1526,10 +1419,6 @@ window.snxCSMusicPlayTrack = function(trackId) {
       _csMusicStartLocalPreview();
       _renderCSPlaylistPanel();
       _patchNowPlayingButtons();
-      if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-        _csMusicPushToWorker();
-        _csMusicPushToFirestore();
-      }
       _renderCSLibrary();
     });
     return;
@@ -1550,10 +1439,6 @@ window.snxCSMusicPlayTrack = function(trackId) {
         _csMusicStartLocalPreview();
         _renderCSPlaylistPanel();
         _patchNowPlayingButtons();
-        if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-          _csMusicPushToWorker();
-          _csMusicPushToFirestore();
-        }
         _renderCSLibrary();
       });
     }
@@ -1565,10 +1450,6 @@ window.snxCSMusicPlayTrack = function(trackId) {
   _csMusicStartLocalPreview();
   _renderCSPlaylistPanel();
   _patchNowPlayingButtons();
-  if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-    _csMusicPushToWorker();
-    _csMusicPushToFirestore();
-  }
   _toast('Playing: ' + (_csMusic.queue[_csMusic.queueIndex] ? (_csMusic.queue[_csMusic.queueIndex].title || 'Untitled') : ''));
   _renderCSLibrary();
 };
@@ -1634,10 +1515,6 @@ window.snxStudioActivateScene = function(sceneId) {
   _renderStatusBar();
   var scene = EVENT_SCENES.find(function(s) { return s.id === sceneId; });
   if (scene) _toast('Scene: ' + scene.name);
-  // If CloudStream is active, sync to cloud
-  if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-    _cloudStreamRPC({ action: 'setScene', sceneId: sceneId });
-  }
 };
 
 /* ═══════════════════════════════════════════════════════
@@ -1697,90 +1574,24 @@ window.snxStudioRemovePlaylistItem = function(index) {
 };
 
 /* ═══════════════════════════════════════════════════════
-   11. CLOUDSTREAM PANEL
-   Studio shows content-management area; broadcasting is in cloud-stream.html.
+   11. REMOVED — CLOUDSTREAM PANEL
+   Cloud Stream broadcasting has been removed.
 ═══════════════════════════════════════════════════════ */
-function _renderCloudStreamPanel() {
-  // Studio is Content Management only — direct to canonical broadcast page.
-  var activeEl  = document.getElementById('snxCSActive');
-  var handoffEl = document.getElementById('snxCSHandoff');
-  var dashIdle  = document.getElementById('snxCSDashboardIdle');
-  if (handoffEl) handoffEl.style.display = 'none';
-  if (activeEl)  activeEl.style.display  = 'none';
-  if (dashIdle)  dashIdle.style.display  = '';
-  _renderCloudStatusBadge();
-}
-
-function _renderCloudStatusBadge() {
-  var el = document.getElementById('snxCSStatusBadge');
-  if (!el) return;
-  el.className = 'snx-cs-status-badge draft';
-  el.innerHTML = '&#9925; MANAGE BROADCAST';
-}
-
-/* Kept as a no-op so any remaining callers don't throw */
-function _renderHandoffSteps() {}
+function _renderCloudStreamPanel()  {}
+function _renderCloudStatusBadge()  {}
+function _renderHandoffSteps()      {}
 function _renderCloudStreamActive() {}
-function _csCtrlBtn(label, onclick, cls) {
-  return '<button class="snx-action-btn' + (cls ? ' ' + cls : '') + '" onclick="' + onclick + '">' + label + '</button>';
-}
+function _cloudStreamRPC()          {}
+function _crPostMusicToFrame()      {}
+function _csMusicSyncQueueToFrame() {}
+window.snxStartCloudStream = function() {};
+window.snxCSStop           = function() {};
 
 /* ═══════════════════════════════════════════════════════
-   12. START CLOUDSTREAM — REDIRECT TO CANONICAL ENGINE
-   ─────────────────────────────────────────────────────
-   Studio is CONTENT MANAGEMENT only.
-   Actual broadcasting lives in cloud-stream.html / cloud-stream.js.
-   All start / stop / health / RPC calls must go through
-   the canonical Cloud Stream engine.
-═══════════════════════════════════════════════════════ */
-
-/* snxStartCloudStream — open the canonical Cloud Stream broadcast page.
-   Any playlist selected in Studio is stored in Firestore (studioPlaylists)
-   and will be available to pick in cloud-stream.html automatically. */
-window.snxStartCloudStream = function() {
-  window.location.href = 'cloud-stream.html';
-};
-
-/* snxCSStop — redirect to Cloud Stream page to manage the broadcast.
-   Studio must NOT independently stop streams; that is cloud-stream.js's job. */
-window.snxCSStop = function() {
-  window.location.href = 'cloud-stream.html';
-};
-
-/* Stub out remote-control functions that should only run from cloud-stream.js */
-window.snxCSChangeScene    = function() { window.location.href = 'cloud-stream.html'; };
-window.snxCSChangeMusic    = function() { window.location.href = 'cloud-stream.html'; };
-window.snxCSOpenPlaylist   = function() { window.location.href = 'cloud-stream.html'; };
-window.snxCSChangeTheme    = function() { window.location.href = 'cloud-stream.html'; };
-window.snxCSAnnounce       = function() { window.location.href = 'cloud-stream.html'; };
-window.snxCSEditQueue      = function() { window.location.href = 'cloud-stream.html'; };
-
-/* ─── Private stubs (no-ops) — kept so internal callers don't throw ─── */
-function _cloudStreamRPC()         {}  // broadcast RPC owned by cloud-stream.js
-function _startHealthMonitor()     {}  // health monitor owned by cloud-stream.js
-function _checkHealth()            {}  // health check owned by cloud-stream.js
-function _updateHealthUI()         {}  // health UI owned by cloud-stream.js
-function _cloudStreamStopped()     {}  // stop flow owned by cloud-stream.js
-function _handoffComplete()        {}  // handoff owned by cloud-stream.js
-function _handoffFailed()          {}  // handoff owned by cloud-stream.js
-function _checkActiveCloudStream() {}  // auto-reconnect owned by cloud-stream.js
-function _showReturnBanner()       {}  // return banner owned by cloud-stream.js
-function _crPostMusicToFrame()     {}  // live-mixer postMessage (Live Studio only)
-function _csMusicSyncQueueToFrame(){}  // live-mixer queue sync (Live Studio only)
-
-/* ═══════════════════════════════════════════════════════
-   16A. CLOUDSTREAM PLAYLIST SYSTEM
-   ─────────────────────────────────────────────────────
-   Completely independent from Regular Live music.
+   16A. STUDIO PLAYLIST SYSTEM
    Data paths:
      studioPlaylists/{uid}/playlists/{playlistId}
        { id, name, trackIds[], shuffle, repeat, crossfade, volume, createdAt }
-     studioCloudStreamMusic/{cloudStreamId}
-       { cloudStreamId, uid, playlistId, queue[], queueIndex,
-         currentTrackId, currentTitle, currentArtist, nextTitle, nextArtist,
-         shuffle, repeat, crossfade, volume, status, updatedAt }
-   Worker KV:
-     music:{streamId}  — authoritative server-side playback pointer
 ═══════════════════════════════════════════════════════ */
 
 /* ── Playlist CRUD ── */
@@ -1838,7 +1649,7 @@ window.snxCSMusicSelectPlaylist = function(playlistId) {
   _csMusic.repeat      = typeof pl.repeat === 'boolean' ? pl.repeat : true;
   _csMusic.crossfade   = typeof pl.crossfade === 'number' ? pl.crossfade : 3;
   _csMusic.volume      = typeof pl.volume === 'number' ? pl.volume : 80;
-  // Resolve queue from track IDs using the creator's cloudStreamTracks library
+  // Resolve queue from track IDs using the creator's music library
   _csMusicResolveQueue(pl.trackIds || [], function(tracks) {
     _csMusic.queue      = tracks;
     _csMusic.queueIndex = 0;
@@ -1850,12 +1661,6 @@ window.snxCSMusicSelectPlaylist = function(playlistId) {
       _csMusic.nextArtist       = tracks[1] ? tracks[1].artist || '' : '';
     }
     _renderCSPlaylistPanel();
-    _renderCloudStreamActive();
-    // Push to worker if stream is active
-    if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-      _csMusicPushToWorker();
-      _csMusicPushToFirestore();
-    }
     _toast('Playlist loaded: ' + pl.name + ' (' + tracks.length + ' tracks)');
     // ── Send the full queue to the live engine so the mixer can load it ──
     // autoplay:false — user must still press Play to start; this just preloads the queue
@@ -1939,11 +1744,6 @@ window.snxCSMusicRemoveTrackFromPlaylist = function(playlistId, trackId) {
         if (_csMusic.queueIndex >= _csMusic.queue.length) _csMusic.queueIndex = 0;
       } else if (_csMusic.queueIndex >= _csMusic.queue.length) {
         _csMusic.queueIndex = _csMusic.queue.length - 1;
-      }
-      // Push updated queue to cloud worker if stream is active
-      if (_state.cloudStatus === 'active' && _state.cloudStreamId) {
-        _csMusicPushToWorker();
-        _csMusicPushToFirestore();
       }
     }
     _toast('Track removed from playlist.');
@@ -2032,12 +1832,9 @@ window.snxCSMusicPlayPause = function() {
   if (_csMusic.playing) {
     _csMusicStopLocalPreview();
     _csMusic.playing = false;
-    _cloudStreamRPC({ action: 'musicPause' });
-    // ── Mirror to live mixer ──
     _crPostMusicToFrame({ type: 'snx_music_pause' });
   } else {
     _csMusicStartLocalPreview();
-    // ── Mirror to live mixer ──
     var cur = _csMusic.queue[_csMusic.queueIndex];
     _crPostMusicToFrame({ type: 'snx_music_play', track: cur ? { id: cur.id || '', title: cur.title || '', artist: cur.artist || '', url: cur.url || '' } : null });
   }
@@ -2062,16 +1859,12 @@ window.snxCSMusicNext = function() {
   }
   _csMusicAdvanceNowPlaying();
   _csMusicStartLocalPreview();
-  _cloudStreamRPC({ action: 'musicNext' });
-  _csMusicPushToFirestore();
-  // ── Mirror to live mixer ──
   _crPostMusicToFrame({ type: 'snx_music_next' });
 };
 
 window.snxCSMusicToggleShuffle = function() {
   _csMusic.shuffle = !_csMusic.shuffle;
   _patchNowPlayingButtons();
-  _cloudStreamRPC({ action: 'musicShuffle', value: _csMusic.shuffle });
   _csMusicSaveSetting('shuffle', _csMusic.shuffle);
   _toast('Shuffle: ' + (_csMusic.shuffle ? 'ON' : 'OFF'));
 };
@@ -2079,7 +1872,6 @@ window.snxCSMusicToggleShuffle = function() {
 window.snxCSMusicToggleRepeat = function() {
   _csMusic.repeat = !_csMusic.repeat;
   _patchNowPlayingButtons();
-  _cloudStreamRPC({ action: 'musicRepeat', value: _csMusic.repeat });
   _csMusicSaveSetting('repeat', _csMusic.repeat);
   _toast('Repeat: ' + (_csMusic.repeat ? 'ON' : 'OFF'));
 };
@@ -2087,14 +1879,11 @@ window.snxCSMusicToggleRepeat = function() {
 window.snxCSMusicSetVolume = function(val) {
   _csMusic.volume = parseInt(val, 10) || 80;
   if (_csMusic.audio) _csMusic.audio.volume = _csMusic.volume / 100;
-  _cloudStreamRPC({ action: 'musicVolume', value: _csMusic.volume });
-  // ── Mirror to live mixer ──
   _crPostMusicToFrame({ type: 'snx_music_volume', value: _csMusic.volume });
 };
 
 window.snxCSMusicSetCrossfade = function(val) {
   _csMusic.crossfade = parseInt(val, 10) || 0;
-  _cloudStreamRPC({ action: 'musicCrossfade', value: _csMusic.crossfade });
 };
 
 /* ── Local preview playback (creator's device while app is open) ── */
@@ -2200,11 +1989,7 @@ function _csMusicBuildWorkerPayload() {
   };
 }
 
-/* _csMusicPushToWorker / _csMusicPushToFirestore:
-   No-ops in Studio — broadcast writes are owned by cloud-stream.js.
-   Studio is CONTENT MANAGEMENT only; it does not push to the live
-   broadcast pipeline.  Keeping the function signatures so any
-   unreachable call sites don't throw. */
+/* _csMusicPushToWorker / _csMusicPushToFirestore: no-ops kept for call-site safety. */
 function _csMusicPushToWorker()    {}
 function _csMusicPushToFirestore() {}
 
@@ -2218,26 +2003,7 @@ function _csMusicSaveSetting(key, val) {
     .catch(function() {});
 }
 
-/* ── Firestore real-time sync (updates Now Playing for creator's UI) ── */
-
-function _csMusicStartSync() {
-  _csMusicStopSync();
-  if (!_state.cloudStreamId || !window._snxFirestore) return;
-  var fs = window._snxFirestore;
-  _csMusic.unsub = fs.onSnapshot(
-    fs.doc(fs.db, 'studioCloudStreamMusic', _state.cloudStreamId),
-    function(snap) {
-      if (!snap || !snap.exists()) return;
-      var d = snap.data();
-      _csMusic.nowPlayingTitle  = d.currentTitle  || '';
-      _csMusic.nowPlayingArtist = d.currentArtist || '';
-      _csMusic.nextTitle        = d.nextTitle     || '';
-      _csMusic.nextArtist       = d.nextArtist    || '';
-      _patchNowPlayingText();
-    },
-    function() {} // ignore errors silently — non-critical
-  );
-}
+function _csMusicStartSync() {} // removed — was Cloud Stream only
 
 function _csMusicStopSync() {
   if (typeof _csMusic.unsub === 'function') {
@@ -2250,7 +2016,7 @@ function _csMusicStopSync() {
   }
 }
 
-/* ── CloudStream Playlist Panel renderer ── */
+/* ── Music Playlist Panel renderer ── */
 
 function _renderCSPlaylistPanelHTML() {
   // Synchronous: just return HTML for the panel container
@@ -2267,7 +2033,7 @@ function _renderCSPlaylistPanel() {
 
   // Header: Create playlist + playlist selector
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">' +
-    '<div style="font-size:13px;font-weight:700;color:#00AEEF;">🎵 CloudStream Playlist</div>' +
+    '<div style="font-size:13px;font-weight:700;color:#00AEEF;">🎵 Music Playlists</div>' +
     '<div style="display:flex;gap:6px;">' +
       '<button onclick="snxCSMusicCreatePlaylist()" style="padding:4px 10px;border-radius:6px;font-size:11px;border:1px solid rgba(0,174,239,0.4);background:rgba(0,174,239,0.10);color:#00AEEF;cursor:pointer;">+ New</button>' +
     '</div>' +
@@ -2374,61 +2140,11 @@ function _renderCSPlaylistPanel() {
         'background:rgba(255,51,85,0.06);color:#ff3355;cursor:pointer;" title="Delete this playlist">🗑 Delete Playlist</button>' +
     '</div>';
 
-    // Schedule section
-    html += '<div style="margin-top:12px;border-top:1px solid rgba(0,174,239,0.10);padding-top:10px;">' +
-      '<div style="font-size:11px;color:#00AEEF;font-weight:700;margin-bottom:6px;">⏰ Schedule (Auto-start)</div>' +
-      '<div style="font-size:11px;color:#4a7a9a;margin-bottom:6px;">Add a time for this playlist to automatically start during your CloudStream.</div>' +
-      '<div style="display:flex;gap:6px;align-items:center;">' +
-        '<input type="time" id="snxCSPlScheduleTime" style="padding:4px 8px;border-radius:6px;background:#071428;border:1px solid rgba(0,174,239,0.22);color:#d8eeff;font-size:12px;">' +
-        '<button onclick="snxCSMusicAddSchedule(\'' + _esc(activePl.id) + '\')" style="padding:4px 10px;border-radius:6px;font-size:11px;border:1px solid rgba(0,174,239,0.30);background:rgba(0,174,239,0.08);color:#00AEEF;cursor:pointer;">Add</button>' +
-      '</div>' +
-      _csMusicRenderScheduleEntries(activePl.id) +
-    '</div>';
   }
 
   el.innerHTML = html;
   // Re-render CS library so the + / ✓ buttons reflect the current playlist selection
   if (typeof _renderCSLibrary === 'function') { _renderCSLibrary(); }
-}
-
-function _csMusicRenderScheduleEntries(playlistId) {
-  var entries = _csMusic.schedule.filter(function(e) { return e.playlistId === playlistId; });
-  if (!entries.length) return '';
-  return '<div style="margin-top:6px;">' +
-    entries.map(function(e, idx) {
-      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(0,174,239,0.06);">' +
-        '<span style="font-size:11px;color:#d8eeff;">▶ ' + _esc(e.time || '—') + '</span>' +
-        '<button onclick="snxCSMusicRemoveSchedule(' + idx + ')" style="background:none;border:none;color:#ff3355;font-size:13px;cursor:pointer;">×</button>' +
-      '</div>';
-    }).join('') +
-  '</div>';
-}
-
-window.snxCSMusicAddSchedule = function(playlistId) {
-  var timeEl = document.getElementById('snxCSPlScheduleTime');
-  var time   = timeEl ? timeEl.value : '';
-  if (!time) { _toastError('Select a time first.'); return; }
-  _csMusic.schedule.push({ playlistId: playlistId, time: time });
-  _csMusicPushScheduleToWorker();
-  _renderCSPlaylistPanel();
-  _toast('Scheduled: ' + time);
-};
-
-window.snxCSMusicRemoveSchedule = function(idx) {
-  _csMusic.schedule.splice(idx, 1);
-  _csMusicPushScheduleToWorker();
-  _renderCSPlaylistPanel();
-};
-
-function _csMusicPushScheduleToWorker() {
-  // Studio saves schedule to Firestore; cloud-stream.js reads and executes it.
-  if (!_state.user || !window._snxFirestore) return;
-  var fs  = window._snxFirestore;
-  var uid = _state.user.uid;
-  fs.setDoc(fs.doc(fs.db, 'studioSettings', uid), {
-    playlistSchedule: _csMusic.schedule,
-    updatedAt:        fs.serverTimestamp()
-  }, { merge: true }).catch(function() {});
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -2467,100 +2183,6 @@ function _saveStudioSettings() {
 }
 
 /* ═══════════════════════════════════════════════════════
-   17. ADMIN — CLOUDSTREAM MONITOR
-═══════════════════════════════════════════════════════ */
-window.snxAdminLoadCloudStreams = function() {
-  var el = document.getElementById('snxAdminCloudStreamList');
-  if (!el) return;
-  if (!window._snxFirestore) { el.innerHTML = '<div class="snx-empty-state">Firestore not ready.</div>'; return; }
-  var fs = window._snxFirestore;
-  el.innerHTML = '<div style="text-align:center;padding:20px;color:#3a5a7a;">Loading active streams…</div>';
-  fs.getDocs(fs.query(
-    fs.collection(fs.db, 'cloudStreams'),
-    fs.where('status', 'in', ['active', 'starting', 'recovering', 'failed']),
-    fs.orderBy('createdAt', 'desc'),
-    fs.limit(20)
-  )).then(function(snap) {
-    if (!snap || !snap.docs || !snap.docs.length) {
-      el.innerHTML = '<div class="snx-empty-state"><div class="empty-icon">☁️</div>No active CloudStreams.</div>';
-      return;
-    }
-    el.innerHTML = snap.docs.map(function(doc) {
-      var d = doc.data();
-      var statusColor = d.status === 'active' ? '#39ff14' : d.status === 'failed' ? '#ff3355' : '#ffaa00';
-      var startedTs   = d.startedAt ? (d.startedAt.toMillis ? d.startedAt.toMillis() : d.startedAt) : null;
-      var expiresTs   = d.expiresAt || null;
-      var remaining   = expiresTs ? Math.max(0, Math.floor((expiresTs - Date.now()) / 60000)) + 'm' : '—';
-      var startedFmt  = startedTs ? new Date(startedTs).toLocaleTimeString() : '—';
-      var listenUrl   = 'cloud-stream.html?id=' + encodeURIComponent(doc.id);
-      return '<div class="snx-admin-stream-card">' +
-        '<div class="snx-admin-stream-header">' +
-          '<span style="font-size:18px;">&#9925;</span>' +
-          '<span class="snx-admin-stream-name">' + _esc(d.streamName || 'Untitled') + '</span>' +
-          '<span class="snx-tag" style="color:' + statusColor + ';border-color:' + statusColor + '">' + _esc(d.status || 'unknown').toUpperCase() + '</span>' +
-        '</div>' +
-        '<div style="font-size:11px;color:#4a7a9a;margin-bottom:6px;display:grid;grid-template-columns:1fr 1fr;gap:2px;">' +
-          '<div>Host: <strong style="color:#d8eeff;">' + _esc(d.displayName || d.uid || '—') + '</strong></div>' +
-          '<div>Category: ' + _esc(d.category || '—') + '</div>' +
-          '<div>Started: ' + startedFmt + '</div>' +
-          '<div>Remaining: <strong style="color:#00AEEF;">' + remaining + '</strong></div>' +
-          '<div>Listeners: ' + (d.viewerCount || 0) + '</div>' +
-          '<div>Track: ' + _esc(d.currentMusicTitle || '—') + '</div>' +
-        '</div>' +
-        '<div class="snx-admin-stream-actions">' +
-          '<a class="snx-admin-stream-btn" href="' + _esc(listenUrl) + '" target="_blank">&#9654; Listen</a>' +
-          '<button class="snx-admin-stream-btn danger" onclick="snxAdminStopStream(\'' + doc.id + '\',\'' + _esc(d.uid || '') + '\')">&#9940; Stop</button>' +
-          '<button class="snx-admin-stream-btn" onclick="snxAdminViewStreamLogs(\'' + doc.id + '\')">&#128203; Logs</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  }).catch(function(err) {
-    el.innerHTML = '<div class="snx-empty-state">Error loading streams: ' + _esc(err.message) + '</div>';
-  });
-};
-
-window.snxAdminStopStream = function(streamId, uid) {
-  if (!confirm('Force-stop stream ' + streamId + '?')) return;
-  var adminUid = _state.user ? _state.user.uid : '';
-  _snxWorkerHeaders().then(function(headers) {
-    return fetch(CLOUDSTREAM_WORKER_URL + '/api/admin/stream/stop', {
-      method: 'POST',
-      headers: headers,
-      body: JSON.stringify({ streamId: streamId, adminUid: adminUid })
-    });
-  }).then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (!data.success) { _toastError(data.error || 'Admin stop failed.'); return; }
-    if (window._snxFirestore) {
-      var fs = window._snxFirestore;
-      fs.updateDoc(fs.doc(fs.db, 'cloudStreams', streamId), { status: 'stopped', stoppedBy: 'admin' }).catch(function() {});
-    }
-    _toast('Stream stopped by admin.');
-    snxAdminLoadCloudStreams();
-  })
-  .catch(function(e) { _toastError('Could not stop stream: ' + e.message); });
-};
-
-window.snxAdminViewStreamLogs = function(streamId) {
-  _toast('Logs for stream ' + streamId + ' — check cloudStreamEvents collection in Firebase Console.');
-};
-
-window.snxAdminPingWorker = function() {
-  var pingEl = document.getElementById('snxAdminWorkerPing');
-  if (pingEl) pingEl.textContent = 'Pinging worker…';
-  var t0 = Date.now();
-  fetch(CLOUDSTREAM_WORKER_URL + '/health')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var ms = Date.now() - t0;
-      if (pingEl) pingEl.innerHTML = '&#9989; Worker online · ' + d.worker + ' v' + d.v + ' · ' + ms + 'ms';
-    })
-    .catch(function(e) {
-      if (pingEl) pingEl.innerHTML = '&#10060; Worker unreachable: ' + _esc(e.message);
-    });
-};
-
-/* ═══════════════════════════════════════════════════════
    18. UTILITIES
 ═══════════════════════════════════════════════════════ */
 function _getVal(id) {
@@ -2587,9 +2209,8 @@ function _formatDuration(secs) {
 
 /* ═══════════════════════════════════════════════════════
    19. STUDIO DIAGNOSTIC
-   Owner-only live status panel. Shows exactly what state
-   each component is in so creator/support can identify
-   which step failed. Never exposes secrets or tokens.
+   Owner-only live status panel. Shows auth / session info.
+   Never exposes secrets or tokens.
 ═══════════════════════════════════════════════════════ */
 window.snxToggleStudioDiag = function() {
   var card = document.getElementById('snxCSPreDiagCard');
@@ -2600,9 +2221,6 @@ window.snxToggleStudioDiag = function() {
 };
 
 window.snxRefreshStudioDiag = function() {
-  // Supports two panel locations:
-  //   snxCSDiagBody    — injected by _renderCloudStreamActive (active state)
-  //   snxCSDiagPreBody — static HTML in setup/pre-launch panel
   var bodyEl = document.getElementById('snxCSDiagBody') ||
                document.getElementById('snxCSDiagPreBody');
   if (!bodyEl) return;
@@ -2623,77 +2241,17 @@ window.snxRefreshStudioDiag = function() {
     return;
   }
 
-  // Build synchronous rows first
   var html = '';
   html += '<div style="color:#00AEEF;font-weight:700;margin-bottom:4px;">Creator</div>';
-  html += _diagRow('Auth UID',       uid,  'ok');
-  html += _diagRow('Display Name',   (_state.userData && (_state.userData.displayName || _state.userData.username)) || '(no profile name)');
-  html += _diagRow('Auth Provider',  (_state.user.providerData && _state.user.providerData[0] ? _state.user.providerData[0].providerId : 'unknown'));
+  html += _diagRow('Auth UID',      uid,  'ok');
+  html += _diagRow('Display Name',  (_state.userData && (_state.userData.displayName || _state.userData.username)) || '(no profile name)');
+  html += _diagRow('Auth Provider', (_state.user.providerData && _state.user.providerData[0] ? _state.user.providerData[0].providerId : 'unknown'));
   html += '<div style="color:#00AEEF;font-weight:700;margin:6px 0 4px;">Studio Session</div>';
-  html += _diagRow('CloudStream ID',    _state.cloudStreamId || '(none yet)', _state.cloudStreamId ? 'ok' : '');
-  html += _diagRow('CloudStream Status', _state.cloudStatus || 'draft', _state.cloudStatus === 'active' ? 'ok' : _state.cloudStatus === 'failed' ? 'err' : '');
-  html += '<div style="color:#00AEEF;font-weight:700;margin:6px 0 4px;">Feed Visibility</div>';
-  html += _diagRow('liveRooms doc ID', uid + ' (= your UID)');
-  html += _diagRow('Feed Entry Status', 'checking…');
-  html += '<div style="color:#00AEEF;font-weight:700;margin:6px 0 4px;">CloudStream Worker</div>';
-  html += _diagRow('Worker URL', CLOUDSTREAM_WORKER_URL);
-  html += _diagRow('Worker Status', _state.cloudStreamId ? 'checking…' : 'no stream started');
+  html += _diagRow('Session ID', _state.studioSessionId || '(none)');
+  html += _diagRow('Playlists loaded', String(_csMusic.playlists ? _csMusic.playlists.length : 0));
+  html += _diagRow('Queue length', String(_csMusic.queue ? _csMusic.queue.length : 0));
 
   bodyEl.innerHTML = html;
-
-  // Async: check liveRooms doc in Firestore
-  if (window._snxFirestore) {
-    var fs = window._snxFirestore;
-    fs.getDoc(fs.doc(fs.db, 'liveRooms', uid))
-      .then(function(snap) {
-        var feedStatus, feedClass;
-        if (snap && snap.exists()) {
-          var d = snap.data();
-          var isActive = d.isLive === true && d.status === 'live';
-          var isCS     = d.type === '24hour_cloudstream';
-          if (isActive && isCS) {
-            feedStatus = 'ACTIVE — cloudStreamId=' + (d.cloudStreamId || '?') + ' — other devices CAN see this stream ✓';
-            feedClass  = 'ok';
-          } else if (isActive) {
-            feedStatus = 'LIVE but wrong type: ' + (d.type || 'unknown') + ' (expected 24hour_cloudstream)';
-            feedClass  = 'warn';
-          } else {
-            feedStatus = 'EXISTS but not live: isLive=' + d.isLive + ', status=' + (d.status || '?');
-            feedClass  = 'warn';
-          }
-        } else {
-          feedStatus = 'MISSING — no liveRooms doc for this UID. Other devices CANNOT see this stream.';
-          feedClass  = _state.cloudStatus === 'active' ? 'err' : '';
-        }
-        _diagPatchRow(bodyEl, 'Feed Entry Status', feedStatus, feedClass);
-      })
-      .catch(function(e) {
-        _diagPatchRow(bodyEl, 'Feed Entry Status',
-          'READ ERROR (' + (e.code || 'unknown') + '): ' + e.message, 'err');
-      });
-  }
-
-  // Async: ping the CloudStream Worker health endpoint
-  if (_state.cloudStreamId) {
-    fetch(CLOUDSTREAM_WORKER_URL + '/api/stream/health/' + _state.cloudStreamId)
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        var wStatus, wClass;
-        if (data.success) {
-          wStatus = 'ALIVE — status=' + (data.status || '?') +
-            ', uptime=' + (data.uptime || 0) + 'm' +
-            ', viewers=' + (data.viewerCount || 0);
-          wClass  = data.status === 'active' ? 'ok' : 'warn';
-        } else {
-          wStatus = 'ERROR — ' + (data.error || 'unknown response');
-          wClass  = 'err';
-        }
-        _diagPatchRow(bodyEl, 'Worker Status', wStatus, wClass);
-      })
-      .catch(function(e) {
-        _diagPatchRow(bodyEl, 'Worker Status', 'UNREACHABLE — ' + e.message, 'err');
-      });
-  }
 };
 
 // Update a single labeled row that is already rendered inside bodyEl.
@@ -3340,13 +2898,7 @@ window.snxLibDeleteTrack = function(trackId) {
   Promise.all(firestoreOps).then(function() {
     _toast('Song deleted from library.');
 
-    // ── 5. Push updated queue to cloud worker (if stream is active) ──────────
-    if (csQueueChanged && _state.cloudStatus === 'active' && _state.cloudStreamId) {
-      _csMusicPushToWorker();
-      _csMusicPushToFirestore();
-    }
-
-    // ── 6. Delete R2 audio file (server-enforced ownership check) ────────────
+    // ── 5. Delete R2 audio file (server-enforced ownership check) ────────────
     if (track.r2Key && _state.user && typeof _state.user.getIdToken === 'function') {
       _state.user.getIdToken(false).then(function(idToken) {
         return fetch(UPLOAD_WORKER_URL + '/r2/delete', {
@@ -3817,170 +3369,6 @@ function _stopAudio() {
 }
 
 /* ═══════════════════════════════════════════════════════
-   26. STREAM DESTINATIONS
-═══════════════════════════════════════════════════════ */
-var DEST_TYPES = [
-  { id: 'snx',     name: 'Shadow Nexus Social', icon: '&#127768;', alwaysOn: true },
-  { id: 'youtube', name: 'YouTube',              icon: '&#127910;', alwaysOn: false },
-  { id: 'facebook',name: 'Facebook',             icon: '&#128100;', alwaysOn: false },
-  { id: 'custom',  name: 'Custom RTMP',          icon: '&#128225;', alwaysOn: false }
-];
-
-window.snxStudioLoadDestinations = function() {
-  _renderDestinations();
-  _loadDestinationStatuses();
-};
-
-function _renderDestinations() {
-  var el = document.getElementById('snxDestinationList');
-  if (!el) return;
-
-  var html = DEST_TYPES.map(function(dtype) {
-    var saved = _music.destinations.find(function(d) { return d.type === dtype.id; }) || {};
-    var connected = dtype.alwaysOn || (saved.status === 'active');
-    var statusText = dtype.alwaysOn ? '&#9989; Always connected'
-                   : connected ? '&#9989; Configured &amp; active' : '&#9898; Not configured';
-    return '<div class="snx-dest-card' + (connected ? ' connected' : '') + '" id="snxDestCard_' + dtype.id + '">' +
-      '<div class="snx-dest-header">' +
-        '<span class="snx-dest-icon">' + dtype.icon + '</span>' +
-        '<span class="snx-dest-name">' + _esc(dtype.name) + '</span>' +
-        '<span class="snx-dest-indicator' + (connected ? ' live' : '') + '"></span>' +
-      '</div>' +
-      '<div class="snx-dest-status">' + statusText + '</div>' +
-      (dtype.alwaysOn ? '' :
-        '<div class="snx-dest-actions">' +
-          '<button class="snx-dest-btn" onclick="snxDestToggleConfig(\'' + dtype.id + '\')">' +
-            (connected ? '&#9881; Configure' : '&#128279; Configure') +
-          '</button>' +
-          (connected ? '<button class="snx-dest-btn danger" onclick="snxDestRemove(\'' + dtype.id + '\')">&#10005; Remove</button>' : '') +
-        '</div>' +
-        '<div id="snxDestConfig_' + dtype.id + '" class="snx-dest-config" style="display:none;">' +
-          _renderDestConfigForm(dtype.id, saved) +
-        '</div>'
-      ) +
-      (connected && !dtype.alwaysOn ?
-        '<div class="snx-dest-health">' +
-          '<div class="snx-dest-health-tile"><div class="dht-val" id="snxDestBr_' + dtype.id + '">—</div><div class="dht-lbl">Bitrate</div></div>' +
-          '<div class="snx-dest-health-tile"><div class="dht-val" id="snxDestFps_' + dtype.id + '">—</div><div class="dht-lbl">FPS</div></div>' +
-          '<div class="snx-dest-health-tile"><div class="dht-val" id="snxDestLast_' + dtype.id + '">—</div><div class="dht-lbl">Last beat</div></div>' +
-          '<div class="snx-dest-health-tile"><div class="dht-val" id="snxDestErr_' + dtype.id + '">0</div><div class="dht-lbl">Errors</div></div>' +
-        '</div>' : '') +
-    '</div>';
-  }).join('');
-
-  el.innerHTML = html;
-}
-
-function _renderDestConfigForm(type, saved) {
-  var rtmpUrl = saved.rtmpUrl ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : '';
-  var streamKey = saved.streamKey ? '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;' : '';
-  var labels = {
-    youtube:  { url: 'RTMP URL',   key: 'Stream Key',   urlPlaceholder: 'rtmp://a.rtmp.youtube.com/live2', note: 'Get your stream key from YouTube Studio → Go Live → Stream settings.' },
-    facebook: { url: 'Stream URL', key: 'Stream Key',   urlPlaceholder: 'rtmps://live-api-s.facebook.com:443/rtmp/', note: 'Get from Facebook Live → Advanced → Stream Key.' },
-    custom:   { url: 'RTMP URL',   key: 'Stream Key',   urlPlaceholder: 'rtmp://your-server/live', note: 'Any RTMP-compatible destination.' }
-  };
-  var lbl = labels[type] || labels.custom;
-  return '<div class="snx-dest-config-field">' +
-    '<div class="snx-dest-config-label">' + lbl.url + '</div>' +
-    '<input class="snx-dest-key-input" type="url" id="snxDestUrl_' + type + '" placeholder="' + lbl.urlPlaceholder + '" autocomplete="off">' +
-  '</div>' +
-  '<div class="snx-dest-config-field">' +
-    '<div class="snx-dest-config-label">' + lbl.key + '</div>' +
-    '<input class="snx-dest-key-input" type="password" id="snxDestKey_' + type + '" placeholder="&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;&#9679;" autocomplete="off">' +
-    (saved.streamKey ? '<div class="snx-dest-config-note">&#128274; Key is saved securely. Enter a new key to replace it. Keys are never returned to the browser.</div>' : '') +
-  '</div>' +
-  '<div class="snx-dest-config-note">' + lbl.note + '</div>' +
-  '<div style="margin-top:10px;">' +
-    '<button class="snx-dest-btn" onclick="snxDestSave(\'' + type + '\')">&#128190; Save Destination</button>' +
-  '</div>';
-}
-
-window.snxDestToggleConfig = function(type) {
-  var cfg = document.getElementById('snxDestConfig_' + type);
-  if (!cfg) return;
-  cfg.style.display = cfg.style.display === 'none' ? '' : 'none';
-};
-
-window.snxDestSave = function(type) {
-  if (!_state.user) { _toastError('Sign in required.'); return; }
-  var urlEl = document.getElementById('snxDestUrl_' + type);
-  var keyEl = document.getElementById('snxDestKey_' + type);
-  var rtmpUrl  = urlEl ? urlEl.value.trim() : '';
-  var streamKey = keyEl ? keyEl.value.trim() : '';
-  if (!rtmpUrl) { _toastError('Please enter an RTMP URL.'); return; }
-  if (!streamKey) { _toastError('Please enter a stream key.'); return; }
-
-  // Send to worker — keys are stored server-side in KV, never returned to browser
-  var saveBody = JSON.stringify({
-    uid: _state.user.uid,
-    type: type,
-    rtmpUrl: rtmpUrl,
-    streamKey: streamKey   // sent once over HTTPS; worker stores it, never returns it
-  });
-  _snxWorkerHeaders().then(function(headers) {
-    return fetch(CLOUDSTREAM_WORKER_URL + '/api/destinations/save', {
-      method: 'POST',
-      headers: headers,
-      body: saveBody
-    });
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.success) {
-      // Clear form fields — key must not persist in DOM
-      if (urlEl) urlEl.value  = '';
-      if (keyEl) keyEl.value  = '';
-      var existing = _music.destinations.findIndex(function(d) { return d.type === type; });
-      var rec = { type: type, rtmpUrl: '[saved]', streamKey: '[saved]', status: 'active' };
-      if (existing === -1) _music.destinations.push(rec);
-      else _music.destinations[existing] = rec;
-      _renderDestinations();
-      _toast(type + ' destination saved.');
-    } else {
-      _toastError(data.error || 'Failed to save destination.');
-    }
-  })
-  .catch(function(e) { _toastError('Could not reach worker: ' + e.message); });
-};
-
-window.snxDestRemove = function(type) {
-  if (!confirm('Remove ' + type + ' destination?')) return;
-  if (!_state.user) return;
-  var removeBody = JSON.stringify({ uid: _state.user.uid, type: type });
-  _snxWorkerHeaders().then(function(headers) {
-    return fetch(CLOUDSTREAM_WORKER_URL + '/api/destinations/remove', {
-      method: 'POST',
-      headers: headers,
-      body: removeBody
-    });
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(data) {
-    if (data.success) {
-      _music.destinations = _music.destinations.filter(function(d) { return d.type !== type; });
-      _renderDestinations();
-      _toast(type + ' destination removed.');
-    } else {
-      _toastError(data.error || 'Failed to remove destination.');
-    }
-  })
-  .catch(function(e) { _toastError('Could not reach worker: ' + e.message); });
-};
-
-function _loadDestinationStatuses() {
-  if (!_state.user) return;
-  fetch(CLOUDSTREAM_WORKER_URL + '/api/destinations/list?uid=' + encodeURIComponent(_state.user.uid))
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.destinations) {
-        _music.destinations = data.destinations;
-        _renderDestinations();
-      }
-    })
-    .catch(function() {}); // non-fatal — destinations are optional
-}
-
-/* ═══════════════════════════════════════════════════════
    27. SCHEDULED MUSIC ROTATION
 ═══════════════════════════════════════════════════════ */
 window.snxScheduleAddEntry = function() {
@@ -4021,8 +3409,6 @@ function _renderSchedule() {
 }
 
 function _saveScheduleToWorker() {
-  // Studio saves the broadcast schedule to Firestore only.
-  // cloud-stream.js / cloudstream-worker.js reads and executes the schedule.
   if (!_state.user || !window._snxFirestore) return;
   var fs  = window._snxFirestore;
   var uid = _state.user.uid;
@@ -4041,9 +3427,6 @@ window.snxSelectVisPreset = function(preset) {
     btn.classList.toggle('active', btn.dataset.preset === preset);
   });
   _toast('Visualizer: ' + preset);
-  if (_state.cloudStreamId && _state.cloudStatus === 'active') {
-    _cloudStreamRPC({ action: 'setVisualizer', preset: preset });
-  }
 };
 
 /* ═══════════════════════════════════════════════════════
@@ -4080,7 +3463,6 @@ var _origInitMusicMode = typeof _initMusicMode === 'function' ? _initMusicMode :
 // Patched from inside IIFE — _initMusicMode is in same scope, we reassign it
 (function() {
   // Patch snxStudioSwitchMode to also call _initMusicLibrary when mode === 'music'.
-  // The cloudstream mode trigger is now handled by _switchSection / snxCSSwitchTab.
   var _origSwitchMode = window.snxStudioSwitchMode;
   window.snxStudioSwitchMode = function(mode) {
     if (_origSwitchMode) _origSwitchMode.call(this, mode);
@@ -4109,29 +3491,6 @@ var _origInitMusicMode = typeof _initMusicMode === 'function' ? _initMusicMode :
 })();
 
 /* ═══════════════════════════════════════════════════════
-   27. CLOUDSTREAM WORKER AUTH HEADER HELPER
-   Returns a headers object with:
-     Content-Type: application/json
-     Authorization: Bearer <Firebase ID token>
-   The ID token is obtained from the authenticated user so
-   the CloudStream worker can verify the caller's identity
-   server-side.  If no user is signed in, returns headers
-   without the Authorization entry (worker will reject).
-═══════════════════════════════════════════════════════ */
-function _snxWorkerHeaders(extraHeaders) {
-  var base = Object.assign({ 'Content-Type': 'application/json' }, extraHeaders || {});
-  var user = _state.user;
-  if (!user || typeof user.getIdToken !== 'function') return Promise.resolve(base);
-  return user.getIdToken(/* forceRefresh */ false).then(function(token) {
-    base['Authorization'] = 'Bearer ' + token;
-    return base;
-  }).catch(function() {
-    // Token fetch failed — proceed without auth header; worker will enforce.
-    return base;
-  });
-}
-
-/* ═══════════════════════════════════════════════════════
    30. STUDIO QUEUE (_sq) — Permanent Always-On Queue
    ─────────────────────────────────────────────────────
    A simplified music queue for content preparation.
@@ -4141,9 +3500,7 @@ function _snxWorkerHeaders(extraHeaders) {
        { uid, queue:[{id,title,artist,url,duration,addedAt}],
          queueIndex, playing, updatedAt }
 
-   Studio saves the queue to Firestore only.
-   cloud-stream.js imports the queue when the creator opens Cloud Stream.
-   The canonical Cloud Stream engine sends broadcast commands to the worker.
+   Studio saves the queue to Firestore for normal music management.
 ═══════════════════════════════════════════════════════ */
 
 var _sq = {
@@ -4180,11 +3537,6 @@ function _sqLoad() {
       } else if (!d.playing && _sq.audio) {
         _sqStopLocalPreview();
       }
-      // Re-sync to worker + viewer channel on every load/restore (handles browser refresh)
-      if (_sq.queue.length && _state.cloudStreamId) {
-        _sqPushToWorker();
-        _sqPushToFirestore();
-      }
       _sqRenderQueue();
       _sqRenderLibraryButtons();
     },
@@ -4212,11 +3564,7 @@ function _sqSave() {
   // Errors propagated to caller — NOT silently swallowed here
 }
 
-/* _sqPushToWorker / _sqPushToFirestore:
-   No-ops in Studio — broadcast writes are owned by cloud-stream.js.
-   Studio Queue persists to studioQueue/{uid} (Firestore) so the creator
-   can manage tracks; the canonical Cloud Stream engine reads this data
-   at stream-start time.  Broadcast state is NOT written from Studio. */
+/* _sqPushToWorker / _sqPushToFirestore: no-ops kept for call-site safety. */
 function _sqPushToWorker()    {}
 function _sqPushToFirestore() {}
 
@@ -4443,16 +3791,9 @@ _renderLibrary = function() {
 })(); // end IIFE
 
 /* ═══════════════════════════════════════════════════════
-   31. SIMPLIFIED 24-HOUR CLOUD STREAM CONTROLLER
-   ─────────────────────────────────────────────────────
-   Controls the simplified 7-feature panel:
+   31. LIVE STUDIO AUX CONTROLLER
+   Controls the simplified audio panel:
      Music · Output · Input · Both · Picture · Camera · Mic
-
-   All audio ultimately flows through the existing
-   _sq (Studio Queue) → cloudstream-worker pipeline.
-   This controller wires the simplified UI to those
-   existing backend functions — it does NOT create a
-   second streaming architecture.
 ═══════════════════════════════════════════════════════ */
 
 (function() {
@@ -4522,11 +3863,8 @@ window.snxsSetMicVol = function(val) {
 window.snxsSetMusicVol = function(val) {
   var v = document.getElementById('snxsMusicVolVal');
   if (v) v.textContent = val;
-  // Push new volume to queue system
   _csMusic.volume = parseInt(val, 10) || 80;
   if (_sq && _sq.audio) { _sq.audio.volume = (parseInt(val, 10) || 80) / 100; }
-  // Push updated volume to worker if streaming
-  if (_state.cloudStreamId) { _sqPushToWorker(); }
 };
 
 /* ── Picture ── */
@@ -4797,111 +4135,11 @@ function _snxsStopUptime() {
   if (el) el.textContent = '';
 }
 
-/* ── Status bar update ── */
-function _snxsUpdateStatus(state) {
-  var bar  = document.getElementById('snxSimpleStatusBar');
-  var text = document.getElementById('snxSimpleStatusText');
-  if (!bar || !text) return;
-  bar.className = 'snxs-status-bar';
-  if (state === 'live') {
-    bar.classList.add('snxs-status-live');
-    text.textContent = '☁️ Cloud Stream LIVE';
-  } else if (state === 'starting') {
-    bar.classList.add('snxs-status-starting');
-    text.textContent = '⏳ Starting…';
-  } else {
-    bar.classList.add('snxs-status-off');
-    text.textContent = 'Not streaming';
-    _snxsStopUptime();
-  }
-}
-
-/* ── START STREAM — bridges simplified UI to existing snxStartCloudStream ── */
-/* snxsStartStream — redirects to the separate Cloud Stream system (cloud-stream.html).
-   The embedded start flow has been removed; Go Live lives exclusively in cloud-stream.html. */
-window.snxsStartStream = function() {
-  window.location.href = 'cloud-stream.html';
-};
-
-/* snxsStartStream redirects to cloud-stream.html — the user leaves Studio immediately.
-   No handoff polling is needed here; broadcast state is owned by cloud-stream.js. */
-
-function _snxsOnStreamActive() {
-  _snxsUpdateStatus('live');
-  _snxsStartUptime();
-  var stopBtn  = document.getElementById('snxCSStopBtn');
-  if (stopBtn)  { stopBtn.style.display  = ''; }
-  // Show now playing, hide idle message
-  var npEl   = document.getElementById('snxsNowPlaying');
-  var idleEl = document.getElementById('snxsNowPlayingIdle');
-  if (npEl)   npEl.style.display   = '';
-  if (idleEl) idleEl.style.display = 'none';
-  _toast('☁️ Cloud Stream is LIVE! You may close the app.');
-}
-
-function _snxsOnStreamStopped() {
-  _snxsUpdateStatus('off');
-  _snxsStopUptime();
-  var stopBtn = document.getElementById('snxCSStopBtn');
-  if (stopBtn) stopBtn.style.display = 'none';
-  // Hide now playing, show idle message
-  var npEl   = document.getElementById('snxsNowPlaying');
-  var idleEl = document.getElementById('snxsNowPlayingIdle');
-  if (npEl)   npEl.style.display   = 'none';
-  if (idleEl) idleEl.style.display = '';
-  // Reset listener count
-  var listenerVal = document.getElementById('snxCSListenerVal');
-  if (listenerVal) listenerVal.textContent = '0';
-}
-
-/* ── Patch snxCSStop to update simplified UI ── */
-var _origCSStop = window.snxCSStop;
-window.snxCSStop = function() {
-  if (typeof _origCSStop === 'function') _origCSStop();
-  _snxsOnStreamStopped();
-};
-
-/* ── Now playing bar refresh — hook into _sqRenderQueue ── */
-var _origSqRender = window._snxSqRenderHook;
-// Poll-based refresh (lightweight — runs only when cloudstream section is visible)
-setInterval(function() {
-  if (_state.currentSection !== 'cloudstream') return;
-  _snxsUpdateNowPlaying();
-  // Keep SQPlayPause button in sync
-  var ppBtn = document.getElementById('snxsPlayPauseBtn');
-  if (ppBtn) ppBtn.textContent = (_sq && _sq.playing) ? '⏸' : '▶';
-}, 800);
-
-/* ── On section switch to cloudstream, init simple UI ── */
-var _origSwitchSection = window.snxStudioSwitchSection;
-window.snxStudioSwitchSection = function(section) {
-  if (typeof _origSwitchSection === 'function') _origSwitchSection(section);
-  if (section === 'cloudstream') {
-    // Init library if not already done
-    if (typeof _initMusicLibrary === 'function') {
-      setTimeout(_initMusicLibrary, 60);
-    }
-    // Render CS library (simplified panel uses snxCSTrackLibraryList)
-    if (typeof _renderCSLibrary === 'function') {
-      setTimeout(_renderCSLibrary, 80);
-    }
-    // Load SQ queue from Firestore
-    if (typeof _sqLoad === 'function') {
-      setTimeout(_sqLoad, 100);
-    }
-    // Sync status bar with current cloud stream state
-    setTimeout(function() {
-      var st = _state.cloudStatus;
-      if (st === 'active') {
-        _snxsOnStreamActive();
-      } else if (st === 'starting') {
-        _snxsUpdateStatus('starting');
-      } else {
-        _snxsOnStreamStopped();
-      }
-    }, 200);
-  }
-};
+/* ── Status placeholder — kept so any remaining callers don't throw ── */
+function _snxsUpdateStatus(state) {}
+function _snxsOnStreamActive()   {}
+function _snxsOnStreamStopped()  {}
+window.snxsStartStream = function() {};
 
 })(); // end simplified controller IIFE
 
@@ -4970,10 +4208,6 @@ window.snxStudioTabSwitch = function(tab, btn) {
   if (tab === 'upload') {
     // After upload, switch back to music tab automatically
     // (no extra init needed — file input triggers upload from any tab)
-  }
-  if (tab === 'stream') {
-    // Stream tab now redirects to the Eternal Stream standalone page (cloud-stream.html).
-    // Navigation is handled by the tab button's onclick — no SPA init needed here.
   }
 };
 
@@ -5067,453 +4301,11 @@ window.snxStudioRefreshQueueLib = function() {
 
 
 /* ═══════════════════════════════════════════════════════
-   33. PLAYING TAB — Server Channel Status & Controls
-   ─────────────────────────────────────────────────────
-   Polls the canonical CloudStream Worker for live state.
-   Displays: CLOUD ENGINE, SCHEDULER, NOW TRANSMITTING,
-             progress, viewers, likes, UP NEXT.
-   Creator controls: Play/Pause, Prev, Skip, Stop Channel.
-   DOES NOT run a local playback engine — all calls go
-   through the server API (cloudstream-worker.js).
+   33. PLAYING TAB — stub only (Cloud Stream removed)
+   NP controls are no-ops since Cloud Stream is gone.
 ═══════════════════════════════════════════════════════ */
-
-(function() {
-
-var _WORKER_URL = 'https://snx-cloudstream.nthntjrn.workers.dev';
-
-var _np = {
-  streamId:       null,
-  status:         'offline',    // 'active' | 'offline' | 'connecting'
-  engineOk:       null,         // null = unchecked, true/false
-  paused:         false,
-  interval:       null,
-  progressRaf:    null,
-  // current track
-  title:          '',
-  artist:         '',
-  duration:       0,
-  artworkUrl:     '',
-  mediaType:      'music',
-  startedAt:      0,
-  pausedAt:       0,
-  seekPosition:   0,
-  nextTitle:      '',
-  viewerCount:    0,
-  likeCount:      0
-};
-
-/* ── tiny helpers ── */
-function _el(id)     { return document.getElementById(id); }
-function _txt(id, v) { var e = _el(id); if (e) e.textContent = v || ''; }
-function _show(id, v){ var e = _el(id); if (e) e.style.display = v ? '' : 'none'; }
-
-function _fmtDur(secs) {
-  secs = Math.floor(secs || 0);
-  if (secs <= 0) return '0:00';
-  var h = Math.floor(secs / 3600);
-  var m = Math.floor((secs % 3600) / 60);
-  var s = secs % 60;
-  if (h > 0) return h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-  return m + ':' + (s < 10 ? '0' : '') + s;
-}
-
-/* ── engine status display ── */
-function _setEngineStatus(ok) {
-  _np.engineOk = ok;
-  var el  = _el('snxNPEngineStatus');
-  var txt = _el('snxNPEngineText');
-  if (!el || !txt) return;
-  if (ok) {
-    el.style.borderColor = 'rgba(57,255,20,0.30)';
-    el.style.background  = 'rgba(57,255,20,0.06)';
-    txt.style.color      = '#39ff14';
-    txt.textContent      = 'CLOUD ENGINE: CONNECTED';
-  } else {
-    el.style.borderColor = 'rgba(255,51,85,0.30)';
-    el.style.background  = 'rgba(255,51,85,0.06)';
-    txt.style.color      = '#ff3355';
-    txt.textContent      = 'CLOUD ENGINE: DISCONNECTED';
-  }
-}
-
-/* ── channel banner ── */
-function _setChannelBanner(live, statusText) {
-  var el = _el('snxNPChannelBanner');
-  if (!el) return;
-  if (live) {
-    el.style.display    = '';
-    el.style.background = 'rgba(57,255,20,0.08)';
-    el.style.border     = '1px solid rgba(57,255,20,0.30)';
-    el.style.color      = '#39ff14';
-    el.textContent      = '🔴 CHANNEL: LIVE — ' + (statusText || 'ACTIVE');
-  } else {
-    el.style.display    = '';
-    el.style.background = 'rgba(90,128,168,0.08)';
-    el.style.border     = '1px solid rgba(90,128,168,0.25)';
-    el.style.color      = '#5a80a8';
-    el.textContent      = '⚫ CHANNEL: OFFLINE';
-  }
-}
-
-/* ── scheduler status ── */
-function _setSchedulerStatus(active, nextIn, musicStatus) {
-  var row = _el('snxNPSchedulerRow');
-  if (!row) return;
-  row.style.display = '';
-  if (active) {
-    var nextStr = nextIn != null ? _fmtDur(nextIn) : '—';
-    row.textContent  = '⚙ SERVER SCHEDULER: ACTIVE · NEXT IN: ' + nextStr;
-    row.style.color  = '#39ff14';
-  } else if (musicStatus === 'paused') {
-    row.textContent  = '⏸ SERVER SCHEDULER: PAUSED';
-    row.style.color  = '#ffaa00';
-  } else {
-    row.textContent  = '⚠ SERVER SCHEDULER: UNAVAILABLE';
-    row.style.color  = '#ff3355';
-  }
-}
-
-/* ── now transmitting card ── */
-function _renderNPCard(data) {
-  _txt('snxNPTitle',  data.title  || '—');
-  _txt('snxNPArtist', data.artist || '');
-  _txt('snxNPMeta',   data.mediaType === 'video' ? '🎬 Video' :
-                      data.mediaType === 'picture' ? '🖼 Picture' : '🎵 Music');
-
-  // Artwork
-  var artEl = _el('snxNPArtwork');
-  if (artEl) {
-    if (data.artworkUrl) {
-      artEl.innerHTML = '<img src="' + data.artworkUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:10px;">';
-    } else {
-      artEl.innerHTML = '&#127925;';
-    }
-  }
-
-  _txt('snxNPDuration', _fmtDur(data.duration));
-
-  // UP NEXT (immediate next track label)
-  if (data.nextTitle) {
-    _show('snxNPNextRow', true);
-    _txt('snxNPNextTitle', data.nextTitle);
-  } else {
-    _show('snxNPNextRow', false);
-  }
-
-  // PROPHECY QUEUE (up to 5 upcoming tracks)
-  var qSection = _el('snxNPQueueSection');
-  if (qSection) {
-    if (data.upNext && data.upNext.length) {
-      var html = '<div style="font-size:9px;letter-spacing:1.5px;color:#3a5a7a;margin-bottom:6px;font-weight:700;">PROPHECY QUEUE</div>';
-      for (var qi = 0; qi < data.upNext.length; qi++) {
-        var qt = data.upNext[qi];
-        var qIcon = qt.mediaType === 'video' ? '🎬' : qt.mediaType === 'picture' ? '🖼' : '𓆣';
-        html += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;background:rgba(0,174,239,0.04);border:1px solid rgba(0,174,239,0.09);margin-bottom:5px;">'
-          + '<span style="font-size:13px;flex-shrink:0;">' + qIcon + '</span>'
-          + '<div style="flex:1;min-width:0;">'
-          +   '<div style="font-size:11px;color:#7abadc;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _escHtml(qt.title || 'Untitled') + '</div>'
-          + (qt.artist ? '<div style="font-size:10px;color:#3a5a7a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _escHtml(qt.artist) + '</div>' : '')
-          + '</div>'
-          + '</div>';
-      }
-      qSection.innerHTML = html;
-      qSection.style.display = '';
-    } else {
-      qSection.style.display = 'none';
-    }
-  }
-
-  // Viewers + Likes
-  _txt('snxNPViewers', String(data.viewerCount || 0));
-  _txt('snxNPLikes',   String(data.likeCount   || 0));
-
-  // Pause/Resume button label
-  var ppBtn = _el('snxNPPlayPauseBtn');
-  if (ppBtn) ppBtn.textContent = data.paused ? '▶ RESUME' : '⏸ PAUSE';
-
-  // Store for progress RAF
-  _np.title       = data.title     || '';
-  _np.duration    = data.duration  || 0;
-  _np.startedAt   = data.startedAt || 0;
-  _np.pausedAt    = data.pausedAt  || 0;
-  _np.seekPosition= data.seekPosition || 0;
-  _np.paused      = !!data.paused;
-}
-
-/* ── HTML-escape helper for queue items ── */
-function _escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-/* ── progress RAF ── */
-function _startProgressRaf() {
-  _stopProgressRaf();
-  function tick() {
-    _np.progressRaf = requestAnimationFrame(tick);
-    var dur = _np.duration;
-    if (!dur || !_np.startedAt) return;
-    var elapsed;
-    if (_np.paused) {
-      elapsed = _np.seekPosition;
-    } else {
-      elapsed = _np.seekPosition + (Date.now() - _np.startedAt) / 1000;
-    }
-    elapsed = Math.max(0, Math.min(elapsed, dur));
-    var pct = (elapsed / dur) * 100;
-    var fill = _el('snxNPProgressFill');
-    if (fill) fill.style.width = pct.toFixed(2) + '%';
-    _txt('snxNPCurrentTime', _fmtDur(elapsed));
-  }
-  tick();
-}
-function _stopProgressRaf() {
-  if (_np.progressRaf) { cancelAnimationFrame(_np.progressRaf); _np.progressRaf = null; }
-}
-
-/* ── main poll ── */
-async function _pollServer() {
-  // 1. Ping health (engine status)
-  try {
-    var hr = await fetch(_WORKER_URL + '/health', { signal: AbortSignal.timeout(6000) });
-    _setEngineStatus(hr.ok);
-    if (!hr.ok) {
-      _setChannelBanner(false, null);
-      _txt('snxNPTitle', '—');
-      _show('snxNPControls', false);
-      return;
-    }
-  } catch(e) {
-    _setEngineStatus(false);
-    _setChannelBanner(false, null);
-    _show('snxNPControls', false);
-    return;
-  }
-
-  // 2. Find user's active stream
-  var user = window._snxCurrentUser;
-  if (!user) return;
-
-  try {
-    var fs = window._snxFirestore;
-    if (!fs) return;
-
-    var snap = await fs.getDocs(fs.query(
-      fs.collection(fs.db, 'cloudStreams'),
-      fs.where('uid', '==', user.uid),
-      fs.where('status', 'in', ['active', 'starting', 'recovering']),
-      fs.limit(1)
-    ));
-
-    if (!snap || !snap.docs || !snap.docs.length) {
-      _np.streamId = null;
-      _np.status   = 'offline';
-      _setChannelBanner(false, null);
-      _txt('snxNPTitle', '—');
-      _txt('snxNPArtist', '');
-      _txt('snxNPMeta', 'Start your channel from THE ETERNAL STREAM');
-      _show('snxNPControls', false);
-      _show('snxNPSchedulerRow', false);
-      _stopProgressRaf();
-      return;
-    }
-
-    var streamDoc     = snap.docs[0];
-    var streamDocData = streamDoc.data();
-    _np.streamId = streamDoc.id;
-    _np.status   = 'active';
-
-    // 3. Get channel state from worker (includes upNext queue)
-    var sr = await fetch(_WORKER_URL + '/api/stream/channel/' + _np.streamId,
-      { signal: AbortSignal.timeout(8000) });
-    if (!sr.ok) { _setChannelBanner(true, 'ACTIVE'); return; }
-    var sd = await sr.json();
-    if (!sd.success) { _setChannelBanner(true, 'ACTIVE'); return; }
-
-    _setChannelBanner(true, sd.status ? sd.status.toUpperCase() : 'ACTIVE');
-    _show('snxNPControls', true);
-
-    // Scheduler status
-    try {
-      var scr = await fetch(_WORKER_URL + '/api/stream/scheduler-status/' + _np.streamId,
-        { signal: AbortSignal.timeout(6000) });
-      if (scr.ok) {
-        var scd = await scr.json();
-        if (scd.success) _setSchedulerStatus(scd.schedulerActive, scd.nextTransitionIn, scd.musicStatus);
-      }
-    } catch(e2) {}
-
-    // Channel endpoint returns media fields in a nested .media object
-    var m = sd.media || {};
-    // Now playing data
-    var nowData = {
-      title:       m.currentTitle          || '—',
-      artist:      m.currentArtist         || '',
-      duration:    m.currentDuration       || 0,
-      artworkUrl:  m.artworkUrl            || '',
-      mediaType:   m.mediaType             || 'music',
-      nextTitle:   m.nextTitle             || '',
-      upNext:      m.upNext                || [],
-      paused:      m.musicStatus === 'paused',
-      viewerCount: sd.viewerCount          || streamDocData.viewerCount || 0,
-      likeCount:   streamDocData.likeCount || sd.likeCount              || 0,
-      startedAt:   m.lastAdvancedAt        ? new Date(m.lastAdvancedAt).getTime()
-                                           : (Date.now() - (m.seekPosition || 0) * 1000),
-      seekPosition:typeof m.seekPosition === 'number' ? m.seekPosition : 0,
-      pausedAt:    0
-    };
-    if (m.musicStatus === 'paused') {
-      nowData.startedAt    = Date.now();
-      nowData.seekPosition = m.pausedPosition || m.seekPosition || 0;
-      nowData.paused       = true;
-    }
-
-    _renderNPCard(nowData);
-
-    if (!nowData.paused && nowData.title !== '—') {
-      _startProgressRaf();
-    } else {
-      _stopProgressRaf();
-      var fill = _el('snxNPProgressFill');
-      if (fill) {
-        var pct = nowData.duration > 0 ? (nowData.seekPosition / nowData.duration) * 100 : 0;
-        fill.style.width = pct.toFixed(2) + '%';
-      }
-    }
-
-  } catch(e) {
-    console.warn('[SNX NP] poll error:', e.message);
-  }
-}
-
-/* ── start polling when tab is opened ── */
-function _startPolling() {
-  _pollServer();
-  if (!_np.interval) {
-    _np.interval = setInterval(_pollServer, 15000);
-  }
-}
-function _stopPolling() {
-  if (_np.interval) { clearInterval(_np.interval); _np.interval = null; }
-  _stopProgressRaf();
-}
-
-/* ── hook into tab switch ── */
-var _origTabSwitch = window.snxStudioTabSwitch;
-window.snxStudioTabSwitch = function(tab, btn) {
-  if (_origTabSwitch) _origTabSwitch.apply(this, arguments);
-  if (tab === 'nowplaying') {
-    _startPolling();
-  } else {
-    _stopPolling();
-  }
-};
-
-/* ── Public controls (call server API via cloud-stream.js functions) ── */
-
-window.snxNPPlayPause = function() {
-  var user = window._snxCurrentUser;
-  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
-  user.getIdToken(false).then(function(tok) {
-    var action = _np.paused ? 'resume' : 'pause';
-    return fetch(_WORKER_URL + '/api/stream/music/control', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid, action: action })
-    });
-  }).then(function() {
-    setTimeout(_pollServer, 800);
-  }).catch(function(e) {
-    console.warn('[SNX NP] play/pause failed:', e.message);
-  });
-};
-
-window.snxNPSkip = function() {
-  var user = window._snxCurrentUser;
-  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
-  user.getIdToken(false).then(function(tok) {
-    return fetch(_WORKER_URL + '/api/stream/music/control', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid, action: 'next' })
-    });
-  }).then(function() {
-    setTimeout(_pollServer, 1200);
-  }).catch(function(e) {
-    console.warn('[SNX NP] skip failed:', e.message);
-  });
-};
-
-window.snxNPPrev = function() {
-  var user = window._snxCurrentUser;
-  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
-  user.getIdToken(false).then(function(tok) {
-    return fetch(_WORKER_URL + '/api/stream/music/control', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: _np.streamId, uid: user.uid, action: 'previous' })
-    });
-  }).then(function() {
-    setTimeout(_pollServer, 1200);
-  }).catch(function(e) {
-    console.warn('[SNX NP] prev failed:', e.message);
-  });
-};
-
-window.snxNPStopChannel = function() {
-  if (!confirm('Stop the channel? This will end the broadcast.')) return;
-  var user = window._snxCurrentUser;
-  if (!user || !_np.streamId) { window.location.href = 'cloud-stream.html'; return; }
-  var sid = _np.streamId;
-  user.getIdToken(false).then(function(tok) {
-    return fetch(_WORKER_URL + '/api/stream/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok },
-      body: JSON.stringify({ streamId: sid, uid: user.uid })
-    });
-  }).then(function() {
-    // Mirror stop in Firestore so viewers see the channel go offline
-    var fs = window._snxFirestore;
-    if (fs && sid) {
-      var now = fs.serverTimestamp ? fs.serverTimestamp() : new Date();
-      fs.updateDoc(fs.doc(fs.db, 'cloudStreams', sid),
-        { status: 'stopped', stoppedAt: now }).catch(function(){});
-      fs.updateDoc(fs.doc(fs.db, 'studioCloudStreamMusic', sid),
-        { status: 'stopped', stoppedAt: now }).catch(function(){});
-      if (user.uid) {
-        fs.updateDoc(fs.doc(fs.db, 'liveRooms', user.uid),
-          { isLive: false, status: 'ended', updatedAt: now }).catch(function(){});
-      }
-    }
-    _np.streamId = null;
-    _np.status   = 'offline';
-    _setChannelBanner(false, null);
-    _txt('snxNPTitle', '—');
-    _txt('snxNPArtist', '');
-    _show('snxNPControls', false);
-    _show('snxNPNextRow', false);
-    _show('snxNPQueueSection', false);
-    _stopProgressRaf();
-  }).catch(function(e) {
-    console.warn('[SNX NP] stop failed:', e.message);
-  });
-};
-
-/* Initial engine ping when studioPage loads */
-(function() {
-  function _tryPing() {
-    if (document.getElementById('snxNPEngineStatus')) {
-      // Do a silent engine ping so the status bar isn't stuck on "CHECKING"
-      fetch(_WORKER_URL + '/health', { signal: AbortSignal.timeout(5000) })
-        .then(function(r) { if (r.ok) _setEngineStatus(true); else _setEngineStatus(false); })
-        .catch(function() { _setEngineStatus(false); });
-    }
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() { setTimeout(_tryPing, 2000); });
-  } else {
-    setTimeout(_tryPing, 2000);
-  }
-})();
-
-})(); // end Playing tab IIFE
+window.snxNPPlayPause   = function() {};
+window.snxNPSkip        = function() {};
+window.snxNPPrev        = function() {};
+window.snxNPStopChannel = function() {};
 

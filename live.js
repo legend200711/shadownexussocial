@@ -133,9 +133,9 @@ let _facingMode   = 'user';
 
 /* ── Audio Mixer state (creator only) ── */
 let _audioMixer     = null;   // SNXAudioMixer instance
-let _csQueue        = [];     // CloudStream music queue  [{id,title,artist,url,duration}]
+let _csQueue        = [];     // Music queue for live mixer [{id,title,artist,url,duration}]
 let _csQueueIndex   = 0;      // index into _csQueue
-let _csMusicPlaying = false;  // whether CS music is currently playing in the mixer
+let _csMusicPlaying = false;  // whether music is currently playing in the mixer
 let _csMusicVolume  = 80;     // 0-100 (maps to 0.0-1.0 for GainNode)
 let _csMicVolume    = 100;    // 0-100
 
@@ -411,7 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (msg.type === 'snx_toggle_mic' && _mode === 'creator') { toggleLiveMic();  }
     if (msg.type === 'snx_flip_cam'   && _mode === 'creator') { flipLiveCamera(); }
 
-    // ── Cloud Stream audio mixer commands (creator only) ──
+    // ── Live mixer music commands (from Studio, creator only) ──
     if (_mode === 'creator') {
       if (msg.type === 'snx_music_set_queue' && Array.isArray(msg.queue)) {
         _csQueue      = msg.queue;
