@@ -73,6 +73,11 @@ let _fsHideTimer       = null;
 let _tvActive          = false;   // true while tvPage is visible
 let _visibilityListenerAdded = false;
 
+// Stage 4 — Main TV Feature state
+let _mainTvUnsub       = null;   // Firestore subscription for mainTvState/current
+let _mainTvState       = null;   // cached mainTvState document data
+let _featureMounted    = false;  // true while a featured live is showing in player
+
 /* ════════════════════════════════════════════════════
    PUBLIC ENTRY POINTS (called by SNS index.html)
 ════════════════════════════════════════════════════ */
@@ -128,6 +133,9 @@ function _startWithUser(user) {
   console.log('[24TV] Engine starting — user:', user?.email || 'anonymous');
   _user      = user;
   _isFounder = !!(user && user.email?.trim().toLowerCase() === FOUNDER_EMAIL.toLowerCase());
+
+  // Subscribe to Main TV feature state (all users — they need to react to featured live)
+  _subscribeMainTvState();
 
   // ── RE-ENTRY: network already initialised, viewer returning to tvPage ────────
   // Do NOT show a loading screen or recreate the entire shell.
@@ -293,7 +301,7 @@ function _rebuildTvShell() {
     <!-- ── Page header ── -->
     <div class="snx-tv-header">
       <div class="snx-tv-title-wrap">
-        <div class="snx-tv-title">📺 24-HOUR TV</div>
+        <div class="snx-tv-title">📺 SHADOW NEXUS TV</div>
         <div class="snx-tv-status" id="snx-tv-status">
           <span class="snx-tv-status-dot" id="snx-tv-status-dot"></span>
           <span id="snx-tv-status-text">CONNECTING</span>
@@ -554,21 +562,182 @@ function _rebuildTvShell() {
 function _renderFounderBar() {
   const bar = document.getElementById('snx-tv-founder-bar');
   if (!bar) return;
-  bar.style.display = 'flex';
-  bar.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 14px;background:rgba(57,255,20,0.06);border-bottom:1px solid rgba(57,255,20,0.18);font-size:12px;';
+  bar.style.display = 'block';
+  bar.style.cssText = 'display:block;background:rgba(57,255,20,0.04);border-bottom:1px solid rgba(57,255,20,0.18);font-size:12px;';
   bar.innerHTML = `
-    <span style="color:#39FF14;font-weight:800;letter-spacing:1px;">⚡ FOUNDER</span>
-    <span style="color:#5a80a8;">${_esc(_user?.email || '')}</span>
-    <div style="flex:1;"></div>
-    <button onclick="snxTvSwitchTab('studio')"
-      style="padding:5px 14px;background:rgba(57,255,20,0.12);border:1px solid rgba(57,255,20,0.30);color:#39FF14;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.5px;">
-      ⚙ CHANNEL STUDIO
-    </button>
-    <button id="ax-submit-btn"
-      style="padding:5px 14px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.30);color:#00AEEF;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.5px;">
-      📤 SUBMIT CONTENT
-    </button>`;
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;flex-wrap:wrap;">
+      <span style="color:#39FF14;font-weight:800;letter-spacing:1px;">⚡ FOUNDER</span>
+      <span style="color:#5a80a8;">${_esc(_user?.email || '')}</span>
+      <div style="flex:1;"></div>
+      <button onclick="snxTvSwitchTab('studio')"
+        style="padding:5px 14px;background:rgba(57,255,20,0.12);border:1px solid rgba(57,255,20,0.30);color:#39FF14;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.5px;">
+        ⚙ CHANNEL STUDIO
+      </button>
+      <button id="ax-submit-btn"
+        style="padding:5px 14px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.30);color:#00AEEF;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.5px;">
+        📤 SUBMIT CONTENT
+      </button>
+    </div>
+    <!-- Network Status panel — Stage 4 -->
+    <div id="snx-tv-network-status" style="padding:8px 14px 10px;border-top:1px solid rgba(57,255,20,0.10);">
+      <!-- Populated by _updateNetworkStatus() -->
+    </div>`;
   document.getElementById('ax-submit-btn')?.addEventListener('click', _openSubmitModal);
+  // Initial render
+  _updateNetworkStatus();
+}
+
+/**
+ * Update the Network Status panel inside the founder bar.
+ * Shows Main TV mode, featured creator (if any), live creator count,
+ * and the emergency RETURN TO SCHEDULE button.
+ */
+function _updateNetworkStatus() {
+  if (!_isFounder) return;
+  const panel = document.getElementById('snx-tv-network-status');
+  if (!panel) return;
+
+  const st = _mainTvState;
+  const isFeatured = st?.mode === 'featured_live';
+  const liveCount  = window._snxLiveChannelCount ?? 0;  // supplied by snx-tv-network.js via window
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+      <div style="flex:1;min-width:180px;">
+        <div style="font-size:10px;font-weight:700;color:#5a80a8;letter-spacing:1.5px;margin-bottom:4px;">NETWORK STATUS</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+          <span style="font-size:10px;font-weight:700;color:#c8d0e8;">MAIN TV</span>
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#39FF14;box-shadow:0 0 5px #39FF14;"></span>
+          <span style="font-size:10px;color:#39FF14;font-weight:700;">ON AIR</span>
+        </div>
+        <div style="font-size:10px;color:#5a80a8;margin-bottom:2px;">MODE: <span style="color:${isFeatured ? '#ff4d6a' : '#c8d0e8'};font-weight:700;">${isFeatured ? '🔴 Featured Creator Live' : 'Scheduled Programming'}</span></div>
+        ${isFeatured ? `<div style="font-size:10px;color:#c8d0e8;margin-bottom:2px;">FEATURED: <span style="color:#fff;font-weight:700;">${_esc(st.featuredChannelName || 'Unknown')}</span></div>` : ''}
+        <div style="font-size:10px;color:#5a80a8;">LIVE CREATORS: <span style="color:#c8d0e8;font-weight:700;">${liveCount}</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
+        <button id="snx-tv-view-live-now-btn"
+          style="padding:4px 12px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.3);color:#00AEEF;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700;letter-spacing:0.5px;white-space:nowrap;">
+          👁 VIEW LIVE NOW
+        </button>
+        ${isFeatured ? `
+          <button id="snx-tv-emergency-return-btn"
+            style="padding:4px 12px;background:rgba(255,45,85,0.15);border:1px solid rgba(255,45,85,0.5);color:#ff4d6a;border-radius:5px;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:0.5px;white-space:nowrap;">
+            ⚡ RETURN TO SCHEDULE
+          </button>
+        ` : ''}
+      </div>
+    </div>`;
+
+  // Wire VIEW LIVE NOW — switches to Live Now tab in the SNX TV Network layer
+  document.getElementById('snx-tv-view-live-now-btn')?.addEventListener('click', () => {
+    // The snx-tv-network module owns the tab — dispatch a custom event
+    window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'live-now' } }));
+  });
+
+  // Wire EMERGENCY RETURN
+  document.getElementById('snx-tv-emergency-return-btn')?.addEventListener('click', () => {
+    _showEmergencyReturnConfirm();
+  });
+}
+
+async function _showEmergencyReturnConfirm() {
+  if (!_isFounder || !_user) return;
+  if (!confirm('⚡ EMERGENCY: Return Main TV to scheduled programming immediately?')) return;
+  try {
+    const { emergencyReturnToSchedule } = await import('./snx-main-tv-feature.js');
+    await emergencyReturnToSchedule(_user);
+    console.log('[SNX-TV] Emergency return executed');
+  } catch (err) {
+    console.error('[SNX-TV] Emergency return failed:', err.message);
+  }
+}
+
+/** Subscribe to Main TV state (called once after user is known). */
+function _subscribeMainTvState() {
+  if (_mainTvUnsub) return;
+  import('./snx-main-tv-feature.js').then(({ subscribeMainTvState }) => {
+    _mainTvUnsub = subscribeMainTvState(st => {
+      _mainTvState = st;
+      _onMainTvStateChange(st);
+    });
+  }).catch(err => {
+    console.warn('[SNX-TV] Main TV state subscription failed:', err.message);
+  });
+}
+
+/**
+ * Called every time mainTvState/current changes.
+ * Responsible for switching the player between scheduled and featured_live.
+ */
+async function _onMainTvStateChange(st) {
+  // Update founder network status panel
+  if (_isFounder) _updateNetworkStatus();
+
+  const isFeatured = st?.mode === 'featured_live' && st?.featuredLiveId;
+  const mediaArea  = document.getElementById('ax-media-area');
+
+  if (isFeatured && !_featureMounted) {
+    // Show "NOW JOINING LIVE" transition overlay (non-blocking)
+    try {
+      const tvNet = await import('./snx-tv-network.js');
+      if (tvNet.showFeatureTransition) tvNet.showFeatureTransition(st.featuredChannelName || 'Creator');
+    } catch (_) {}
+
+    // Switch to featured live
+    _featureMounted = true;
+    _stopMedia();    // pause scheduled media — schedule keeps advancing in background
+    _setNowPlaying(`🔴 LIVE: ${st.featuredChannelName || 'Creator'}`, st.featuredLiveTitle || '', 'featured_live');
+    _setLiveStatus('live');
+
+    try {
+      const { mountFeaturedLiveInPlayer } = await import('./snx-main-tv-feature.js');
+      await mountFeaturedLiveInPlayer(_user, null, st, mediaArea, reason => {
+        console.log('[SNX-TV] Featured live ended, reason:', reason, '— returning to schedule');
+        _featureMounted = false;
+        import('./snx-main-tv-feature.js').then(m => m.dismountFeaturedLiveFromPlayer()).catch(() => {});
+        // Resume current scheduled item at correct elapsed position
+        const schedSt = _activeChannel ? _channelStates[_activeChannel.id] : null;
+        if (schedSt?.current_item) {
+          _currentMediaId = null;
+          _transitioning  = false;
+          setTimeout(() => _onActiveChannelUpdate(schedSt), 500);
+        }
+      });
+    } catch (err) {
+      console.warn('[SNX-TV] Featured live mount failed:', err.message, '— falling back to schedule');
+      _featureMounted = false;
+      const schedSt = _activeChannel ? _channelStates[_activeChannel.id] : null;
+      if (schedSt?.current_item) _onActiveChannelUpdate(schedSt);
+    }
+
+  } else if (!isFeatured && _featureMounted) {
+    // Show "RETURNING TO MAIN TV" transition overlay (non-blocking)
+    try {
+      const tvNet = await import('./snx-tv-network.js');
+      if (tvNet.showReturnToProgramming) tvNet.showReturnToProgramming();
+    } catch (_) {}
+
+    // Return to scheduled programming
+    _featureMounted = false;
+    try {
+      const { dismountFeaturedLiveFromPlayer } = await import('./snx-main-tv-feature.js');
+      dismountFeaturedLiveFromPlayer();
+    } catch (_) {}
+
+    // Resume scheduled media at CURRENT position (not from the beginning)
+    const schedSt = _activeChannel ? _channelStates[_activeChannel.id] : null;
+    if (schedSt?.current_item) {
+      _currentMediaId = null; // force reload at correct elapsed position
+      _transitioning  = false;
+      setTimeout(() => _onActiveChannelUpdate(schedSt), 200);
+    } else {
+      _setNowPlaying('Standby…', '', '');
+    }
+    _setLiveStatus('live');
+
+  } else if (!isFeatured && !_featureMounted) {
+    // Normal state change (scheduled → scheduled, content update etc.) — nothing to do
+  }
 }
 
 /* ════════════════════════════════════════════════════
@@ -786,7 +955,18 @@ function _onActiveChannelUpdate(st) {
     _setNowPlaying('Standby…', '', '');
     _setLiveStatus('offair');
     _renderUpNext_from(null);
-    _stopMedia();
+    if (!_featureMounted) _stopMedia(); // don't stop featured live when schedule has no item
+    return;
+  }
+
+  // Stage 4: While a featured live is mounted, update Now Playing info but
+  // do NOT load scheduled media into the player — the featured live occupies it.
+  if (_featureMounted) {
+    // Update Up Next so the guide stays accurate
+    const queue  = (st.queue || []).filter(q => q?.id && q?.url);
+    const curIdx = queue.findIndex(q => q.id === st.current_item.id);
+    const upNext = curIdx >= 0 ? queue.slice(curIdx + 1, curIdx + 4) : queue.slice(0, 3);
+    _renderUpNext_from({ queue: upNext });
     return;
   }
   const item   = st.current_item;

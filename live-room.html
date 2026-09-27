@@ -278,12 +278,10 @@ body.lr-is-viewer .lr-viewer-bar { display: flex; }
 <body>
 
 <!-- ── Feature gate ─────────────────────────────────────────────────────────
-     2-Week Public Test: Live streaming is ENABLED by default.
+     Live streaming: enabled for all signed-in users.
      The Founder can disable it globally via Firestore siteSettings/config
      (liveEnabled: false) — that flag is checked inside the module below
      after Firebase loads, and shows a clean error screen if off.
-     The old localStorage-based gate has been removed so the page loads for
-     all signed-in users during the public test period.
 ──────────────────────────────────────────────────────────────────────────── -->
 
 <!-- ══════════════════════════════════════════════

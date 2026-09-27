@@ -75,6 +75,11 @@ const _bootstrapRequestedAt = {};  // channelId → Date.now() of last bootstrap
 // Reconnect recovery: prevent concurrent same-item reload attempts.
 let _viewerReloadingId = null;
 
+// Stage 4 — Main TV Feature state (channel.html standalone path)
+let _mainTvUnsub    = null;   // Firestore subscription for mainTvState/current
+let _mainTvState    = null;   // cached mainTvState document data
+let _featureMounted = false;  // true while a featured live is showing in player
+
 /* ════════════════════════════════════
    INIT
 ════════════════════════════════════ */
@@ -85,8 +90,12 @@ export function initBroadcast() {
   onAuthChange((user) => {
     _user      = user;
     _isFounder = !!(user && user.email?.trim().toLowerCase() === FOUNDER_EMAIL.toLowerCase());
-    if (user) { _enterNetwork(); }
-    else      { _showLoginScreen(); }
+    if (user) {
+      _subscribeMainTvState();
+      _enterNetwork();
+    } else {
+      _showLoginScreen();
+    }
   });
 
   // ── BFCACHE / PAGE VISIBILITY RECOVERY ──────────────────────────────────────
@@ -966,10 +975,21 @@ function _onActiveChannelUpdate(st) {
   if (!st || !st.current_item) {
     _setNowPlaying('Standby…', '', '');
     _renderUpNext([]);
-    _stopMedia();
+    if (!_featureMounted) _stopMedia();
     _updateLiveTVOverlay(null, false);
     return;
   }
+
+  // Stage 4: While a featured live is mounted, keep schedule advancing
+  // in the background but do NOT load any new media into the player.
+  if (_featureMounted) {
+    const queue = (st.queue || []).filter(q => q?.id && q?.url);
+    const curIdx = queue.findIndex(q => q.id === st.current_item.id);
+    const upNext = curIdx >= 0 ? queue.slice(curIdx + 1, curIdx + 5) : queue.slice(0, 4);
+    _renderUpNext(upNext);
+    return;
+  }
+
   const item   = st.current_item;
   const isComm = !!(st.is_commercial);
 
@@ -1531,6 +1551,70 @@ async function _bgChannelRequestAdvance(channelId, currentItemId) {
   }
 }
 
+
+/* ════════════════════════════════════
+   MAIN TV FEATURE — Stage 4
+   Subscribe to mainTvState/current and react to mode changes.
+   This mirrors the logic in snx-ch-adapter.js but runs in the
+   channel.html standalone (broadcast.js) path.
+════════════════════════════════════ */
+function _subscribeMainTvState() {
+  if (_mainTvUnsub) return;
+  import('./snx-main-tv-feature.js').then(({ subscribeMainTvState }) => {
+    _mainTvUnsub = subscribeMainTvState(st => {
+      _mainTvState = st;
+      _onMainTvStateChange(st);
+    });
+  }).catch(err => {
+    console.warn('[24TV BROADCAST] Main TV state subscription failed:', err.message);
+  });
+}
+
+async function _onMainTvStateChange(st) {
+  const isFeatured = st?.mode === 'featured_live' && st?.featuredLiveId;
+  const mediaArea  = document.getElementById('ax-media-area');
+
+  if (isFeatured && !_featureMounted) {
+    _featureMounted = true;
+    _stopMedia();
+    const label = document.getElementById('ax-np-title');
+    if (label) label.textContent = `🔴 LIVE: ${st.featuredChannelName || 'Creator'}`;
+
+    try {
+      const { mountFeaturedLiveInPlayer } = await import('./snx-main-tv-feature.js');
+      await mountFeaturedLiveInPlayer(_user, null, st, mediaArea, reason => {
+        console.log('[24TV BROADCAST] Featured live ended:', reason);
+        _featureMounted = false;
+        import('./snx-main-tv-feature.js').then(m => m.dismountFeaturedLiveFromPlayer()).catch(() => {});
+        const schedSt = _activeChannel ? _channelStates[_activeChannel.id] : null;
+        if (schedSt?.current_item) {
+          _currentMediaId = null;
+          _transitioning  = false;
+          setTimeout(() => _onActiveChannelUpdate(schedSt), 500);
+        }
+      });
+    } catch (err) {
+      console.warn('[24TV BROADCAST] Featured live mount failed:', err.message);
+      _featureMounted = false;
+      const schedSt = _activeChannel ? _channelStates[_activeChannel.id] : null;
+      if (schedSt?.current_item) _onActiveChannelUpdate(schedSt);
+    }
+
+  } else if (!isFeatured && _featureMounted) {
+    _featureMounted = false;
+    try {
+      const { dismountFeaturedLiveFromPlayer } = await import('./snx-main-tv-feature.js');
+      dismountFeaturedLiveFromPlayer();
+    } catch (_) {}
+
+    const schedSt = _activeChannel ? _channelStates[_activeChannel.id] : null;
+    if (schedSt?.current_item) {
+      _currentMediaId = null;
+      _transitioning  = false;
+      setTimeout(() => _onActiveChannelUpdate(schedSt), 200);
+    }
+  }
+}
 
 function _stopMedia() {
   if (_mediaEl) {

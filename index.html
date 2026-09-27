@@ -12104,12 +12104,67 @@ body.arcade-fs-ios body::after { display:none !important; }
 </style>
 
 <div class="page" id="tvPage">
-  <!-- snx-ch-adapter.js renders everything into #snxTvApp -->
+  <!-- snx-ch-adapter.js renders the Main TV broadcast into #snxTvApp -->
+  <!-- snx-tv-network.js injects its tab bar + LIVE NOW / CHANNELS / MY CHANNEL panels -->
   <div id="snxTvApp" style="min-height:200px;"></div>
+  <!-- TV Network panels are injected dynamically by snx-tv-network.js -->
 </div><!-- end tvPage -->
 
 <!-- ── Load 24-Hour TV adapter as ES module (no second Firebase init, no second login) ── -->
 <script type="module" src="snx-ch-adapter.js"></script>
+
+<!-- ── Load SNX TV Network (Creator Channels) for index.html tvPage ── -->
+<link rel="stylesheet" href="snx-tv-network.css">
+<link rel="stylesheet" href="snx-creator-live.css">
+<script type="module">
+/**
+ * SNX TV Network — index.html integration
+ * Initialises LIVE NOW / CHANNELS / MY CHANNEL tabs when the user opens tvPage.
+ * Auth is read from window._snxCurrentUser (set by the main SNS auth block).
+ * No second login, no second Firebase init.
+ */
+let _tvNetworkModule = null;
+let _tvNetworkInited = false;
+
+async function _getTvNetworkModule() {
+  if (!_tvNetworkModule) {
+    _tvNetworkModule = await import('./snx-tv-network.js');
+  }
+  return _tvNetworkModule;
+}
+
+window.snxTvNetworkInit = async function() {
+  try {
+    const m = await _getTvNetworkModule();
+    if (!_tvNetworkInited) {
+      _tvNetworkInited = true;
+      m.initTvNetwork(window._snxCurrentUser || null);
+    } else {
+      // Re-entry — just sync auth state in case it changed
+      m.onTvNetworkAuthChange(window._snxCurrentUser || null);
+    }
+  } catch (err) {
+    console.warn('[SNX TV Network index] Init error:', err.message);
+  }
+};
+
+window.snxTvNetworkTeardown = function() {
+  // Nothing to explicitly teardown — subscriptions are kept alive so re-entry is instant.
+  // The live stage overlay (if open) will stay open independently of page navigation.
+};
+
+// Keep TV Network in sync with SNS auth changes
+window.addEventListener('snxAuthStateChanged', e => {
+  if (_tvNetworkModule) {
+    _tvNetworkModule.onTvNetworkAuthChange(e.detail?.user || null);
+  }
+});
+window.addEventListener('snxAuthSignOut', () => {
+  if (_tvNetworkModule) {
+    _tvNetworkModule.onTvNetworkAuthChange(null);
+  }
+});
+</script>
 
 
 
@@ -12510,33 +12565,27 @@ body.arcade-fs-ios body::after { display:none !important; }
           toastNotification('⛔ Live streaming is currently unavailable.');
           return;
       }
-      // Close sidebar
+      // Close sidebar / hamburger
       const sidebar = document.getElementById('side');
       const overlay = document.getElementById('sidebarOverlay');
       if (sidebar)  sidebar.classList.remove('active');
       if (overlay)  overlay.classList.remove('visible');
 
       if (!currentUser) {
-          window.location.href = 'live.html';
+          // Not signed in — send to login then they come back to their channel
+          if (typeof realmNavTo === 'function') realmNavTo('login');
           return;
       }
 
-      // If the current user is already live, go back to their creator stage
-      // (NOT #watch= which would put them in viewer mode in their own stream).
-      try {
-          const snap = await getDoc(doc(db, 'users', currentUser.uid));
-          if (snap.exists()) {
-              const d = snap.data();
-              if (d.isLive && d.liveRoomId) {
-                  window.location.href = 'live.html';
-                  return;
-              }
-          }
-      } catch (_) {}
-
-      // Not currently live — go to the setup / Go Live screen
-      localStorage.setItem('snx_live_intent', 'golive');
-      window.location.href = 'live.html';
+      // Route through 24-Hour TV → MY CHANNEL (Stage 5 — unified network)
+      // Switch to tvPage, init TV Network, then switch to my-channel tab
+      if (typeof realmNavTo === 'function') {
+          realmNavTo('tvPage');
+          // After the TV page is visible, switch to MY CHANNEL tab
+          setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'my-channel' } }));
+          }, 300);
+      }
   };
 
   /* ═══════════════════════════════════════════════
@@ -13190,6 +13239,8 @@ body.arcade-fs-ios body::after { display:none !important; }
             window._snxAuthReadyQueue = [];
           }
           window._snxAuthResolved = true;
+          // Notify TV Network of signed-in user (for MY CHANNEL auto-resolve)
+          window.dispatchEvent(new CustomEvent('snxAuthStateChanged', { detail: { user } }));
           // Start passive invite listener for sidebar badge (deferred so arcade IIFE has loaded)
           setTimeout(() => {
             if (typeof window._snxArcadeSubscribeInvites === 'function') window._snxArcadeSubscribeInvites();
@@ -21466,7 +21517,8 @@ function navTo(pageId) {
         moderatorPage:'navMod', administratorPage:'navAdminOfficer',
         communityPage:'navCommunity', supportRoomsPage:'navSupport',
         communityRulesPage:'navCommunityRules',
-        liveHubPage:'navLiveHub', inboxPage:'navInbox'
+        liveHubPage:'navLiveHub', inboxPage:'navInbox',
+        tvPage:'navNexus'
     };
     const navEl = document.getElementById(map[pageId]);
     if (navEl) navEl.classList.add('active-nav');
@@ -21498,8 +21550,11 @@ function navTo(pageId) {
     // ── 24-Hour TV lifecycle hooks ──
     if (pageId === 'tvPage') {
         if (typeof window.snxTvInit === 'function') window.snxTvInit();
+        // Also init the TV Network (LIVE NOW / CHANNELS / MY CHANNEL tabs)
+        if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
     } else {
         if (typeof window.snxTvTeardown === 'function') window.snxTvTeardown();
+        if (typeof window.snxTvNetworkTeardown === 'function') window.snxTvNetworkTeardown();
     }
     // Initialize 24-HOUR NEXUS when nexusPage or studioPage opens (legacy)
     if (pageId === 'nexusPage' || pageId === 'studioPage') {

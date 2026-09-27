@@ -13,12 +13,10 @@
 <body>
 
 <!-- ── Feature gate ─────────────────────────────────────────────────────────
-     2-Week Public Test: Live Hub is ENABLED by default.
+     Live Hub: enabled for all signed-in users.
      The Founder can disable it globally via Firestore siteSettings/config
      (liveHubEnabled: false) — that flag is checked inside the module below
      after Firebase loads, and shows a clean "coming soon" screen if off.
-     The old localStorage-based gate has been removed so the page loads for
-     all signed-in users during the public test period.
 ──────────────────────────────────────────────────────────────────────────── -->
 
 <!-- ══════════════════════════════════════════════
@@ -56,11 +54,6 @@
       <span class="go-live-dot"></span>
       Go Live
     </button>
-  </div>
-
-  <!-- Test period notice -->
-  <div class="hub-test-banner">
-    🧪 <strong>2-Week Public Test</strong> — Live streaming is now open. Report issues via chat!
   </div>
 
   <!-- Live rooms grid -->

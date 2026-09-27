@@ -19,8 +19,14 @@
 <!-- SNX Channel visual system -->
 <link rel="stylesheet" href="snx-channel.css">
 
+<!-- SNX TV Network — Creator Channels expansion -->
+<link rel="stylesheet" href="snx-tv-network.css">
+
+<!-- SNX Creator Live — live stage styles -->
+<link rel="stylesheet" href="snx-creator-live.css">
+
 <style>
-/* ── Override Aurenix particle canvas opacity for SNS look ── */
+/* ── Override particle canvas opacity for Shadow Nexus look ── */
 #ax-particles { opacity: 0.30; }
 .ax-ambient::before { background: radial-gradient(circle, rgba(0,100,255,0.07) 0%, transparent 70%); }
 .ax-ambient::after  { background: radial-gradient(circle, rgba(57,255,20,0.04) 0%, transparent 70%); }
@@ -63,9 +69,9 @@
 }
 @keyframes snxBackDot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
-/* ── Push content below back bar and above nav bar ── */
+/* ── Push content below back bar and above nav bar + TV Network tab bar ── */
 #ax-nav { top: 44px !important; }
-#ax-app { padding-top: calc(44px + 58px) !important; }
+#ax-app { padding-top: calc(44px + 58px + 44px) !important; }
 
 /* ── Recolor the channel nav to SNS palette ── */
 .ax-nav-logo-text { color: #c8d0e8 !important; }
@@ -110,7 +116,7 @@
   <a class="snx-back-btn" href="index.html" aria-label="Back to Shadow Nexus Social">
     ← <span>Shadow Nexus Social</span>
   </a>
-  <div class="snx-back-bar-title">24-HOUR CHANNEL</div>
+  <div class="snx-back-bar-title">SHADOW NEXUS TV</div>
   <div class="snx-back-bar-badge">
     <div class="snx-back-bar-badge-dot"></div>
     ON AIR
@@ -154,6 +160,25 @@
     window._snxAuthResolved  = true;
     if (!user) window.dispatchEvent(new CustomEvent('snxAuthSignOut'));
   });
+</script>
+
+<!-- SNX TV Network — Creator Channels init (ES module)
+     Runs independently from the broadcast engine.
+     Auth-bridges off window._snxCurrentUser set by the block above. -->
+<script type="module">
+  await new Promise(r => setTimeout(r, 80));
+  try {
+    const { initTvNetwork, onTvNetworkAuthChange } = await import('./snx-tv-network.js');
+    // Init with whoever is signed in at this moment
+    initTvNetwork(window._snxCurrentUser || null);
+    // Keep in sync with sign-in/sign-out events
+    window.addEventListener('snxAuthSignOut', () => onTvNetworkAuthChange(null));
+    if (window._snxAuth && typeof window._snxAuth.onAuthStateChanged === 'function') {
+      window._snxAuth.onAuthStateChanged(user => onTvNetworkAuthChange(user));
+    }
+  } catch (err) {
+    console.warn('[SNX TV Network] Init error:', err);
+  }
 </script>
 
 <!-- SNX Channel Broadcast Engine (ES module) -->
