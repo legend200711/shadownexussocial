@@ -496,6 +496,11 @@ function _renderFounderBar() {
    TAB SWITCHING
 ════════════════════════════════════════════════════ */
 window.snxTvSwitchTab = function(tab) {
+  // Studio tab is strictly founder-only. Any attempt by a non-founder to
+  // navigate to the Studio — including direct console calls — is silently
+  // ignored; the Watch panel stays visible and no studio DOM is shown.
+  if (tab === 'studio' && !_isFounder) return;
+
   ['watch','studio'].forEach(t => {
     const p = document.getElementById(`snxTvPanel_${t}`);
     const b = document.getElementById(`snxTvTab${t.charAt(0).toUpperCase()+t.slice(1)}`);
@@ -511,6 +516,8 @@ window.snxTvSwitchTab = function(tab) {
 };
 
 function _openStudio() {
+  // Founder-only — hard gate in addition to the tab-switch guard above.
+  if (!_isFounder || !_user) return;
   const ctrl = document.getElementById('ax-control');
   if (!ctrl) return;
   if (ctrl.innerHTML.trim()) return; // already mounted
