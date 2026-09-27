@@ -62,6 +62,7 @@ let _tickTimer     = null;
 let _advancing     = false;
 let _currentMediaId    = null;
 let _viewerAdvancingId = null;
+let _authSignOutListenerAdded = false;
 const _bgAdvancingId   = {};
 let _transitioning     = false;
 let _saKeyMissingLoggedAt = 0;
@@ -112,7 +113,9 @@ window.snxTvInit = function () {
  * re-entering the page is instant.
  */
 window.snxTvTeardown = function () {
+  console.log('[24TV] Teardown — pausing media, stopping tick');
   _tvActive = false;
+  _gateOpen = false;
   _stopMedia();
   _stopTick();
 };
@@ -121,6 +124,7 @@ window.snxTvTeardown = function () {
    INTERNAL INIT
 ════════════════════════════════════════════════════ */
 function _startWithUser(user) {
+  console.log('[24TV] Engine starting — user:', user?.email || 'anonymous');
   _user      = user;
   _isFounder = !!(user && user.email?.trim().toLowerCase() === FOUNDER_EMAIL.toLowerCase());
 
@@ -130,7 +134,15 @@ function _startWithUser(user) {
     if (_isFounder) _renderFounderBar();
     _buildChannelList();
     _buildEPGChannelTabs();
-    _updateUpNext();
+    // Re-apply active channel state to the freshly rebuilt DOM so
+    // "Connecting to broadcast…" is replaced by the actual now-playing info.
+    if (_activeChannel) {
+      const st = _channelStates[_activeChannel.id];
+      if (st) _onActiveChannelUpdate(st);
+      else _setNowPlaying(_activeChannel.name || _activeChannel.label || '', '', '');
+    } else if (_channels[0]) {
+      _setActiveChannel(_channels[0].id);
+    }
     _startTick();
     return;
   }
@@ -139,15 +151,18 @@ function _startWithUser(user) {
   _subscribeChannels();
 
   // React to SNS auth changes (user signs out → clear TV)
-  // Only register once; _networkReady guards re-registration
-  window.addEventListener('snxAuthSignOut', () => {
-    _stopMedia(); _stopTick();
-    _networkReady = false; _channels = [];
-    if (_channelsUnsub) { _channelsUnsub(); _channelsUnsub = null; }
-    Object.values(_channelUnsubs).forEach(u => u && u());
-    _channelUnsubs = {}; _channelStates = {};
-    if (_tvActive) _renderNotLoggedIn();
-  }, { once: false });
+  // Guard against duplicate listeners on re-entry
+  if (!_authSignOutListenerAdded) {
+    _authSignOutListenerAdded = true;
+    window.addEventListener('snxAuthSignOut', () => {
+      _stopMedia(); _stopTick();
+      _networkReady = false; _channels = [];
+      if (_channelsUnsub) { _channelsUnsub(); _channelsUnsub = null; }
+      Object.values(_channelUnsubs).forEach(u => u && u());
+      _channelUnsubs = {}; _channelStates = {};
+      if (_tvActive) _renderNotLoggedIn();
+    }, { once: false });
+  }
 }
 
 /* ════════════════════════════════════════════════════
@@ -157,7 +172,7 @@ function _renderLoading() {
   const app = document.getElementById('snxTvApp');
   if (!app) return;
   app.innerHTML = `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:340px;gap:14px;padding:40px 20px;text-align:center;">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:120px;gap:14px;padding:40px 20px;text-align:center;">
       <div style="font-size:36px;">📺</div>
       <div style="font-size:15px;font-weight:800;color:#00AEEF;letter-spacing:2px;">24-HOUR TV</div>
       <div style="font-size:12px;color:#5a80a8;">Connecting to broadcast…</div>
@@ -190,6 +205,7 @@ function _subscribeChannels() {
       .filter(ch => ch.enabled !== false);
 
     _channels = loaded;
+    console.log('[24TV] Firestore connected — channels loaded:', loaded.length);
 
     if (!_networkReady) {
       _networkReady = true;
@@ -202,10 +218,17 @@ function _subscribeChannels() {
       _buildChannelList();
       _buildEPGChannelTabs();
       _channels.forEach(ch => _subscribeChannelState(ch.id));
+      if (_tvActive) _startTick();
     }
   }, (err) => {
-    console.warn('[SNX-TV] Failed to load channels:', err);
-    if (!_networkReady) { _networkReady = true; _rebuildTvShell(); }
+    console.error('[24TV ERROR] Failed to load channels from Firestore:', err?.code, err?.message);
+    if (!_networkReady) {
+      _networkReady = true;
+      _rebuildTvShell();
+      if (_isFounder) _renderFounderBar();
+      if (_channels[0]) _setActiveChannel(_channels[0].id);
+      _startTick();
+    }
   });
 }
 
@@ -651,6 +674,7 @@ function _subscribeChannelState(channelId) {
   if (_channelUnsubs[channelId]) return;
   _channelUnsubs[channelId] = onSnapshot(doc(db, 'network_state', channelId), (snap) => {
     const st = snap.exists() ? snap.data() : null;
+    if (_activeChannel?.id === channelId) console.log('[24TV] Channel state received — channel:', channelId, 'current_item:', st?.current_item?.title || 'none');
     _channelStates[channelId] = st;
 
     // Update channel dot
@@ -701,6 +725,7 @@ function _setActiveChannel(channelId) {
 }
 
 function _onActiveChannelUpdate(st) {
+  console.log('[24TV] Channel update — channel:', _activeChannel?.id, 'item:', st?.current_item?.title || 'none', 'gateOpen:', _gateOpen);
   if (!st || !st.current_item) {
     _setNowPlaying('Standby…', '', '');
     _renderUpNext_from(null);
@@ -748,6 +773,7 @@ function _isMediaStale() {
 }
 
 async function _loadMedia(item, elapsed) {
+  console.log('[24TV] Loading media — title:', item.title, 'url:', item.url?.slice(0, 80), 'elapsed:', elapsed.toFixed(1) + 's');
   const video = document.getElementById('ax-video');
   const audio = document.getElementById('ax-audio');
   const thumb = document.getElementById('ax-thumbnail');
@@ -793,6 +819,7 @@ async function _loadMedia(item, elapsed) {
   _mediaEl.volume = parseFloat(document.getElementById('ax-vol-slider')?.value || '0.8');
   _mediaEl.muted  = false;
   _mediaEl.src    = item.url;
+  console.log('[24TV] Player created — type:', isVideo ? 'video' : 'audio');
 
   // PiP button visibility
   const pip = document.getElementById('ax-pip-btn');
@@ -807,7 +834,19 @@ async function _loadMedia(item, elapsed) {
   }, { once: true });
 
   _updatePlayBtn();
-  try { await _mediaEl.play(); } catch (_) { /* autoplay blocked — gate handles it */ }
+  console.log('[24TV] Playback requested');
+  try {
+    await _mediaEl.play();
+    console.log('[24TV] Playback started ✓');
+  } catch (playErr) {
+    console.log('[24TV] Autoplay blocked — showing tap-to-play gate:', playErr?.name);
+    const gate = document.getElementById('ax-gate');
+    if (gate) {
+      gate.style.display = 'flex';
+      const sub = gate.querySelector('.ax-gate-sub');
+      if (sub) sub.textContent = 'Tap to start watching';
+    }
+  }
 }
 
 function _onMediaEnded() {
@@ -902,7 +941,7 @@ async function _viewerRequestAdvance(channelId, currentItemId) {
     const res = await fetch(ADVANCE_WORKER_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel_id: channelId, current_item_id: currentItemId }),
+      body: JSON.stringify({ channelId, currentItemId }),
     });
     if (!res.ok) console.warn(`[SNX-TV] advance ${res.status}`);
   } catch (e) {
@@ -974,6 +1013,7 @@ function _tickProgress() {
    PLAYER CONTROLS
 ════════════════════════════════════════════════════ */
 function _enterBroadcast() {
+  console.log('[24TV] Gate entered — starting playback');
   _gateOpen = true;
   const gate = document.getElementById('ax-gate');
   if (gate) gate.style.display = 'none';

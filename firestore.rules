@@ -44,6 +44,15 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'founder';
     }
 
+    // isFounderEmail — checks the Firebase Auth token email claim directly.
+    // Used for 24-Hour TV Studio security: grants access only to the
+    // christijerina46@gmail.com account regardless of any role field.
+    // This cannot be spoofed — the email claim is set by Firebase Auth.
+    function isFounderEmail() {
+      return isSignedIn()
+        && request.auth.token.email == 'christijerina46@gmail.com';
+    }
+
     function isModerator() {
       return isSignedIn()
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['founder', 'moderator', 'admin'];
@@ -1118,6 +1127,38 @@ service cloud.firestore {
           );
         allow update: if false;
       }
+    }
+
+    // ── 24-Hour TV — media_submissions ────────────────────────────────────────
+    //
+    //   /media_submissions/{docId}  — content submitted by users for broadcast
+    //
+    //   • Any authenticated user may CREATE a submission doc (viewer submit flow).
+    //   • The Founder (christijerina46@gmail.com) may read, update (approve/reject),
+    //     and delete any submission.
+    //   • Regular users may read ONLY their own submissions (submitted_by == uid).
+    //   • No user may update their own submission after it has been submitted —
+    //     the Founder is the only one who changes status.
+    //
+    // Security note: the Aurenix Worker also validates tokens server-side before
+    // writing to Supabase storage.  This Firestore rule is the second defence layer.
+
+    match /media_submissions/{docId} {
+      // Any signed-in user can submit content.
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.submitted_by == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      // Users can read their own submissions; Founder can read all.
+      allow read: if isFounderEmail()
+        || (isSignedIn() && resource.data.submitted_by == request.auth.uid);
+
+      // Only the Founder can update (approve/reject/edit) submissions.
+      allow update: if isFounderEmail();
+
+      // Only the Founder can delete submissions.
+      allow delete: if isFounderEmail();
     }
 
   }
