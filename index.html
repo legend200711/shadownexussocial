@@ -65,6 +65,8 @@
 <link rel="stylesheet" href="snx-perf.css?v=SNS-2026-PERF-001">
 <!-- ── Nexus Cinematic Glass Visual Upgrade (loads last — overrides land above perf quality gates) ── -->
 <link rel="stylesheet" href="nexus-glass.css?v=SNS-2026-GLASS-001">
+<!-- ── Stage 11 Core Social Polish ── -->
+<link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
 
 <!-- ── Preconnect to Firebase + R2 CDN so first load is faster ── -->
 <link rel="preconnect" href="https://www.gstatic.com">
@@ -6623,6 +6625,11 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">📡</span>
             <span class="sc-item-label">Go Live</span>
         </button>
+        <!-- Music Hub -->
+        <button class="sc-item" id="scNavMusic" onclick="realmNavTo('studioPage')" aria-label="Music Hub">
+            <span class="sc-item-icon">🎵</span>
+            <span class="sc-item-label">Music Hub</span>
+        </button>
         <!-- 24-HOUR TV — native SNS page -->
         <button class="sc-item" id="scNavNexus" onclick="realmNavTo('tvPage')" aria-label="24-Hour TV" style="color:#00AEEF;">
             <span class="sc-item-icon">📺</span>
@@ -6731,6 +6738,10 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="ncm-item ncm-item-live" id="ncmGoLive" onclick="mobileNavTo('_golive')" style="display:none;">
             <div class="ncm-icon-wrap">📡</div>
             <div class="ncm-label">Go Live</div>
+        </div>
+        <div class="ncm-item" id="ncmMusic" onclick="mobileNavTo('studioPage')">
+            <div class="ncm-icon-wrap">🎵</div>
+            <div class="ncm-label">Music Hub</div>
         </div>
         <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
             <div class="ncm-icon-wrap">📺</div>
@@ -6855,6 +6866,9 @@ body.arcade-fs-ios body::after { display:none !important; }
         <button class="nav-item nav-item-go-live" id="navLive" onclick="goLiveOrWatch()" style="display:none;">
             <span class="nav-icon">📡</span> Go Live
             <span id="navLiveDot" class="nav-badge" style="display:none;background:#ff3344;"></span>
+        </button>
+        <button class="nav-item" id="navMusic" onclick="realmNavTo('studioPage')">
+            <span class="nav-icon">🎵</span> Music Hub
         </button>
         <button class="nav-item" id="navNexus" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
             <span class="nav-icon">📺</span> 24-Hour TV
@@ -7859,8 +7873,8 @@ body.arcade-fs-ios body::after { display:none !important; }
             <!-- Placeholder (no conversation selected) -->
             <div class="inbox-chat-placeholder" id="inboxChatPlaceholder">
                 <div class="inbox-chat-placeholder-icon">💬</div>
-                <div style="font-size:16px;font-weight:700;color:#3a6a9a;">No messages yet.</div>
-                <div style="font-size:13px;color:#2a4060;max-width:260px;line-height:1.6;">Pick someone from the list, or start a brand new conversation.</div>
+                <div style="font-size:16px;font-weight:700;color:#3a6a9a;">No conversations yet.</div>
+                <div style="font-size:13px;color:#2a4060;max-width:260px;line-height:1.6;">Start a new conversation to get the party started.</div>
                 <button class="inbox-empty-start-btn" onclick="openNewMessage()">✉️ Start New Conversation</button>
             </div>
 
@@ -7997,7 +8011,7 @@ body.arcade-fs-ios body::after { display:none !important; }
         <!-- Notification list — populated in real-time by renderNotifications() -->
         <div id="notifList"><div class="empty-state">
             <div style="font-size:28px;margin-bottom:10px;">🔔</div>
-            No notifications yet.
+            You're all caught up.
         </div></div>
     </div>
 </div>
@@ -10964,7 +10978,7 @@ body.arcade-fs-ios body::after { display:none !important; }
   <!-- Empty state (no one is live) -->
   <div id="liveHubEmpty" class="live-hub-empty" style="display:none;">
     <div class="live-hub-empty-icon">📡</div>
-    <div class="live-hub-empty-text">No one is live right now.<br>Be the first to go live!</div>
+    <div class="live-hub-empty-text">No creators are live right now.<br>Check back soon or be the first to go live.</div>
   </div>
 
   <!-- Live cards grid -->
@@ -11732,67 +11746,55 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 /* ── TV header bar ── */
 .snx-tv-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px 12px;
-  border-bottom: 1px solid rgba(0,174,239,0.15);
+  display: flex; align-items: center;
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid rgba(0,174,239,0.11);
   flex-wrap: wrap; gap: 10px;
 }
-.snx-tv-title-wrap { display: flex; align-items: center; gap: 12px; }
+.snx-tv-title-wrap { display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
 .snx-tv-title {
-  font-size: clamp(15px,2.5vw,20px); font-weight: 900;
-  letter-spacing: 0.12em; color: #c8d0e8; text-transform: uppercase;
+  font-size: 15px; font-weight: 900;
+  letter-spacing: 2.5px; color: #c8d0e8; text-transform: uppercase;
+  white-space: nowrap;
 }
-/* Legacy on-air badge (kept for safety, now replaced by snx-tv-status) */
-.snx-tv-onair {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 10px; border-radius: 20px;
-  border: 1px solid rgba(255,51,68,0.4); background: rgba(255,51,68,0.08);
-  font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #ff3344;
-}
-/* ● Live status indicator — reactive (CONNECTING / LIVE / OFF AIR / RECONNECTING) */
+/* Live status indicator — reactive */
 .snx-tv-status {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 10px; border-radius: 20px;
-  border: 1px solid rgba(90,128,168,0.35); background: rgba(90,128,168,0.08);
-  font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #5a80a8;
-  transition: color 0.4s, border-color 0.4s, background 0.4s;
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
+  color: #39FF14; text-transform: uppercase; flex-shrink: 0;
+  transition: color 0.4s;
 }
 .snx-tv-status-dot {
-  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
   background: #5a80a8;
   transition: background 0.4s, box-shadow 0.4s;
 }
 .snx-tv-dot {
   width: 7px; height: 7px; border-radius: 50%; background: #ff3344;
-  box-shadow: 0 0 8px rgba(255,51,68,0.7);
   animation: snxTvDot 2s ease-in-out infinite;
 }
 @keyframes snxTvDot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
-/* ── Watch/Studio tabs ── */
-.snx-tv-tabs { display: flex; gap: 6px; }
+/* ── Founder-only tabs (Watch / Studio) ── */
+.snx-tv-tabs { display: flex; gap: 6px; flex-shrink: 0; }
 .snx-tv-tab {
-  padding: 7px 18px; border-radius: 8px;
-  background: rgba(0,174,239,0.07); border: 1px solid rgba(0,174,239,0.22);
-  color: #5a80a8; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 5px 14px; border-radius: 6px;
+  background: none; border: 1px solid rgba(0,174,239,0.18);
+  color: #5a80a8; font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
   cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
-.snx-tv-tab:hover { background: rgba(0,174,239,0.14); color: #c8d0e8; }
-.snx-tv-tab.active {
-  background: rgba(0,174,239,0.18); border-color: rgba(0,174,239,0.55);
-  color: #00AEEF;
-}
+.snx-tv-tab:hover { background: rgba(0,174,239,0.09); color: #00AEEF; border-color: rgba(0,174,239,0.30); }
+.snx-tv-tab.active { background: rgba(0,174,239,0.09); border-color: rgba(0,174,239,0.35); color: #00AEEF; }
 
 /* ── Founder bar ── */
 #snx-tv-founder-bar {
-  align-items: center; gap: 10px; padding: 8px 14px;
-  background: rgba(57,255,20,0.05);
-  border-bottom: 1px solid rgba(57,255,20,0.15);
+  background: rgba(57,255,20,0.03);
+  border-bottom: 1px solid rgba(57,255,20,0.14);
 }
 
 /* ── Main layout ── */
-.snx-tv-panel { padding: 0 16px 24px; }
-.snx-tv-player-area { margin-bottom: 18px; }
+.snx-tv-panel { padding: 0; }
 
 /* Player: inherits ax-player-shell + adds width constraint */
 .snx-tv-player-shell { width: 100%; }
@@ -11915,20 +11917,21 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 /* Now Playing panel (below player) */
 .ax-now-playing-panel {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
-  padding: 12px 4px 0; flex-wrap: wrap;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 10px 16px 0; flex-wrap: wrap; max-width: 900px; margin: 0 auto;
+  border-top: 1px solid rgba(0,174,239,0.11);
 }
 .ax-np-panel-label { font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #ff3344; margin-bottom: 2px; }
-.ax-np-panel-title { font-size: 15px; font-weight: 800; color: #c8d0e8; line-height: 1.2; margin-bottom: 2px; }
-.ax-np-panel-meta { font-size: 11px; color: #5a80a8; }
-.ax-np-panel-time { font-size: 12px; color: #5a80a8; text-align: right; }
-.ax-np-panel-remain { font-size: 11px; color: #3a5a7a; text-align: right; margin-top: 2px; }
+.ax-np-panel-title { font-size: 14px; font-weight: 800; color: #c8d0e8; line-height: 1.2; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ax-np-panel-meta { font-size: 11px; color: #5a80a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ax-np-panel-time { font-size: 11px; color: #5a80a8; text-align: right; }
+.ax-np-panel-remain { font-size: 10px; color: #3a5a7a; text-align: right; margin-top: 2px; }
 
 /* ── Info row (channels + up next + EPG) ── */
 .snx-tv-info-row {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
-  gap: 14px; margin-top: 18px;
+  gap: 12px; padding: 12px 16px 20px; max-width: 900px; margin: 0 auto;
 }
 .snx-tv-section-card {
   background: rgba(7,20,40,0.85);
@@ -12129,6 +12132,8 @@ let _tvNetworkInited = false;
 async function _getTvNetworkModule() {
   if (!_tvNetworkModule) {
     _tvNetworkModule = await import('./snx-tv-network.js');
+    // Expose publicly so VIEW CHANNEL onclick and external callers can use it
+    window._tvNetworkModule = _tvNetworkModule;
   }
   return _tvNetworkModule;
 }
@@ -12163,6 +12168,88 @@ window.addEventListener('snxAuthSignOut', () => {
   if (_tvNetworkModule) {
     _tvNetworkModule.onTvNetworkAuthChange(null);
   }
+});
+
+/* ── Deep-link helpers called by notification buttons ────────────────────────
+   snxOpenTvLive(creatorUid, liveId)  — navigate to TV, open the live viewer
+   snxOpenTvReplay(creatorUid, replayId) — navigate to TV, open the replay
+   These work whether the user is currently on any page inside index.html.
+──────────────────────────────────────────────────────────────────────────── */
+window.snxOpenTvLive = async function(creatorUid, liveId) {
+  if (!creatorUid || !liveId) return;
+  // Navigate to TV page first
+  if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
+  // Init the TV network if not already done
+  if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
+  // Give UI a frame to settle, then open the live viewer
+  setTimeout(async () => {
+    try {
+      const [m, fs, live] = await Promise.all([
+        import('./snx-creator-channels.js'),
+        import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js'),
+        import('./snx-creator-live-viewer.js'),
+      ]);
+      const ch = await m.loadCreatorChannel(creatorUid);
+      if (!ch) return;
+      let userData = null;
+      try {
+        const viewerUid = window._snxCurrentUser?.uid;
+        if (viewerUid) {
+          const snap = await fs.getDoc(fs.doc(m.snsDb, 'users', viewerUid));
+          if (snap.exists()) userData = snap.data();
+        }
+      } catch (_) {}
+      await live.openViewerLiveStage(window._snxCurrentUser, userData, ch, liveId);
+    } catch (err) {
+      console.warn('[SNX TV] snxOpenTvLive deep-link error:', err.message);
+    }
+  }, 500);
+};
+
+window.snxOpenTvReplay = async function(creatorUid, replayId) {
+  if (!creatorUid || !replayId) return;
+  if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
+  if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
+  setTimeout(async () => {
+    try {
+      const [m, fs, live] = await Promise.all([
+        import('./snx-creator-channels.js'),
+        import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js'),
+        import('./snx-creator-live-viewer.js'),
+      ]);
+      let userData = null;
+      try {
+        const viewerUid = window._snxCurrentUser?.uid;
+        if (viewerUid) {
+          const snap = await fs.getDoc(fs.doc(m.snsDb, 'users', viewerUid));
+          if (snap.exists()) userData = snap.data();
+        }
+      } catch (_) {}
+      await live.openReplayPlayer(window._snxCurrentUser, userData, creatorUid, replayId, false);
+    } catch (err) {
+      console.warn('[SNX TV] snxOpenTvReplay deep-link error:', err.message);
+    }
+  }, 500);
+};
+
+/* ── snx:openCreatorChannel event — fired by VIEW CHANNEL button ─────────────
+   Listens for the event dispatched when a user clicks VIEW CHANNEL on a profile.
+   Switches to the Channels tab and opens the specified creator's channel view.
+──────────────────────────────────────────────────────────────────────────── */
+window.addEventListener('snx:openCreatorChannel', async e => {
+  const uid = e?.detail?.uid;
+  if (!uid) return;
+  try {
+    const m = await _getTvNetworkModule();
+    // Switch to channels tab and open the creator's channel view
+    if (typeof m.openChannelForUid === 'function') {
+      m.openChannelForUid(uid);
+    } else {
+      // Fire the event that switches to channels tab — the TV network's
+      // subscribeChannelDirectory will have the data; user can find them there.
+      window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'channels' } }));
+    }
+  } catch (_) {}
 });
 </script>
 
@@ -12577,14 +12664,27 @@ window.addEventListener('snxAuthSignOut', () => {
           return;
       }
 
-      // Route through 24-Hour TV → MY CHANNEL (Stage 5 — unified network)
-      // Switch to tvPage, init TV Network, then switch to my-channel tab
-      if (typeof realmNavTo === 'function') {
-          realmNavTo('tvPage');
-          // After the TV page is visible, switch to MY CHANNEL tab
-          setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'my-channel' } }));
-          }, 300);
+      // Open the original Go Live setup overlay directly over the current page.
+      // This calls the same openHostLiveStage() that the My Channel "Go Live" button
+      // uses, so the full camera/mic setup → live stage → broadcast flow is identical.
+      // The resulting broadcast is registered in liveSessions / creatorChannels so it
+      // appears in 24-Hour TV → LIVE NOW automatically — no page navigation required.
+      try {
+          // Ensure the creator channel doc exists (idempotent — creates once then reuses)
+          const { ensureCreatorChannel } = await import('./snx-creator-channels.js');
+          const channel = await ensureCreatorChannel(currentUser);
+
+          // Load user profile data (displayName, avatar, username)
+          const userData = window._snxUserData || null;
+
+          // Open the live setup overlay immediately over the current page
+          const { openHostLiveStage } = await import('./snx-creator-live-viewer.js');
+          await openHostLiveStage(currentUser, userData, channel);
+      } catch (err) {
+          // Log the real exception so developers can diagnose the root cause.
+          // The user-facing message intentionally stays generic (no secrets/tokens exposed).
+          console.error('[goLiveOrWatch] Failed to open live setup:', err);
+          toastNotification('⚠️ Could not open live setup. Please try again.');
       }
   };
 
@@ -16062,6 +16162,30 @@ window.addEventListener('snxAuthSignOut', () => {
                   <button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button>
               </div>`;
               navFn = n.roomId ? `window.open('live.html#watch=${escFeed(n.roomId)}','_blank')` : `goLiveOrWatch()`;
+          } else if (n.type === 'creator_live') {
+              // 🔴 Creator went LIVE on Shadow Nexus TV
+              // Deep-link opens the actual live session — not just the channel page.
+              icon = '🔴';
+              const _clName = escFeed(n.channelName || n.fromName || 'A creator');
+              text = `<b>${_clName}</b> is <span style="color:#ff3344;font-weight:800;">LIVE</span> on Shadow Nexus TV`;
+              const _clDeepLink = n.deepLink || (n.fromUid && n.liveId
+                  ? `channel.html?live=${n.fromUid}&liveId=${n.liveId}`
+                  : 'channel.html');
+              actHtml = `<div class="notif-actions" style="margin-top:6px;">
+                  <button class="btn-accept" style="font-size:11px;background:rgba(255,51,68,0.15);border-color:rgba(255,51,68,0.5);color:#ff6677;" onclick="event.stopPropagation();snxOpenTvLive('${escFeed(n.fromUid||'')}','${escFeed(n.liveId||'')}');markNotifById('${nid}')">🔴 Watch Live</button>
+                  <button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button>
+              </div>`;
+              navFn = `snxOpenTvLive('${escFeed(n.fromUid||'')}','${escFeed(n.liveId||'')}')`;
+          } else if (n.type === 'replay_published') {
+              // ▶ Creator published a live replay
+              icon = '▶️';
+              const _rpName = escFeed(n.channelName || n.fromName || 'A creator');
+              text = `<b>${_rpName}</b> posted a Live Replay: <i>"${escFeed(n.replayTitle || '')}"</i>`;
+              actHtml = `<div class="notif-actions" style="margin-top:6px;">
+                  <button class="btn-accept" style="font-size:11px;" onclick="event.stopPropagation();snxOpenTvReplay('${escFeed(n.fromUid||'')}','${escFeed(n.replayId||'')}');markNotifById('${nid}')">▶ Watch Replay</button>
+                  <button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button>
+              </div>`;
+              navFn = `snxOpenTvReplay('${escFeed(n.fromUid||'')}','${escFeed(n.replayId||'')}')`;
           } else if (n.type === 'announcement') {
               icon = '📢';
               text = `<b>Admin</b>: ${escFeed(n.body || 'New announcement')}`;
@@ -16912,6 +17036,41 @@ window.addEventListener('snxAuthSignOut', () => {
                   }, 600);
               }
           };
+
+          // VIEW CHANNEL button — injected once per profile session
+          // Allows direct navigation from a user's SNS profile to their TV channel
+          let btnViewChannel = document.getElementById('btnViewChannelAction');
+          if (!btnViewChannel) {
+              btnViewChannel = document.createElement('button');
+              btnViewChannel.id = 'btnViewChannelAction';
+              btnViewChannel.style.cssText = 'border-color:rgba(0,174,239,0.35);color:#00AEEF;font-size:12px;padding:6px 14px;border-radius:20px;';
+              const btnReport2 = document.getElementById('btnReportUser');
+              if (btnReport2) btnReport2.insertAdjacentElement('afterend', btnViewChannel);
+              else document.getElementById('btnFollowAction')?.insertAdjacentElement('afterend', btnViewChannel);
+          }
+          // Always show VIEW CHANNEL (every user has a channel) — hide only on own profile
+          if (isSelf) {
+              btnViewChannel.style.display = 'none';
+          } else {
+              btnViewChannel.textContent   = '📺 View Channel';
+              btnViewChannel.style.display = '';
+              btnViewChannel.onclick       = () => {
+                  // Navigate to TV tab and open this user's channel
+                  if (typeof window.realmNavTo === 'function') realmNavTo('tvPage');
+                  // Give the TV tab a moment to init, then open the channel view
+                  setTimeout(() => {
+                      if (window._tvNetworkModule && typeof window._tvNetworkModule.openChannelForUid === 'function') {
+                          window._tvNetworkModule.openChannelForUid(uid);
+                      } else {
+                          // Fallback: TV tab is the channel listing; user can find it there
+                          if (typeof window.toastNotification === 'function')
+                              toastNotification('📺 Opening ' + (p.displayName || p.username || 'their') + '\'s channel…');
+                          // Fire an event that snx-tv-network picks up
+                          window.dispatchEvent(new CustomEvent('snx:openCreatorChannel', { detail: { uid } }));
+                      }
+                  }, 350);
+              };
+          }
 
           // Block / Report buttons — show on other users' profiles only
           const btnBlock  = document.getElementById('btnBlockUser');
@@ -32254,7 +32413,7 @@ function updateShadowCoreActive(pageId) {
         'moderatorPage':     ['navMod', 'scNavMod', 'ncmMod'],
         'administratorPage': ['navAdminOfficer', 'scNavAdm', 'ncmAdm'],
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
-        'studioPage':        ['navNexus', 'scNavNexus', 'ncmNexus'],
+        'studioPage':        ['navMusic', 'scNavMusic', 'ncmMusic'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
         'tvPage':            ['navNexus', 'scNavNexus', 'ncmNexus']
     };

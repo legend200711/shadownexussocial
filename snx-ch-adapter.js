@@ -300,16 +300,16 @@ function _rebuildTvShell() {
     <!-- ── Page header ── -->
     <div class="snx-tv-header">
       <div class="snx-tv-title-wrap">
-        <div class="snx-tv-title">📺 SHADOW NEXUS TV</div>
+        <div class="snx-tv-title">SHADOW NEXUS TV</div>
         <div class="snx-tv-status" id="snx-tv-status">
           <span class="snx-tv-status-dot" id="snx-tv-status-dot"></span>
           <span id="snx-tv-status-text">CONNECTING</span>
         </div>
       </div>
-      <div id="snx-tv-tab-bar" class="snx-tv-tabs">
-        <button class="snx-tv-tab active" id="snxTvTabWatch" onclick="snxTvSwitchTab('watch')">▶ Watch</button>
-        ${_isFounder ? `<button class="snx-tv-tab" id="snxTvTabStudio" onclick="snxTvSwitchTab('studio')">⚙ Studio</button>` : ''}
-      </div>
+      ${_isFounder ? `<div id="snx-tv-tab-bar" class="snx-tv-tabs">
+        <button class="snx-tv-tab active" id="snxTvTabWatch" onclick="snxTvSwitchTab('watch')">WATCH</button>
+        <button class="snx-tv-tab" id="snxTvTabStudio" onclick="snxTvSwitchTab('studio')">⚙ TV STUDIO</button>
+      </div>` : ''}
     </div>
 
     <!-- ── WATCH panel ── -->
@@ -562,27 +562,18 @@ function _renderFounderBar() {
   const bar = document.getElementById('snx-tv-founder-bar');
   if (!bar) return;
   bar.style.display = 'block';
-  bar.style.cssText = 'display:block;background:rgba(57,255,20,0.04);border-bottom:1px solid rgba(57,255,20,0.18);font-size:12px;';
   bar.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;flex-wrap:wrap;">
-      <span style="color:#39FF14;font-weight:800;letter-spacing:1px;">⚡ FOUNDER</span>
-      <span style="color:#5a80a8;">${_esc(_user?.email || '')}</span>
+      <span style="color:#39FF14;font-weight:800;letter-spacing:1px;font-size:11px;">⚡ FOUNDER</span>
       <div style="flex:1;"></div>
-      <button onclick="snxTvSwitchTab('studio')"
-        style="padding:5px 14px;background:rgba(57,255,20,0.12);border:1px solid rgba(57,255,20,0.30);color:#39FF14;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.5px;">
-        ⚙ CHANNEL STUDIO
-      </button>
       <button id="ax-submit-btn"
-        style="padding:5px 14px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.30);color:#00AEEF;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.5px;">
-        📤 SUBMIT CONTENT
+        style="padding:5px 13px;background:rgba(0,174,239,0.10);border:1px solid rgba(0,174,239,0.25);color:#00AEEF;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:0.4px;">
+        📤 Submit Content
       </button>
     </div>
-    <!-- Network Status panel — Stage 4 -->
-    <div id="snx-tv-network-status" style="padding:8px 14px 10px;border-top:1px solid rgba(57,255,20,0.10);">
-      <!-- Populated by _updateNetworkStatus() -->
-    </div>`;
+    <!-- Network status (Main TV mode + emergency return) -->
+    <div id="snx-tv-network-status" style="padding:0 14px 10px;"></div>`;
   document.getElementById('ax-submit-btn')?.addEventListener('click', _openSubmitModal);
-  // Initial render
   _updateNetworkStatus();
 }
 
@@ -598,42 +589,23 @@ function _updateNetworkStatus() {
 
   const st = _mainTvState;
   const isFeatured = st?.mode === 'featured_live';
-  const liveCount  = window._snxLiveChannelCount ?? 0;  // supplied by snx-tv-network.js via window
+
+  // Only show the panel when a creator is featured — otherwise stay minimal
+  if (!isFeatured) {
+    panel.innerHTML = '';
+    return;
+  }
 
   panel.innerHTML = `
-    <div style="display:flex;align-items:flex-start;flex-wrap:wrap;gap:10px;">
-      <div style="flex:1;min-width:180px;">
-        <div style="font-size:10px;font-weight:700;color:#5a80a8;letter-spacing:1.5px;margin-bottom:4px;">NETWORK STATUS</div>
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
-          <span style="font-size:10px;font-weight:700;color:#c8d0e8;">MAIN TV</span>
-          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#39FF14;box-shadow:0 0 5px #39FF14;"></span>
-          <span style="font-size:10px;color:#39FF14;font-weight:700;">ON AIR</span>
-        </div>
-        <div style="font-size:10px;color:#5a80a8;margin-bottom:2px;">MODE: <span style="color:${isFeatured ? '#ff4d6a' : '#c8d0e8'};font-weight:700;">${isFeatured ? '🔴 Featured Creator Live' : 'Scheduled Programming'}</span></div>
-        ${isFeatured ? `<div style="font-size:10px;color:#c8d0e8;margin-bottom:2px;">FEATURED: <span style="color:#fff;font-weight:700;">${_esc(st.featuredChannelName || 'Unknown')}</span></div>` : ''}
-        <div style="font-size:10px;color:#5a80a8;">LIVE CREATORS: <span style="color:#c8d0e8;font-weight:700;">${liveCount}</span></div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
-        <button id="snx-tv-view-live-now-btn"
-          style="padding:4px 12px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.3);color:#00AEEF;border-radius:5px;cursor:pointer;font-size:10px;font-weight:700;letter-spacing:0.5px;white-space:nowrap;">
-          👁 VIEW LIVE NOW
-        </button>
-        ${isFeatured ? `
-          <button id="snx-tv-emergency-return-btn"
-            style="padding:4px 12px;background:rgba(255,45,85,0.15);border:1px solid rgba(255,45,85,0.5);color:#ff4d6a;border-radius:5px;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:0.5px;white-space:nowrap;">
-            ⚡ RETURN TO SCHEDULE
-          </button>
-        ` : ''}
-      </div>
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 0;flex-wrap:wrap;border-top:1px solid rgba(57,255,20,0.10);">
+      <div style="font-size:10px;color:#ff4d6a;font-weight:700;">🔴 FEATURED: <span style="color:#fff;">${_esc(st.featuredChannelName || 'Creator')}</span></div>
+      <div style="flex:1;"></div>
+      <button id="snx-tv-emergency-return-btn"
+        style="padding:4px 12px;background:rgba(255,45,85,0.12);border:1px solid rgba(255,45,85,0.40);color:#ff4d6a;border-radius:5px;cursor:pointer;font-size:10px;font-weight:800;letter-spacing:0.5px;white-space:nowrap;">
+        ↩ Return to Schedule
+      </button>
     </div>`;
 
-  // Wire VIEW LIVE NOW — switches to Live Now tab in the SNX TV Network layer
-  document.getElementById('snx-tv-view-live-now-btn')?.addEventListener('click', () => {
-    // The snx-tv-network module owns the tab — dispatch a custom event
-    window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'live-now' } }));
-  });
-
-  // Wire EMERGENCY RETURN
   document.getElementById('snx-tv-emergency-return-btn')?.addEventListener('click', () => {
     _showEmergencyReturnConfirm();
   });

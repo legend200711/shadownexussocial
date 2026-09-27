@@ -6,15 +6,26 @@
  * Reads/writes to the SNS Firebase project (horr-a08f4) — same project as
  * Shadow Nexus Social.  Uses window._snxAuth / window._snxCurrentUser.
  *
+ * ONE SOCIAL GRAPH — ARCHITECTURE:
+ *   Follow state is stored ONLY in users/{uid}.followers / users/{uid}.following
+ *   (the canonical SNS social graph). This ensures:
+ *     - Following on SNS profile = following on TV channel (and vice versa)
+ *     - Follower counts are always in sync across all surfaces
+ *     - No duplicate social data
+ *
+ * channelFollows/{uid}/followers/{fid} is kept ONLY for the live-notification
+ * preference (notificationsEnabled). It no longer stores the authoritative
+ * follow relationship.
+ *
  * Collections (all in project horr-a08f4 Firestore):
  *
+ *   users/{uid}                          — canonical SNS user doc (followers/following arrays)
  *   creatorChannels/{uid}                — permanent channel, keyed by owner UID
  *   liveSessions/{liveId}                — per-live-session documents
  *   liveReplays/{uid}/replays/{replayId} — replay metadata subcollection
  *   liveReplays/{uid}/replays/{replayId}/comments/{commentId} — replay comments
  *   replayLikes/{uid_replayId}           — like dedup index (flat collection)
- *   channelFollows/{uid}/followers/{fid} — follower index
- *   channelNotifPrefs/{uid}/prefs/{targetUid} — per-follower notification prefs
+ *   channelFollows/{uid}/followers/{fid} — NOTIF PREF ONLY (notificationsEnabled)
  *
  * ARCHITECTURE NOTES:
  *   - One channel per user, identified by their UID (NOT a separate ID)
@@ -37,7 +48,7 @@ import {
   getDocs, onSnapshot, addDoc,
   serverTimestamp, increment, Timestamp,
   initializeFirestore, memoryLocalCache,
-  runTransaction,
+  runTransaction, arrayUnion, arrayRemove,
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 /* ══════════════════════════════════════════════════════════════
@@ -57,10 +68,17 @@ const _snsCfg = {
 // Reuse the existing SNS Firebase app (initialised in channel.html) if available
 const _snsApp = getApps().find(a => a.name === '[DEFAULT]') || initializeApp(_snsCfg);
 
-// Use memory cache for creator channel state — we always want live data
-export const snsDb = initializeFirestore(_snsApp, {
-  localCache: memoryLocalCache(),
-});
+// Use memory cache when we are the first to initialise Firestore on this app.
+// If index.html (getFirestore) or snx-creator-live.js (initializeFirestore) already
+// ran first, initializeFirestore throws "already initialized" — fall back to
+// getFirestore() to get the existing instance.
+let snsDb;
+try {
+  snsDb = initializeFirestore(_snsApp, { localCache: memoryLocalCache() });
+} catch (_initErr) {
+  snsDb = getFirestore(_snsApp);
+}
+export { snsDb };
 
 /* ══════════════════════════════════════════════════════════════
    CURRENT USER ACCESSOR
@@ -87,20 +105,56 @@ export async function ensureCreatorChannel(user, opts = {}) {
   const ref = doc(snsDb, 'creatorChannels', user.uid);
   const snap = await getDoc(ref);
 
-  if (snap.exists()) return snap.data();
+  // Load the canonical SNS user profile to get authoritative identity fields
+  let snsProfile = null;
+  try {
+    const uSnap = await getDoc(doc(snsDb, 'users', user.uid));
+    if (uSnap.exists()) snsProfile = uSnap.data();
+  } catch (_) {}
+
+  // Derive display name and avatar from canonical SNS profile
+  const displayName  = snsProfile?.displayName || snsProfile?.username || user.displayName || '';
+  const snsAvatar    = snsProfile?.avatar || snsProfile?.profileImage || user.photoURL || null;
+  const snsUsername  = snsProfile?.username || snsProfile?.handle || '';
+  // Follower count always derives from canonical SNS followers array
+  const followersCount = (snsProfile?.followers || []).length;
+
+  if (snap.exists()) {
+    // Channel exists — sync identity fields from SNS profile so they stay current
+    const existing = snap.data();
+    const needsSync =
+      existing.ownerUsername !== snsUsername ||
+      existing.avatar        !== snsAvatar   ||
+      existing.ownerUid      !== user.uid;
+    if (needsSync) {
+      try {
+        await updateDoc(ref, {
+          ownerUsername: snsUsername,
+          avatar:        snsAvatar,
+          followersCount,
+          updatedAt:     serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+    return { ...existing, ownerUsername: snsUsername, avatar: snsAvatar, followersCount };
+  }
 
   // First time — create the channel
+  const channelName = opts.channelName
+    || (displayName ? `${displayName}'s Channel` : 'My Channel');
+
   const data = {
     ownerUid:           user.uid,
-    channelName:        opts.channelName || (user.displayName ? `${user.displayName}'s Channel` : 'My Channel'),
+    ownerUsername:      snsUsername,
+    channelName,
     channelDescription: opts.channelDescription || '',
-    avatar:             user.photoURL || null,
+    avatar:             snsAvatar,
     coverImage:         null,
     createdAt:          serverTimestamp(),
     updatedAt:          serverTimestamp(),
     status:             'offline',   // 'offline' | 'live'
     currentLiveId:      null,
-    followersCount:     0,
+    followersCount,
     // Stage 4: Main TV feature fields
     featuredOnMainTv:   false,    // true while founder is featuring this channel on Main TV
     allowMainTvFeature: true,     // creator opt-out: set false to prevent Main TV featuring
@@ -128,7 +182,10 @@ export async function loadCreatorChannel(uid) {
  * @param {object} updates  — subset of: channelName, channelDescription, avatar, coverImage
  */
 export async function updateCreatorChannel(uid, updates) {
-  const allowed = ['channelName', 'channelDescription', 'avatar', 'coverImage', 'allowMainTvFeature'];
+  // avatar is NOT allowed here — avatar is owned by the SNS users/{uid} profile.
+  // channelName is the TV-display name (can differ from SNS displayName — it's the
+  // creator's chosen broadcast persona name).
+  const allowed = ['channelName', 'channelDescription', 'coverImage', 'allowMainTvFeature'];
   const safe = {};
   for (const k of allowed) { if (k in updates) safe[k] = updates[k]; }
   await updateDoc(doc(snsDb, 'creatorChannels', uid), {
@@ -676,61 +733,174 @@ export async function deleteReplayComment(creatorUid, replayId, commentId) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   FOLLOW HELPERS  (channelFollows/{uid}/followers/{followerUid})
+   FOLLOW HELPERS — ONE CANONICAL FOLLOW SYSTEM
+   ─────────────────────────────────────────────────────────────
+   Follow state lives in users/{uid}.followers / users/{uid}.following
+   (the SNS canonical social graph).  This is the SAME data the main
+   Shadow Nexus profile follow button reads and writes.
+
+   channelFollows/{creatorUid}/followers/{followerUid} is kept solely for
+   the per-creator live-notification preference (notificationsEnabled).
+   It does NOT determine whether a follow relationship exists.
 ══════════════════════════════════════════════════════════════ */
 
 /**
- * Follow a creator channel.
+ * Follow a creator.
+ * Writes to the canonical SNS users collection (followers/following arrays).
+ * Also writes a channelFollows record for live-notification prefs.
+ *
  * @param {string} creatorUid  — channel owner
  * @param {string} followerUid
  */
 export async function followChannel(creatorUid, followerUid) {
-  await setDoc(
+  // ── 1. Canonical SNS follow relationship ──────────────────────────────────
+  await Promise.all([
+    updateDoc(doc(snsDb, 'users', creatorUid),  { followers: arrayUnion(followerUid) }),
+    updateDoc(doc(snsDb, 'users', followerUid), { following: arrayUnion(creatorUid) }),
+  ]);
+
+  // ── 2. Sync followersCount on creatorChannels from actual follower array ──
+  // We use a fresh read after the write so the count is always accurate.
+  try {
+    const snap = await getDoc(doc(snsDb, 'users', creatorUid));
+    if (snap.exists()) {
+      const count = (snap.data().followers || []).length;
+      await updateDoc(doc(snsDb, 'creatorChannels', creatorUid), {
+        followersCount: count,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (_) {}
+
+  // ── 3. Notification pref record (TV-specific, non-blocking) ──────────────
+  setDoc(
     doc(snsDb, 'channelFollows', creatorUid, 'followers', followerUid),
     { followerUid, followedAt: serverTimestamp(), notificationsEnabled: true },
-  );
-  // Increment the channel follower count
-  await updateDoc(doc(snsDb, 'creatorChannels', creatorUid), {
-    followersCount: increment(1),
-    updatedAt: serverTimestamp(),
-  });
+    { merge: true },
+  ).catch(() => {});
 }
 
 /**
- * Unfollow a creator channel.
+ * Unfollow a creator.
+ * Removes from canonical SNS users collection and channelFollows pref record.
+ *
  * @param {string} creatorUid
  * @param {string} followerUid
  */
 export async function unfollowChannel(creatorUid, followerUid) {
-  await deleteDoc(doc(snsDb, 'channelFollows', creatorUid, 'followers', followerUid));
-  await updateDoc(doc(snsDb, 'creatorChannels', creatorUid), {
-    followersCount: increment(-1),
-    updatedAt: serverTimestamp(),
-  });
+  // ── 1. Canonical SNS follow relationship ──────────────────────────────────
+  await Promise.all([
+    updateDoc(doc(snsDb, 'users', creatorUid),  { followers: arrayRemove(followerUid) }),
+    updateDoc(doc(snsDb, 'users', followerUid), { following: arrayRemove(creatorUid) }),
+  ]);
+
+  // ── 2. Sync followersCount on creatorChannels ─────────────────────────────
+  try {
+    const snap = await getDoc(doc(snsDb, 'users', creatorUid));
+    if (snap.exists()) {
+      const count = (snap.data().followers || []).length;
+      await updateDoc(doc(snsDb, 'creatorChannels', creatorUid), {
+        followersCount: count,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (_) {}
+
+  // ── 3. Remove notification pref record (non-blocking) ─────────────────────
+  deleteDoc(doc(snsDb, 'channelFollows', creatorUid, 'followers', followerUid)).catch(() => {});
 }
 
 /**
- * Check if a user follows a channel.
+ * Check if a user follows a creator.
+ * Reads from the canonical SNS users/{creatorUid}.followers array —
+ * the same data the main profile follow button uses.
+ *
  * @param {string} creatorUid
  * @param {string} followerUid
  * @returns {Promise<boolean>}
  */
 export async function isFollowingChannel(creatorUid, followerUid) {
-  const snap = await getDoc(doc(snsDb, 'channelFollows', creatorUid, 'followers', followerUid));
-  return snap.exists();
+  try {
+    const snap = await getDoc(doc(snsDb, 'users', creatorUid));
+    if (!snap.exists()) return false;
+    return (snap.data().followers || []).includes(followerUid);
+  } catch (_) { return false; }
 }
 
 /**
  * Update live notification preference for a followed channel.
+ * This preference is TV-specific (separate from the follow relationship).
+ * Turning off notifications does NOT unfollow the creator.
+ *
  * @param {string} creatorUid
  * @param {string} followerUid
  * @param {boolean} enabled
  */
 export async function setNotificationPref(creatorUid, followerUid, enabled) {
   const ref = doc(snsDb, 'channelFollows', creatorUid, 'followers', followerUid);
-  const snap = await getDoc(ref);
-  if (snap.exists()) {
-    await updateDoc(ref, { notificationsEnabled: enabled });
+  await setDoc(ref, { followerUid, notificationsEnabled: enabled }, { merge: true });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ONE-TIME MIGRATION HELPER
+   Merges legacy channelFollows records into the canonical SNS
+   users collection. Safe to call multiple times — idempotent.
+   Exported so the TV Network can call it once on startup.
+══════════════════════════════════════════════════════════════ */
+
+/**
+ * Migrate legacy channelFollows data into the canonical SNS follow system.
+ * For each creatorUid in channelFollows, adds followerUid to
+ * users/{creatorUid}.followers and users/{followerUid}.following if not
+ * already present.
+ *
+ * @param {string} creatorUid  — only migrate for this creator's followers
+ * @returns {Promise<number>}  number of relationships migrated
+ */
+export async function migrateChannelFollowsToSns(creatorUid) {
+  try {
+    const chFollowsSnap = await getDocs(
+      collection(snsDb, 'channelFollows', creatorUid, 'followers'),
+    );
+    if (chFollowsSnap.empty) return 0;
+
+    // Get current canonical followers for this creator
+    const creatorSnap = await getDoc(doc(snsDb, 'users', creatorUid));
+    if (!creatorSnap.exists()) return 0;
+    const existingFollowers = new Set(creatorSnap.data().followers || []);
+
+    let migrated = 0;
+    for (const fDoc of chFollowsSnap.docs) {
+      const followerUid = fDoc.data().followerUid;
+      if (!followerUid || followerUid === creatorUid) continue;
+      if (existingFollowers.has(followerUid)) continue; // already in canonical system
+
+      try {
+        await Promise.all([
+          updateDoc(doc(snsDb, 'users', creatorUid),  { followers: arrayUnion(followerUid) }),
+          updateDoc(doc(snsDb, 'users', followerUid), { following: arrayUnion(creatorUid) }),
+        ]);
+        existingFollowers.add(followerUid);
+        migrated++;
+      } catch (_) { /* non-fatal — skip this record */ }
+    }
+
+    // Sync followersCount after migration
+    if (migrated > 0) {
+      const updatedSnap = await getDoc(doc(snsDb, 'users', creatorUid));
+      if (updatedSnap.exists()) {
+        const count = (updatedSnap.data().followers || []).length;
+        updateDoc(doc(snsDb, 'creatorChannels', creatorUid), {
+          followersCount: count,
+          updatedAt: serverTimestamp(),
+        }).catch(() => {});
+      }
+    }
+
+    return migrated;
+  } catch (err) {
+    console.warn('[SNX Channels] Follow migration error:', err.message);
+    return 0;
   }
 }
 
@@ -745,30 +915,37 @@ async function _writeReplayNotification(creatorUid, replayId, replayTitle) {
     if (!channelSnap.exists()) return;
     const channel = channelSnap.data();
 
-    const followersSnap = await getDocs(
-      query(
-        collection(snsDb, 'channelFollows', creatorUid, 'followers'),
-        where('notificationsEnabled', '==', true),
-        limit(500),
-      )
-    );
+    // ── Use canonical SNS followers array as the source of truth ─────────────
+    const creatorUserSnap = await getDoc(doc(snsDb, 'users', creatorUid));
+    if (!creatorUserSnap.exists()) return;
+    const allFollowers = (creatorUserSnap.data().followers || []).filter(f => f !== creatorUid);
+    if (!allFollowers.length) return;
 
-    const notifBatch = followersSnap.docs.map(fDoc => {
-      const followerUid = fDoc.data().followerUid;
-      if (followerUid === creatorUid) return Promise.resolve();
-      return addDoc(collection(snsDb, 'notifications', followerUid, 'items'), {
-        type:          'replay_published',
-        fromUid:       creatorUid,
-        channelName:   channel.channelName || 'A creator',
-        replayId,
-        replayTitle,
-        text:          `▶ ${channel.channelName || 'A creator'} posted a Live Replay`,
-        subtitle:      `"${replayTitle}"`,
-        deepLink:      `channel.html?replay=${creatorUid}&replayId=${replayId}`,
-        timestamp:     serverTimestamp(),
-        read:          false,
-      });
+    // Load notification pref records to filter out opted-out followers
+    const notifPrefsSnap = await getDocs(
+      collection(snsDb, 'channelFollows', creatorUid, 'followers'),
+    );
+    const notifPrefs = {};
+    notifPrefsSnap.docs.forEach(d => {
+      notifPrefs[d.data().followerUid] = d.data().notificationsEnabled !== false;
     });
+
+    const notifBatch = allFollowers
+      .filter(followerUid => notifPrefs[followerUid] !== false) // default: notify unless opted out
+      .map(followerUid =>
+        addDoc(collection(snsDb, 'notifications', followerUid, 'items'), {
+          type:          'replay_published',
+          fromUid:       creatorUid,
+          channelName:   channel.channelName || 'A creator',
+          replayId,
+          replayTitle,
+          text:          `▶ ${channel.channelName || 'A creator'} posted a Live Replay`,
+          subtitle:      `"${replayTitle}"`,
+          deepLink:      `channel.html?replay=${creatorUid}&replayId=${replayId}`,
+          timestamp:     serverTimestamp(),
+          read:          false,
+        }),
+      );
 
     await Promise.allSettled(notifBatch);
   } catch (err) {
@@ -783,39 +960,46 @@ async function _writeReplayNotification(creatorUid, replayId, replayTitle) {
 ══════════════════════════════════════════════════════════════ */
 async function _writeLiveNotification(creatorUid, liveId) {
   try {
-    // Load the creator's channel to get display info
-    const channelSnap = await getDoc(doc(snsDb, 'creatorChannels', creatorUid));
-    if (!channelSnap.exists()) return;
+    // ── Load display info from canonical SNS profile ──────────────────────────
+    const [channelSnap, creatorUserSnap] = await Promise.all([
+      getDoc(doc(snsDb, 'creatorChannels', creatorUid)),
+      getDoc(doc(snsDb, 'users', creatorUid)),
+    ]);
+    if (!channelSnap.exists() || !creatorUserSnap.exists()) return;
     const channel = channelSnap.data();
 
-    // Load followers who have notifications enabled
-    const followersSnap = await getDocs(
-      query(
-        collection(snsDb, 'channelFollows', creatorUid, 'followers'),
-        where('notificationsEnabled', '==', true),
-        limit(500),  // reasonable batch limit for Stage 1
-      )
-    );
+    // ── Use canonical SNS followers array as the source of truth ─────────────
+    // Only followers who were added via the unified follow system receive notifications.
+    // This prevents phantom notifications to TV-only followers that predate the migration.
+    const allFollowers = (creatorUserSnap.data().followers || []).filter(f => f !== creatorUid);
+    if (!allFollowers.length) return;
 
-    // Write a notification document for each follower
-    const notifBatch = followersSnap.docs.map(fDoc => {
-      const followerUid = fDoc.data().followerUid;
-      // Do not notify the creator themselves
-      if (followerUid === creatorUid) return Promise.resolve();
-      return addDoc(collection(snsDb, 'notifications', followerUid, 'items'), {
-        type:          'creator_live',
-        fromUid:       creatorUid,
-        channelName:   channel.channelName || 'A creator',
-        liveId,
-        text:          `🔴 ${channel.channelName || 'A creator'} is LIVE on Shadow Nexus TV`,
-        subtitle:      `${channel.channelName || 'A creator'} is broadcasting now.`,
-        // Include liveId so tapping the notification deep-links directly to
-        // this exact live session — not just the creator's channel page.
-        deepLink:      `channel.html?live=${creatorUid}&liveId=${liveId}`,
-        timestamp:     serverTimestamp(),
-        read:          false,
-      });
+    // Load per-creator live-notification prefs from channelFollows
+    const notifPrefsSnap = await getDocs(
+      collection(snsDb, 'channelFollows', creatorUid, 'followers'),
+    );
+    const notifPrefs = {};
+    notifPrefsSnap.docs.forEach(d => {
+      notifPrefs[d.data().followerUid] = d.data().notificationsEnabled !== false;
     });
+
+    // Write ONE notification per eligible follower
+    const notifBatch = allFollowers
+      .filter(followerUid => notifPrefs[followerUid] !== false) // default: notify unless opted out
+      .map(followerUid =>
+        addDoc(collection(snsDb, 'notifications', followerUid, 'items'), {
+          type:          'creator_live',
+          fromUid:       creatorUid,
+          channelName:   channel.channelName || 'A creator',
+          liveId,
+          text:          `🔴 ${channel.channelName || 'A creator'} is LIVE on Shadow Nexus TV`,
+          subtitle:      `${channel.channelName || 'A creator'} is broadcasting now.`,
+          // Deep-link directly to this live session (not generic channel page)
+          deepLink:      `channel.html?live=${creatorUid}&liveId=${liveId}`,
+          timestamp:     serverTimestamp(),
+          read:          false,
+        }),
+      );
 
     await Promise.allSettled(notifBatch);
   } catch (err) {
@@ -838,9 +1022,36 @@ export async function loadUserProfile(uid) {
     if (!snap.exists()) return null;
     const d = snap.data();
     return {
+      uid,
       username:     d.username || d.handle || '',
       displayName:  d.displayName || d.name || '',
-      profileImage: d.profileImage || d.photoURL || null,
+      profileImage: d.avatar || d.profileImage || d.photoURL || null,
+      avatar:       d.avatar || d.profileImage || d.photoURL || null,
+      followers:    d.followers || [],
+      following:    d.following || [],
     };
   } catch (_) { return null; }
+}
+
+/**
+ * Subscribe to real-time profile updates for a user.
+ * Use this to keep TV channel identity in sync with SNS profile changes.
+ * @param {string} uid
+ * @param {function} cb  — called with profile data or null
+ * @returns {function} unsubscribe
+ */
+export function subscribeUserProfile(uid, cb) {
+  return onSnapshot(doc(snsDb, 'users', uid), snap => {
+    if (!snap.exists()) { cb(null); return; }
+    const d = snap.data();
+    cb({
+      uid,
+      username:     d.username || d.handle || '',
+      displayName:  d.displayName || d.name || '',
+      profileImage: d.avatar || d.profileImage || d.photoURL || null,
+      avatar:       d.avatar || d.profileImage || d.photoURL || null,
+      followers:    d.followers || [],
+      following:    d.following || [],
+    });
+  });
 }

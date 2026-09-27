@@ -26,6 +26,7 @@ import {
   subscribeCreatorChannel,
   subscribeChannelDirectory,
   subscribeLiveChannels,
+  subscribeUserProfile,
   loadReplays,
   publishReplay,
   deleteReplay,
@@ -35,6 +36,7 @@ import {
   setNotificationPref,
   setMainTvFeaturePreference,
   loadUserProfile,
+  migrateChannelFollowsToSns,
   getCurrentUser,
   snsDb,
 } from './snx-creator-channels.js';
@@ -52,7 +54,9 @@ async function _getLiveModule() {
 let _activeTab       = 'main-tv';
 let _user            = null;
 let _myChannel       = null;
+let _myProfile       = null;    // canonical SNS profile for current user (real-time)
 let _myUnsub         = null;    // realtime subscription for own channel
+let _myProfileUnsub  = null;    // realtime subscription for own SNS profile
 let _dirUnsub        = null;    // directory subscription
 let _liveUnsub       = null;    // live-now subscription
 let _mainTvUnsub     = null;    // Main TV state subscription
@@ -75,14 +79,19 @@ export function initTvNetwork(user) {
   _injectNetworkPanels();
   _injectLivePreview();
   _startSubscriptions();
-  if (user) _ensureMyChannel();
+  if (user) {
+    _ensureMyChannel();
+    _subscribeMyProfile();
+  }
 
-  // Handle deep-links from notifications
+  // Handle deep-links from notifications / external entry points
   const params = new URLSearchParams(location.search);
   const deepLiveUid   = params.get('live');
   const deepLiveId    = params.get('liveId');
   const deepReplayUid = params.get('replay');
   const deepReplayId  = params.get('replayId');
+  // ?channel=uid — deep-link to open a specific creator's channel page
+  const deepChannelUid = params.get('channel');
 
   if (deepReplayUid && deepReplayId && user) {
     // Open replay player — direct link from notification or feed post
@@ -122,7 +131,27 @@ export function initTvNetwork(user) {
     return;
   }
 
+  if (deepChannelUid) {
+    // Deep-link to a specific creator's channel (e.g. from VIEW CHANNEL in index.html)
+    setTimeout(() => _openChannelView(deepChannelUid), 400);
+    _switchTab('channels', true);
+    return;
+  }
+
   _switchTab('main-tv', true);
+}
+
+/**
+ * Programmatically open a specific creator's channel view.
+ * Called by index.html's snx:openCreatorChannel handler and the VIEW CHANNEL button.
+ * @param {string} uid
+ */
+export function openChannelForUid(uid) {
+  if (!uid) return;
+  // Switch to channels tab if not there already
+  _switchTab('channels');
+  // Give the channels section a moment to render, then open the channel view
+  setTimeout(() => _openChannelView(uid), 150);
 }
 
 /**
@@ -137,10 +166,13 @@ export function onTvNetworkAuthChange(user) {
   }
   if (user) {
     _ensureMyChannel();
+    _subscribeMyProfile();
   } else {
     // Clean up per-user subscriptions on sign-out
-    if (_myUnsub)  { try { _myUnsub();  } catch (_) {} _myUnsub  = null; }
+    if (_myUnsub)        { try { _myUnsub();        } catch (_) {} _myUnsub        = null; }
+    if (_myProfileUnsub) { try { _myProfileUnsub(); } catch (_) {} _myProfileUnsub = null; }
     _myChannel = null;
+    _myProfile = null;
     _renderMyChannelSection();
   }
 }
@@ -388,6 +420,16 @@ function _startSubscriptions() {
     };
     window.addEventListener('snx:switchTvTab', window._snxTvTabSwitchHandler);
   }
+
+  // Handle snx:openCreatorChannel — fired by the VIEW CHANNEL button in index.html
+  // Works in both index.html (embedded) and channel.html (standalone) contexts.
+  if (!window._snxTvOpenChannelHandler) {
+    window._snxTvOpenChannelHandler = e => {
+      const uid = e?.detail?.uid;
+      if (uid) openChannelForUid(uid);
+    };
+    window.addEventListener('snx:openCreatorChannel', window._snxTvOpenChannelHandler);
+  }
 }
 
 function _updateLiveBadge() {
@@ -411,9 +453,11 @@ function _updateLiveBadge() {
 async function _ensureMyChannel() {
   if (!_user) return;
   try {
-    // Ensure the channel doc exists (idempotent)
+    // Ensure the channel doc exists (idempotent) — also syncs identity from SNS profile
     _myChannel = await ensureCreatorChannel(_user);
-    // Subscribe to real-time updates
+    // One-time migration: merge any legacy channelFollows into SNS canonical follow system
+    migrateChannelFollowsToSns(_user.uid).catch(() => {});
+    // Subscribe to real-time updates for the channel doc
     if (_myUnsub) _myUnsub();
     _myUnsub = subscribeCreatorChannel(_user.uid, ch => {
       _myChannel = ch;
@@ -423,6 +467,34 @@ async function _ensureMyChannel() {
   } catch (err) {
     console.warn('[SNX TV Network] ensureCreatorChannel error:', err.message);
   }
+}
+
+/* Subscribe to the current user's SNS profile in real time.
+   When the user changes their avatar/username/displayName on their main profile,
+   the TV channel identity updates automatically — no manual re-entry required. */
+function _subscribeMyProfile() {
+  if (!_user) return;
+  if (_myProfileUnsub) { try { _myProfileUnsub(); } catch (_) {} }
+  _myProfileUnsub = subscribeUserProfile(_user.uid, async profile => {
+    _myProfile = profile;
+    if (!profile) return;
+
+    // Sync identity fields to creatorChannels so Live Now / Channels cards
+    // display the updated avatar and username in real time.
+    try {
+      const {
+        doc: docFn, updateDoc, serverTimestamp,
+      } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
+      await updateDoc(docFn(snsDb, 'creatorChannels', _user.uid), {
+        avatar:        profile.avatar       || null,
+        ownerUsername: profile.username     || '',
+        followersCount: profile.followers.length,
+        updatedAt:     serverTimestamp(),
+      });
+    } catch (_) { /* channel may not exist yet — ensureCreatorChannel will handle it */ }
+
+    if (_activeTab === 'my-channel') _renderMyChannelSection();
+  });
 }
 
 /* ════════════════════════════════════
@@ -436,12 +508,12 @@ function _renderLiveNowSection() {
     el.innerHTML = `
       <div class="snx-tn-page-header">
         <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
-        <div class="snx-tn-page-sub">Creator channels currently broadcasting</div>
+        <div class="snx-tn-page-sub">No creators are live right now</div>
       </div>
       <div class="snx-tn-empty" role="status" aria-live="polite">
         <div class="snx-tn-empty-icon" aria-hidden="true">📡</div>
-        <div class="snx-tn-empty-title">No Creator Channels are live right now.</div>
-        <div class="snx-tn-empty-sub">Shadow Nexus Main TV is still broadcasting.</div>
+        <div class="snx-tn-empty-title">No creators are live right now.</div>
+        <div class="snx-tn-empty-sub">Shadow Nexus Main TV is still broadcasting 24/7.</div>
         <button class="snx-tn-btn-primary" id="snx-tn-watch-main-tv-btn" style="margin-top:14px;">Watch Main TV</button>
       </div>`;
     el.querySelector('#snx-tn-watch-main-tv-btn')?.addEventListener('click', () => _switchTab('main-tv'));
@@ -452,7 +524,7 @@ function _renderLiveNowSection() {
   el.innerHTML = `
     <div class="snx-tn-page-header">
       <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
-      <div class="snx-tn-page-sub">${_liveChannels.length} channel${_liveChannels.length !== 1 ? 's' : ''} broadcasting</div>
+      <div class="snx-tn-page-sub">${_liveChannels.length} creator${_liveChannels.length !== 1 ? 's' : ''} broadcasting</div>
     </div>
     <div class="snx-tn-card-grid" role="list" aria-label="Live channels">${cards}</div>`;
 
@@ -509,7 +581,7 @@ function _renderChannelsSection() {
   el.innerHTML = `
     <div class="snx-tn-page-header">
       <div class="snx-tn-page-title">CHANNELS</div>
-      <div class="snx-tn-page-sub">Permanent creator channels — browse, follow, and watch</div>
+      <div class="snx-tn-page-sub">Browse creator channels, follow, and watch</div>
     </div>
     <div class="snx-tn-search-wrap">
       <input class="snx-tn-search" id="snx-tn-dir-search" type="search"
@@ -554,39 +626,33 @@ function _renderMyChannelSection() {
 
   if (!_user) {
     el.innerHTML = `
-      <div class="snx-tn-page-header">
-        <div class="snx-tn-page-title">🎙 MY CHANNEL</div>
-      </div>
       <div class="snx-tn-empty">
         <div class="snx-tn-empty-icon">🔒</div>
         <div class="snx-tn-empty-title">Sign in to access your channel</div>
         <div class="snx-tn-empty-sub">Your permanent creator channel is linked to your Shadow Nexus account.</div>
-        <a class="snx-tn-btn-primary" href="index.html">Sign in to Shadow Nexus</a>
+        <a class="snx-tn-btn-primary" href="index.html">Sign In</a>
       </div>`;
     return;
   }
 
   if (!_myChannel) {
     el.innerHTML = `
-      <div class="snx-tn-page-header">
-        <div class="snx-tn-page-title">🎙 MY CHANNEL</div>
-      </div>
       <div class="snx-tn-empty">
         <div class="snx-tn-loading-spinner"></div>
-        <div class="snx-tn-empty-sub">Loading your channel…</div>
+        <div class="snx-tn-empty-sub" style="margin-top:10px;">Loading your channel…</div>
       </div>`;
     return;
   }
 
   const ch = _myChannel;
   const isLive = ch.status === 'live';
+  // Always use the canonical SNS profile for identity display
+  const snsAvatar    = _myProfile?.avatar    || ch.avatar    || null;
+  const snsUsername  = _myProfile?.username  || ch.ownerUsername || _user.email?.split('@')[0] || 'creator';
+  const followerCount = _myProfile?.followers?.length ?? ch.followersCount ?? 0;
   const avatarLetter = (ch.channelName || _user.email || '?').charAt(0).toUpperCase();
 
   el.innerHTML = `
-    <div class="snx-tn-page-header">
-      <div class="snx-tn-page-title">🎙 MY CHANNEL</div>
-    </div>
-
     <div class="snx-tn-my-profile-card">
       <!-- Cover image -->
       <div class="snx-tn-cover" id="snx-tn-cover-wrap"
@@ -597,61 +663,46 @@ function _renderMyChannelSection() {
       <!-- Profile row -->
       <div class="snx-tn-profile-row">
         <div class="snx-tn-channel-avatar" id="snx-tn-my-avatar">
-          ${ch.avatar ? `<img src="${_esc(ch.avatar)}" alt="channel avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : avatarLetter}
+          ${snsAvatar ? `<img src="${_esc(snsAvatar)}" alt="channel avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">` : avatarLetter}
         </div>
         <div class="snx-tn-profile-info">
           <div class="snx-tn-channel-name">${_esc(ch.channelName)}</div>
-          <div class="snx-tn-channel-handle">@${_esc(ch.ownerUsername || _user.email?.split('@')[0] || 'creator')}</div>
+          <div class="snx-tn-channel-handle">@${_esc(snsUsername)}</div>
           <div class="snx-tn-status-row">
             <span class="snx-tn-status-badge ${isLive ? 'live' : 'offline'}">
               ${isLive ? '🔴 LIVE' : '⚫ OFF AIR'}
             </span>
-            <span class="snx-tn-followers-count">Followers: ${ch.followersCount || 0}</span>
+            <span class="snx-tn-followers-count">Followers: ${followerCount}</span>
           </div>
         </div>
         <div class="snx-tn-profile-actions">
-          <button class="snx-tn-btn-edit" id="snx-tn-edit-btn" aria-label="Edit channel settings">Edit Channel</button>
+          <button class="snx-tn-btn-edit" id="snx-tn-edit-btn" aria-label="Edit channel settings">Edit</button>
         </div>
       </div>
 
-      <!-- Live stats bar (when live) -->
+      <!-- Live stats bar (shown only when live) -->
       ${isLive ? `
       <div class="snx-tn-live-stats-bar" id="snx-tn-live-stats-bar">
-          <div class="snx-tn-live-stat-item">
-            <span class="snx-tn-live-stat-label">Status</span>
-            <span class="snx-tn-live-stat-value live-red">🔴 YOU ARE LIVE</span>
-          </div>
-          <div class="snx-tn-live-stat-item">
-            <span class="snx-tn-live-stat-label">Viewers</span>
-            <span class="snx-tn-live-stat-value" id="snx-tn-my-live-viewers">${ch.currentViewerCount || 0}</span>
-          </div>
-          <div class="snx-tn-live-stat-item">
-            <span class="snx-tn-live-stat-label">Duration</span>
-            <span class="snx-tn-live-stat-value" id="snx-tn-my-live-duration">LIVE</span>
-          </div>
-        </div>` : ''}
+        <div class="snx-tn-live-stat-item">
+          <span class="snx-tn-live-stat-label">Status</span>
+          <span class="snx-tn-live-stat-value live-red">🔴 LIVE</span>
+        </div>
+        <div class="snx-tn-live-stat-item">
+          <span class="snx-tn-live-stat-label">Viewers</span>
+          <span class="snx-tn-live-stat-value" id="snx-tn-my-live-viewers">${ch.currentViewerCount || 0}</span>
+        </div>
+        <div class="snx-tn-live-stat-item">
+          <span class="snx-tn-live-stat-label">Duration</span>
+          <span class="snx-tn-live-stat-value" id="snx-tn-my-live-duration">—</span>
+        </div>
+      </div>` : ''}
 
-      <!-- Go Live / Manage Live buttons -->
+      <!-- Actions — show only what's relevant to current state -->
       <div class="snx-tn-go-live-wrap">
         ${isLive ? `
-          <button class="snx-tn-btn-go-live" id="snx-tn-watch-own-live-btn" style="background:rgba(255,51,68,0.15);color:var(--snx-red);border:1px solid var(--snx-red-rim);" aria-label="Watch your live stream">Manage Live</button>
-          <button class="snx-tn-btn-end-live" id="snx-tn-end-live-btn" aria-label="End your live broadcast">End Broadcast</button>
-        ` : `<button class="snx-tn-btn-go-live" id="snx-tn-go-live-btn" aria-label="Start a live broadcast">Go Live</button>`}
-      </div>
-
-      <!-- Stage 4: Main TV Feature opt-out toggle -->
-      <div class="snx-tn-inner-section" style="padding:10px 14px;border-top:1px solid rgba(255,255,255,0.05);">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:#8a9bc0;user-select:none;">
-          <input type="checkbox" id="snx-tn-main-tv-toggle"
-                 style="accent-color:#00AEEF;cursor:pointer;"
-                 ${ch.allowMainTvFeature !== false ? 'checked' : ''}>
-          <span>
-            <strong style="color:#c8d0e8;">Allow Main TV Feature</strong>
-            <span style="display:block;font-size:10px;margin-top:1px;">
-              Let the founder temporarily carry your live broadcast on Shadow Nexus Main TV.
-            </span>
-          </span>
-        </label>
+          <button class="snx-tn-btn-end-live" id="snx-tn-watch-own-live-btn" aria-label="Manage your live broadcast">Manage Live</button>
+          <button class="snx-tn-btn-ghost" id="snx-tn-end-live-btn" aria-label="End your live broadcast" style="color:var(--snx-red);border-color:var(--snx-red-rim);">■ End Broadcast</button>
+        ` : `<button class="snx-tn-btn-go-live" id="snx-tn-go-live-btn" aria-label="Start a live broadcast">🔴 Go Live</button>`}
       </div>
 
       <!-- Channel tabs -->
@@ -671,6 +722,7 @@ function _renderMyChannelSection() {
 
   // Default inner tab
   _renderMyChannelInner('home', ch, isLive);
+  // Wire Main TV feature toggle from ABOUT tab
 
   // Inner tab events
   el.querySelectorAll('.snx-tn-inner-tab').forEach(btn => {
@@ -679,17 +731,6 @@ function _renderMyChannelSection() {
       btn.classList.add('active');
       _renderMyChannelInner(btn.dataset.inner, ch, isLive);
     });
-  });
-
-  // Main TV feature opt-out toggle
-  document.getElementById('snx-tn-main-tv-toggle')?.addEventListener('change', async e => {
-    try {
-      await setMainTvFeaturePreference(_user.uid, e.target.checked);
-      _toast(e.target.checked ? '✓ Main TV feature allowed.' : '✓ Main TV feature disabled.');
-    } catch (err) {
-      _toast('Error saving preference.', 'error');
-      e.target.checked = !e.target.checked; // revert
-    }
   });
 
   // Go Live
@@ -839,13 +880,32 @@ function _renderMyChannelInner(tab, ch, isLive) {
   if (tab === 'about') {
     content.innerHTML = `
       <div class="snx-tn-inner-section">
-        <div class="snx-tn-section-label">About This Channel</div>
-        <div class="snx-tn-about-text">${_esc(ch.channelDescription) || '<span style="color:#5a80a8;">No description yet. Edit your channel to add one.</span>'}</div>
+        <div class="snx-tn-section-label">About</div>
+        <div class="snx-tn-about-text">${_esc(ch.channelDescription) || '<span style="color:#5a80a8;">No description yet. Tap Edit to add one.</span>'}</div>
         <div class="snx-tn-about-meta">
-          <div>Channel created via Shadow Nexus Social account</div>
-          <div style="color:#5a80a8;font-size:11px;margin-top:4px;">Channel ID: ${_esc(ch.ownerUid || '')}</div>
+          Creator channel on Shadow Nexus Social
+        </div>
+        <div class="snx-tn-feature-toggle-wrap" style="margin-top:14px;">
+          <label class="snx-tn-feature-toggle-label">
+            <input type="checkbox" id="snx-tn-main-tv-toggle"
+                   ${ch.allowMainTvFeature !== false ? 'checked' : ''}>
+            <span>
+              <span class="snx-tn-feature-toggle-name">Allow Main TV Feature</span>
+              <span class="snx-tn-feature-toggle-desc">Let the founder carry your live on Shadow Nexus Main TV.</span>
+            </span>
+          </label>
         </div>
       </div>`;
+    // Wire toggle
+    content.querySelector('#snx-tn-main-tv-toggle')?.addEventListener('change', async e => {
+      try {
+        await setMainTvFeaturePreference(_user.uid, e.target.checked);
+        _toast(e.target.checked ? '✓ Main TV feature allowed.' : '✓ Main TV feature disabled.');
+      } catch (err) {
+        _toast('Error saving preference.');
+        e.target.checked = !e.target.checked; // revert
+      }
+    });
   }
 }
 
@@ -929,6 +989,9 @@ async function _confirmEndLive(ch) {
 
 /* ════════════════════════════════════
    EDIT CHANNEL DIALOG
+   NOTE: Avatar is NOT editable here — it comes from the user's
+   Shadow Nexus Social profile. To change your avatar, edit your
+   SNS profile. This dialog only controls TV-specific display fields.
 ════════════════════════════════════ */
 function _showEditChannelDialog(ch) {
   const existing = document.getElementById('snx-tn-edit-modal');
@@ -940,8 +1003,12 @@ function _showEditChannelDialog(ch) {
   modal.innerHTML = `
     <div class="snx-tn-modal-box">
       <div class="snx-tn-modal-title">✏️ EDIT CHANNEL</div>
+      <div class="snx-tn-modal-info" style="font-size:11px;color:#5a80a8;margin-bottom:12px;padding:8px;background:rgba(0,174,239,0.05);border-radius:6px;border:1px solid rgba(0,174,239,0.12);">
+        Your avatar and username are automatically synced from your Shadow Nexus profile.
+        To update them, <a href="index.html#profile" style="color:#00AEEF;text-decoration:underline;">edit your SNS profile</a>.
+      </div>
       <div class="snx-tn-field-group">
-        <label class="snx-tn-field-label">Channel Name</label>
+        <label class="snx-tn-field-label">Channel Name <span style="font-size:10px;color:#5a80a8;">(your TV broadcast name)</span></label>
         <input class="snx-tn-field-input" id="snx-tn-edit-name" maxlength="60"
                value="${_esc(ch.channelName || '')}">
       </div>
@@ -949,11 +1016,6 @@ function _showEditChannelDialog(ch) {
         <label class="snx-tn-field-label">Channel Description</label>
         <textarea class="snx-tn-field-input" id="snx-tn-edit-desc" rows="3" maxlength="300"
                   style="resize:vertical;">${_esc(ch.channelDescription || '')}</textarea>
-      </div>
-      <div class="snx-tn-field-group">
-        <label class="snx-tn-field-label">Avatar URL <span style="font-size:10px;color:#5a80a8;">(optional)</span></label>
-        <input class="snx-tn-field-input" id="snx-tn-edit-avatar" type="url"
-               placeholder="https://…" value="${_esc(ch.avatar || '')}">
       </div>
       <div class="snx-tn-field-group">
         <label class="snx-tn-field-label">Cover Image URL <span style="font-size:10px;color:#5a80a8;">(optional)</span></label>
@@ -976,7 +1038,6 @@ function _showEditChannelDialog(ch) {
     const errEl = document.getElementById('snx-tn-edit-err');
     const name = document.getElementById('snx-tn-edit-name')?.value.trim();
     const desc = document.getElementById('snx-tn-edit-desc')?.value.trim();
-    const avatar = document.getElementById('snx-tn-edit-avatar')?.value.trim();
     const cover = document.getElementById('snx-tn-edit-cover')?.value.trim();
     const btn = document.getElementById('snx-tn-edit-save');
 
@@ -987,7 +1048,6 @@ function _showEditChannelDialog(ch) {
       await updateCreatorChannel(_user.uid, {
         channelName: name,
         channelDescription: desc || '',
-        avatar: avatar || null,
         coverImage: cover || null,
       });
       modal.remove();
@@ -1049,9 +1109,13 @@ function _openChannelView(uid) {
 
 function _renderChannelView(el, ch, profile, replays) {
   const isLive = ch.status === 'live';
-  const avatarLetter = (ch.channelName || '?').charAt(0).toUpperCase();
-  const username = profile?.username || ch.ownerUid?.substring(0, 8) || 'creator';
-  const isOwnChannel = _user && _user.uid === ch.ownerUid;
+  // Avatar: prefer SNS profile image (canonical) over channel avatar
+  const displayAvatar = profile?.avatar || profile?.profileImage || ch.avatar || null;
+  const avatarLetter  = (ch.channelName || '?').charAt(0).toUpperCase();
+  const username      = profile?.username || ch.ownerUsername || ch.ownerUid?.substring(0, 8) || 'creator';
+  // Follower count from canonical SNS profile
+  const followerCount = profile?.followers?.length ?? ch.followersCount ?? 0;
+  const isOwnChannel  = _user && _user.uid === ch.ownerUid;
 
   el.innerHTML = `
     <button class="snx-tn-back-btn" id="snx-tn-channel-view-back">← Back</button>
@@ -1063,23 +1127,34 @@ function _renderChannelView(el, ch, profile, replays) {
       </div>
 
       <div class="snx-tn-profile-row">
-        <div class="snx-tn-channel-avatar">
-          ${ch.avatar ? `<img src="${_esc(ch.avatar)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : avatarLetter}
+        <div class="snx-tn-channel-avatar" role="button" tabindex="0" title="View ${_esc(username)}'s profile"
+             id="snx-tn-cv-avatar" style="cursor:pointer;" aria-label="View ${_esc(username)}'s Shadow Nexus profile">
+          ${displayAvatar ? `<img src="${_esc(displayAvatar)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">` : avatarLetter}
         </div>
         <div class="snx-tn-profile-info">
           <div class="snx-tn-channel-name">${_esc(ch.channelName)}</div>
-          <div class="snx-tn-channel-handle">@${_esc(username)}</div>
+          <div class="snx-tn-channel-handle" id="snx-tn-cv-handle"
+               style="cursor:pointer;" title="View ${_esc(username)}'s profile">@${_esc(username)}</div>
           <div class="snx-tn-status-row">
             <span class="snx-tn-status-badge ${isLive ? 'live' : 'offline'}">
               ${isLive ? '🔴 LIVE' : '⚫ OFF AIR'}
             </span>
-            <span class="snx-tn-followers-count">Followers: ${ch.followersCount || 0}</span>
+            <span class="snx-tn-followers-count">Followers: ${followerCount}</span>
           </div>
         </div>
         ${!isOwnChannel && _user ? `
           <div class="snx-tn-profile-actions" id="snx-tn-follow-area">
             <div class="snx-tn-loading-small">…</div>
           </div>` : ''}
+      </div>
+
+      <!-- VIEW PROFILE link — opens creator's main SNS profile -->
+      <div style="padding:0 16px 10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="snx-tn-btn-ghost" id="snx-tn-view-profile-btn"
+                style="font-size:11px;padding:5px 12px;"
+                aria-label="View ${_esc(username)}'s Shadow Nexus profile">
+          👤 VIEW PROFILE
+        </button>
       </div>
 
       ${isLive ? `
@@ -1100,6 +1175,23 @@ function _renderChannelView(el, ch, profile, replays) {
     if (_activeTab === 'live-now') _renderLiveNowSection();
     else _renderChannelsSection();
   });
+
+  // VIEW PROFILE — opens the creator's main SNS profile
+  const _openCreatorProfile = () => {
+    if (typeof window.viewProfile === 'function') {
+      // We are inside index.html — use the native profile viewer
+      window.viewProfile(ch.ownerUid);
+    } else {
+      // We are in channel.html (standalone) — navigate to index.html with the profile param
+      window.location.href = `index.html?profile=${ch.ownerUid}`;
+    }
+  };
+  document.getElementById('snx-tn-view-profile-btn')?.addEventListener('click', _openCreatorProfile);
+  document.getElementById('snx-tn-cv-avatar')?.addEventListener('click', _openCreatorProfile);
+  document.getElementById('snx-tn-cv-avatar')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); _openCreatorProfile(); }
+  });
+  document.getElementById('snx-tn-cv-handle')?.addEventListener('click', _openCreatorProfile);
 
   // Watch live — open viewer stage
   document.getElementById('snx-tn-watch-live-btn')?.addEventListener('click', async () => {
@@ -1254,6 +1346,9 @@ function _buildChannelCard(ch, forceShowLive = false) {
   const statusText = isLive ? 'Live' : 'Off Air';
   const viewerText = isLive && ch.currentViewerCount > 0 ? `${ch.currentViewerCount} watching` : '';
   const followers  = (ch.followersCount || 0).toLocaleString();
+  // Action label: WATCH for live, VIEW CHANNEL for directory
+  const actionLabel = isLive ? 'WATCH' : 'VIEW CHANNEL';
+  const actionClass = isLive ? 'snx-tn-card-action watch' : 'snx-tn-card-action';
   return `
     <div class="snx-tn-card ${isLive ? 'snx-tn-card-live' : ''} ${isFeatured ? 'snx-tn-card-featured' : ''}"
          data-uid="${_esc(uid)}" role="listitem" tabindex="0"
@@ -1270,14 +1365,15 @@ function _buildChannelCard(ch, forceShowLive = false) {
         <div class="snx-tn-card-name">${_esc(ch.channelName)}</div>
         <div class="snx-tn-card-handle">@${_esc(ch.ownerUsername || ch.ownerUid?.substring(0, 8) || 'creator')}</div>
         <div class="snx-tn-card-meta">
-          <span class="snx-tn-status-badge-sm ${isLive ? 'live' : 'offline'}" data-status="${isLive ? 'live' : 'offline'}" aria-label="${statusText}">
+          <span class="snx-tn-status-badge-sm ${isLive ? 'live' : 'offline'}" aria-label="${statusText}">
             ${isLive ? '🔴 LIVE' : '⚫ OFF AIR'}
           </span>
-          ${isFeatured ? '<span class="snx-tn-featured-badge" aria-label="Featured on Main TV">📺 FEATURED</span>' : ''}
+          ${isFeatured ? '<span class="snx-tn-featured-badge" aria-label="Featured on Main TV">📺 MAIN TV</span>' : ''}
           ${viewerText ? `<span class="snx-tn-card-followers">${_esc(viewerText)}</span>` : ''}
           <span class="snx-tn-card-followers">${_esc(followers)} followers</span>
         </div>
       </div>
+      <span class="${actionClass}" aria-hidden="true">${actionLabel}</span>
     </div>`;
 }
 

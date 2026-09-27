@@ -68,7 +68,12 @@ service cloud.firestore {
         'familyInvitesReceived',
         'familyInvitesSent',
         'family',
-        'friends'
+        'friends',
+        // Follow system: any signed-in user may add/remove themselves from another
+        // user's followers array, and update their own following array.
+        // This is the canonical SNS follow relationship used by TV channels too.
+        'followers',
+        'following'
       ];
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
     }

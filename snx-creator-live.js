@@ -64,7 +64,16 @@ const _snsCfg = {
   appId:             '1:933810617818:web:efb24f123337dd987c14e3',
 };
 const _app    = getApps().find(a => a.name === '[DEFAULT]') || initializeApp(_snsCfg);
-export const db     = initializeFirestore(_app, { localCache: memoryLocalCache() });
+
+// Initialise Firestore with memory cache if we are first; fall back to
+// getFirestore() if index.html or snx-creator-channels.js already did it.
+let db;
+try {
+  db = initializeFirestore(_app, { localCache: memoryLocalCache() });
+} catch (_initErr) {
+  db = getFirestore(_app);
+}
+export { db };
 export const liveDB = getDatabase(_app);
 
 /* ══════════════════════════════════════════════════════════════
@@ -915,19 +924,28 @@ export async function leaveCreatorLive() {
 ══════════════════════════════════════════════════════════════ */
 async function _sendLiveNotifications(uid, liveId, rtdbRoomId, title, roomData) {
   try {
-    const channelSnap = await getDoc(doc(db, 'creatorChannels', uid));
-    if (!channelSnap.exists()) return;
-    const channel = channelSnap.data();
-
-    const followersSnap = await getDocs ? null : null; // import below
-    const { getDocs: gds, query: q2, where: w2, collection: col2, limit: lim2 } =
+    const { getDocs: gds, query: q2, collection: col2 } =
       await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
 
-    const fSnap = await gds(q2(
-      col2(db, 'channelFollows', uid, 'followers'),
-      w2('notificationsEnabled', '==', true),
-      lim2(500),
-    ));
+    const [channelSnap, creatorUserSnap] = await Promise.all([
+      getDoc(doc(db, 'creatorChannels', uid)),
+      getDoc(doc(db, 'users', uid)),
+    ]);
+    if (!channelSnap.exists() || !creatorUserSnap.exists()) return;
+    const channel = channelSnap.data();
+
+    // ── Use canonical SNS followers array as the source of truth ────────────
+    // This is the same list that the SNS profile follow button writes to.
+    // Do not notify the creator about their own live.
+    const allFollowers = (creatorUserSnap.data().followers || []).filter(f => f !== uid);
+    if (!allFollowers.length) return;
+
+    // Load per-channel notification prefs to respect opted-out followers
+    const notifPrefsSnap = await gds(q2(col2(db, 'channelFollows', uid, 'followers')));
+    const notifPrefs = {};
+    notifPrefsSnap.docs.forEach(d => {
+      notifPrefs[d.data().followerUid] = d.data().notificationsEnabled !== false;
+    });
 
     const notif = {
       type:        'creator_live',
@@ -943,11 +961,12 @@ async function _sendLiveNotifications(uid, liveId, rtdbRoomId, title, roomData) 
       read:        false,
     };
 
-    await Promise.allSettled(fSnap.docs.map(fDoc => {
-      const fUid = fDoc.data().followerUid;
-      if (fUid === uid) return Promise.resolve(); // don't notify self
-      return addDoc(col2(db, 'notifications', fUid, 'items'), notif);
-    }));
+    // Notify all canonical SNS followers, except those who explicitly opted out
+    await Promise.allSettled(
+      allFollowers
+        .filter(fUid => notifPrefs[fUid] !== false) // default: notify unless opted out
+        .map(fUid => addDoc(col2(db, 'notifications', fUid, 'items'), notif)),
+    );
   } catch (err) {
     console.warn('[CRL notifications]', err.message);
   }
