@@ -119,7 +119,6 @@ window.snxTvInit = function () {
  * Keeps _gateOpen = true so re-entry is instant (no Watch Now again).
  */
 window.snxTvTeardown = function () {
-  console.log('[24TV] Teardown — pausing media, keeping gate open for re-entry');
   _tvActive = false;
   // Do NOT reset _gateOpen — viewer already consented; re-entry should be instant.
   _stopMedia();

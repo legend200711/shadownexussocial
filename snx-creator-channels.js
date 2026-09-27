@@ -800,13 +800,15 @@ async function _writeLiveNotification(creatorUid, liveId) {
     // Write a notification document for each follower
     const notifBatch = followersSnap.docs.map(fDoc => {
       const followerUid = fDoc.data().followerUid;
+      // Do not notify the creator themselves
+      if (followerUid === creatorUid) return Promise.resolve();
       return addDoc(collection(snsDb, 'notifications', followerUid, 'items'), {
         type:          'creator_live',
         fromUid:       creatorUid,
         channelName:   channel.channelName || 'A creator',
         liveId,
         text:          `🔴 ${channel.channelName || 'A creator'} is LIVE on Shadow Nexus TV`,
-        subtitle:      `${channel.channelName} is broadcasting now.`,
+        subtitle:      `${channel.channelName || 'A creator'} is broadcasting now.`,
         // Include liveId so tapping the notification deep-links directly to
         // this exact live session — not just the creator's channel page.
         deepLink:      `channel.html?live=${creatorUid}&liveId=${liveId}`,
