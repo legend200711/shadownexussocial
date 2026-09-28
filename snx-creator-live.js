@@ -283,9 +283,10 @@ export async function startCreatorBroadcast(user, userData, opts = {}) {
 
   // Update creator's permanent channel
   await updateDoc(doc(db, 'creatorChannels', user.uid), {
-    status:        'live',
-    currentLiveId: liveId,
-    updatedAt:     serverTimestamp(),
+    status:           'live',
+    currentLiveId:    liveId,
+    currentStartedAt: serverTimestamp(),
+    updatedAt:        serverTimestamp(),
   });
 
   // Write host presence to liveGuests (mirrors live.js)
@@ -567,7 +568,7 @@ export async function endCreatorBroadcast(uid) {
 
   // Return creator channel to offline
   await updateDoc(doc(db, 'creatorChannels', uid), {
-    status: 'offline', currentLiveId: null, updatedAt: serverTimestamp(),
+    status: 'offline', currentLiveId: null, currentStartedAt: null, updatedAt: serverTimestamp(),
   }).catch(() => {});
 
   const finalPeak = peakViewers;

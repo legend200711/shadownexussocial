@@ -8288,7 +8288,7 @@ body.arcade-fs-ios body::after { display:none !important; }
                     <div style="font-size:12px;color:#3a5a7a;padding:8px 0;">Loading…</div>
                 </div>
                 <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
-                    <button onclick="if(typeof signOutUser==='function')signOutUser();else window._snxAuth&&window._snxAuth.signOut()" style="padding:8px 18px;border-radius:10px;border-color:rgba(255,80,80,0.4);color:#ff7777;font-size:13px;">🚪 Log Out</button>
+                    <button onclick="handleLogout()" style="padding:8px 18px;border-radius:10px;border-color:rgba(255,80,80,0.4);color:#ff7777;font-size:13px;">🚪 Log Out</button>
                 </div>
             </div>
 
@@ -8337,7 +8337,7 @@ body.arcade-fs-ios body::after { display:none !important; }
                 <p style="font-size:12px;color:#6a90b8;margin:0 0 10px;line-height:1.5;">Current session and account information. Sign out to end your session on this device.</p>
                 <div id="snxSessionBox"><div style="font-size:12px;color:#3a5a7a;padding:8px 0;">Loading…</div></div>
                 <div style="margin-top:14px;">
-                    <button onclick="if(typeof signOutUser==='function')signOutUser();else window._snxAuth&&window._snxAuth.signOut()" style="padding:8px 18px;border-radius:10px;border-color:rgba(255,80,80,0.4);color:#ff7777;font-size:13px;">🚪 Log Out</button>
+                    <button onclick="handleLogout()" style="padding:8px 18px;border-radius:10px;border-color:rgba(255,80,80,0.4);color:#ff7777;font-size:13px;">🚪 Log Out</button>
                 </div>
             </div>
         </div>
@@ -13286,11 +13286,47 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   })();
 
   window.handleLogout = async () => {
+      // ── Step 1: Creator Live cleanup — must happen before signOut so RTDB
+      //    writes still have auth. Use a tight timeout so a stalled cleanup
+      //    never blocks the sign-out.
+      try {
+          const { getHostState, endCreatorBroadcast } = await import('./snx-creator-live.js');
+          if (getHostState() && !getHostState()?.endedFlag) {
+              await Promise.race([
+                  endCreatorBroadcast(currentUser?.uid || ''),
+                  new Promise(r => setTimeout(r, 4000))   // 4 s hard cap
+              ]);
+          }
+      } catch (_liveErr) { /* live cleanup failed — proceed to sign out */ }
+
+      // ── Step 2: Presence cleanup — fire-and-forget (never blocks signOut) ──
       if (currentUser) {
-          try { await updateDoc(doc(db, "users", currentUser.uid), { status: "offline", lastSeen: Date.now() }); } catch(_) {}
-          try { await _rtdbSet(_rtdbRef(_presenceRtdb, 'users/' + currentUser.uid), { online: false, live: false, lastSeen: _rtdbServerTimestamp() }); } catch(_) {}
+          updateDoc(doc(db, "users", currentUser.uid), { status: "offline", lastSeen: Date.now() }).catch(() => {});
+          _rtdbSet(_rtdbRef(_presenceRtdb, 'users/' + currentUser.uid), { online: false, live: false, lastSeen: _rtdbServerTimestamp() }).catch(() => {});
       }
-      signOut(auth);
+
+      // ── Step 3: Clear guest state (so login screen is clean) ──
+      try {
+          sessionStorage.removeItem('snxGuestActive');
+          sessionStorage.removeItem('snxGuestName');
+      } catch (_) {}
+      window._snxGuest     = false;
+      window._snxGuestName = '';
+      window.guestDisplayName = '';
+
+      // ── Step 4: THE CANONICAL SIGN-OUT — must always run ──
+      // This is on the SNS / horr-a08f4 auth instance only.
+      // onAuthStateChanged(null) will handle all remaining UI teardown.
+      try {
+          await signOut(auth);
+      } catch (_signOutErr) {
+          // Even if signOut throws (e.g. already signed out), clear local state
+          window._snxCurrentUser  = null;
+          window._snxUserData     = null;
+          window._snxAuthResolved = false;
+          window._snxRole         = 'member';
+          show('login');
+      }
   };
 
   /* ── Forgot Password ── */
@@ -13460,6 +13496,17 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       _authFirstResolved = true;
       if (user) {
           currentUser = user;
+
+          // ── Guest state MUST be cleared when a real Firebase user is present ──
+          // Guest mode uses sessionStorage only (no Firebase). Clear all traces
+          // so the authenticated member never sees a mixed state.
+          try {
+              sessionStorage.removeItem('snxGuestActive');
+              sessionStorage.removeItem('snxGuestName');
+          } catch (_) {}
+          window._snxGuest     = false;
+          window._snxGuestName = '';
+          window.guestDisplayName = '';
 
           // ── Founder role — set immediately from email, never overridden ──
           // window._snxRole is set synchronously so all downstream code sees the

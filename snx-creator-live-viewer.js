@@ -68,11 +68,13 @@ function _getOrCreateOverlay() {
 function _hideOverlay() {
   const el = document.getElementById('snx-crl-overlay');
   if (el) {
-    // Clean up all subscriptions stored on the overlay before wiping it
-    if (el._founderStateUnsub) { try { el._founderStateUnsub(); } catch (_) {} el._founderStateUnsub = null; }
-    if (el._crlHostChatUnsub)  { try { el._crlHostChatUnsub();  } catch (_) {} el._crlHostChatUnsub  = null; }
-    if (el._crlRpCommentUnsub) { try { el._crlRpCommentUnsub(); } catch (_) {} el._crlRpCommentUnsub = null; }
-    if (el._crlRpReplayUnsub)  { try { el._crlRpReplayUnsub();  } catch (_) {} el._crlRpReplayUnsub  = null; }
+    // Clean up all subscriptions/handlers stored on the overlay before wiping it
+    if (el._founderStateUnsub)    { try { el._founderStateUnsub();    } catch (_) {} el._founderStateUnsub    = null; }
+    if (el._crlHostChatUnsub)     { try { el._crlHostChatUnsub();     } catch (_) {} el._crlHostChatUnsub     = null; }
+    if (el._crlRpCommentUnsub)    { try { el._crlRpCommentUnsub();    } catch (_) {} el._crlRpCommentUnsub    = null; }
+    if (el._crlRpReplayUnsub)     { try { el._crlRpReplayUnsub();     } catch (_) {} el._crlRpReplayUnsub     = null; }
+    if (el._crlPopStateHandler)   { window.removeEventListener('popstate',    el._crlPopStateHandler);   el._crlPopStateHandler   = null; }
+    if (el._crlBeforeUnloadHandler){ window.removeEventListener('beforeunload', el._crlBeforeUnloadHandler); el._crlBeforeUnloadHandler = null; }
     el.style.display = 'none';
     el.innerHTML = '';
   }
@@ -83,6 +85,30 @@ function _hideOverlay() {
 ══════════════════════════════════════════════════════════════ */
 export async function openHostLiveStage(user, userData, channel) {
   const overlay = _getOrCreateOverlay();
+
+  // ── Re-entry guard: if already live, reconnect to the existing broadcast ──
+  const existingState = getHostState();
+  if (existingState && !existingState.endedFlag) {
+    // Host is already broadcasting — show the live stage instead of setup
+    overlay.innerHTML = _buildLiveStageHTML(true, channel, null);
+    const videoEl = overlay.querySelector('#crl-live-video');
+    const existingStream = getHostStream();
+    if (videoEl && existingStream) {
+      videoEl.srcObject = existingStream;
+      videoEl.muted = true;
+      videoEl.play().catch(() => {});
+    }
+    _wireHostStage(overlay, user, userData, channel, {
+      action:      'go_live',
+      localStream: existingStream,
+      camOn:       existingState.camOn,
+      micOn:       existingState.micOn,
+      facingMode:  existingState.facingMode,
+      title:       existingState.roomData?.title || channel?.channelName || 'Live Broadcast',
+      _reconnect:  true,  // flag: skip startCreatorBroadcast
+    });
+    return;
+  }
 
   // Show setup inside the overlay
   overlay.innerHTML = `<div id="crl-setup-container" style="flex:1;overflow-y:auto;background:var(--crl-void,#02040a);"></div>`;
@@ -125,20 +151,26 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
   let timerStartTs = null;
   let chatSending = false;
 
-  // Start broadcast
-  try {
-    liveId = await startCreatorBroadcast(user, userData, {
-      localStream: setupResult.localStream,
-      camOn:       setupResult.camOn,
-      micOn:       setupResult.micOn,
-      facingMode:  setupResult.facingMode,
-      title:       setupResult.title,
-    });
-    _toast('🔴 You are LIVE!');
-  } catch (err) {
-    _toast('Failed to start broadcast: ' + err.message, 'error');
-    setTimeout(() => _hideOverlay(), 2000);
-    return;
+  if (setupResult._reconnect) {
+    // Re-entry: already broadcasting — recover liveId from existing state
+    liveId = getHostState()?.liveId || null;
+    if (!liveId) { _hideOverlay(); return; }
+  } else {
+    // Start fresh broadcast
+    try {
+      liveId = await startCreatorBroadcast(user, userData, {
+        localStream: setupResult.localStream,
+        camOn:       setupResult.camOn,
+        micOn:       setupResult.micOn,
+        facingMode:  setupResult.facingMode,
+        title:       setupResult.title,
+      });
+      _toast('🔴 You are LIVE!');
+    } catch (err) {
+      _toast('Failed to start broadcast: ' + err.message, 'error');
+      setTimeout(() => _hideOverlay(), 2000);
+      return;
+    }
   }
 
   // Patch title display
@@ -168,7 +200,7 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
   const evtTypes = ['crl:viewerCount','crl:camToggle','crl:micToggle','crl:streamFlipped','crl:streamRestored'];
   evtTypes.forEach(t => window.addEventListener(t, _onCrl));
 
-  // Timer (optional — can be toggled by host)
+  // Timer
   function _startTimer() {
     timerStartTs = Date.now();
     if (timerEl) timerEl.classList.add('visible');
@@ -187,8 +219,7 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
   // Chat subscription (host reads own room)
   const hostState = getHostState();
   if (hostState?.rtdbRoomId) {
-    const { onSnapshot: onSnap, collection: col, query: q, orderBy: ob, limit: lim,
-            initializeFirestore: ifs, memoryLocalCache: mlc } =
+    const { onSnapshot: onSnap, collection: col, query: q, orderBy: ob, limit: lim } =
       await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
     const { db: crlDb } = await import('./snx-creator-live.js');
     const chatQ = q(col(crlDb, 'liveRooms', hostState.rtdbRoomId, 'liveMessages'), ob('createdAt', 'asc'), lim(80));
@@ -236,11 +267,36 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
     if (confirm) confirm.classList.remove('visible');
   });
 
-  // Close/X button (also triggers end confirm)
+  // Close/X button — while live, show confirm instead of just closing
   overlay.querySelector('.crl-close-btn')?.addEventListener('click', () => {
     const confirm = overlay.querySelector('.crl-confirm-overlay');
     if (confirm) confirm.classList.add('visible');
   });
+
+  // ── Browser/mobile back guard ────────────────────────────────────────────
+  // Push a history state so we intercept the back button.
+  history.pushState({ crlLive: true }, '');
+  function _onPopState(e) {
+    if (!getHostState() || getHostState()?.endedFlag) {
+      window.removeEventListener('popstate', _onPopState);
+      return;
+    }
+    // Push state again to keep the guard in place
+    history.pushState({ crlLive: true }, '');
+    const confirm = overlay.querySelector('.crl-confirm-overlay');
+    if (confirm) confirm.classList.add('visible');
+  }
+  window.addEventListener('popstate', _onPopState);
+  overlay._crlPopStateHandler = _onPopState;
+
+  // ── beforeunload guard ───────────────────────────────────────────────────
+  function _onBeforeUnload(e) {
+    if (!getHostState() || getHostState()?.endedFlag) return;
+    e.preventDefault();
+    e.returnValue = '';
+  }
+  window.addEventListener('beforeunload', _onBeforeUnload);
+  overlay._crlBeforeUnloadHandler = _onBeforeUnload;
 
   // Listen for external crl:ended event (e.g. RTDB disconnect cleanup)
   window.addEventListener('crl:ended', function onEnded(e) {
@@ -250,13 +306,15 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
     if (timerInterval) clearInterval(timerInterval);
     evtTypes.forEach(t => window.removeEventListener(t, _onCrl));
     if (overlay._crlHostChatUnsub) { try { overlay._crlHostChatUnsub(); } catch (_) {} overlay._crlHostChatUnsub = null; }
+    if (overlay._crlPopStateHandler) { window.removeEventListener('popstate', overlay._crlPopStateHandler); overlay._crlPopStateHandler = null; }
+    if (overlay._crlBeforeUnloadHandler) { window.removeEventListener('beforeunload', overlay._crlBeforeUnloadHandler); overlay._crlBeforeUnloadHandler = null; }
     // Capture stats from event detail
     const peakViewers = e.detail?.peakViewers || 0;
-    const timerTxt = overlay.querySelector('#crl-timer-text');
-    const durationStr = timerTxt?.textContent || null;
+    const timerTxtEl = overlay.querySelector('#crl-timer-text');
+    const durationStr = timerTxtEl?.textContent || null;
     const durationSec = durationStr ? _parseTimerToSeconds(durationStr) : null;
-    const titleEl = overlay.querySelector('#crl-live-title');
-    const liveTitle = titleEl?.textContent?.trim() || 'Live Replay';
+    const titleEl2 = overlay.querySelector('#crl-live-title');
+    const liveTitle = titleEl2?.textContent?.trim() || 'Live Replay';
     _showEndLiveReplayModal(overlay, user, e.detail?.liveId || liveId, liveTitle, durationSec, peakViewers);
   });
 }
@@ -272,6 +330,8 @@ async function _cleanupHostStage(overlay, user, liveId, timerInterval, evtTypes,
   if (timerInterval) clearInterval(timerInterval);
   evtTypes.forEach(t => window.removeEventListener(t, _onCrl));
   if (overlay._crlHostChatUnsub) { try { overlay._crlHostChatUnsub(); } catch (_) {} overlay._crlHostChatUnsub = null; }
+  if (overlay._crlPopStateHandler) { window.removeEventListener('popstate', overlay._crlPopStateHandler); overlay._crlPopStateHandler = null; }
+  if (overlay._crlBeforeUnloadHandler) { window.removeEventListener('beforeunload', overlay._crlBeforeUnloadHandler); overlay._crlBeforeUnloadHandler = null; }
 
   // Capture elapsed duration before tearing down
   const timerTxt = overlay.querySelector('#crl-timer-text');
@@ -486,7 +546,7 @@ function _showEndLiveReplayModal(overlay, user, liveId, liveTitle, durationSec, 
       });
       // stays as private (default from createReplayRecord)
       _setStatus('✓ Saved privately. You can publish anytime from MY CHANNEL → REPLAYS.');
-      setTimeout(() => _hideOverlay(), 3000);
+      setTimeout(() => _returnHostToChannel(), 3000);
     } catch (err) {
       _setStatus('Error: ' + (err.message || 'Could not save.'), true);
       _savePrivatePending = false;
@@ -537,7 +597,7 @@ function _showEndLiveReplayModal(overlay, user, liveId, liveTitle, durationSec, 
       });
 
       if (errEl) { errEl.textContent = '✓ Replay published!'; errEl.style.color = 'var(--crl-blue)'; }
-      setTimeout(() => _hideOverlay(), 2200);
+      setTimeout(() => _returnHostToChannel(), 2200);
     } catch (err) {
       if (errEl) { errEl.textContent = 'Error: ' + (err.message || 'Publish failed.'); errEl.style.color = 'var(--crl-red)'; }
       _publishPending = false;
@@ -568,12 +628,19 @@ function _showEndLiveReplayModal(overlay, user, liveId, liveTitle, durationSec, 
       }
       // If no record yet, nothing to delete — just close
       if (errEl) errEl.textContent = '';
-      _hideOverlay();
+      _returnHostToChannel();
     } catch (err) {
       if (errEl) { errEl.textContent = 'Error: ' + (err.message || 'Delete failed.'); errEl.style.color = 'var(--crl-red)'; }
       _setBtnsDisabled(deleteScreen, false);
     }
   });
+}
+
+/* Navigate host back to MY CHANNEL tab after end-live flow completes */
+function _returnHostToChannel() {
+  _hideOverlay();
+  // Switch the TV Network to MY CHANNEL tab
+  window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'my-channel' } }));
 }
 
 /* Parse "HH:MM:SS" timer string to seconds */
@@ -673,13 +740,13 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
 
     if (type === 'not_found') {
       _hideConnBanner(overlay);
-      _showOffAirScreen(overlay, channel?.channelName || 'Creator', false);
+      _showOffAirScreen(overlay, channel?.channelName || 'Creator', false, channel?.ownerUid || channel?.id);
       if (_viewerDurationTimer) clearInterval(_viewerDurationTimer);
       return;
     }
     if (type === 'ended') {
       _hideConnBanner(overlay);
-      _showOffAirScreen(overlay, channel?.channelName || 'Creator', true);
+      _showOffAirScreen(overlay, channel?.channelName || 'Creator', true, channel?.ownerUid || channel?.id);
       if (_viewerDurationTimer) clearInterval(_viewerDurationTimer);
       return;
     }
@@ -1148,8 +1215,9 @@ function _showEndedOverlay(overlay, title, sub, isHost) {
  * @param {HTMLElement} overlay
  * @param {string} channelName
  * @param {boolean} wasLive  — true: broadcast ended; false: not found
+ * @param {string} [ownerUid]  — creator UID for View Channel navigation
  */
-function _showOffAirScreen(overlay, channelName, wasLive) {
+function _showOffAirScreen(overlay, channelName, wasLive, ownerUid) {
   // Remove any existing off-air screen to avoid duplicates
   overlay.querySelector('.crl-off-air-screen')?.remove();
 
@@ -1165,23 +1233,28 @@ function _showOffAirScreen(overlay, channelName, wasLive) {
     <div class="crl-off-air-actions">
       <button class="crl-off-air-view-channel" id="crl-off-air-view-channel"
               aria-label="View ${_esc(channelName)}'s channel">View Channel</button>
-      <button class="crl-btn-cancel" id="crl-off-air-close">Close</button>
+      <button class="crl-btn-cancel" id="crl-off-air-back">← Back to Live Now</button>
     </div>`;
 
   const videoWrap = overlay.querySelector('.crl-video-wrap') || overlay;
   videoWrap.appendChild(el);
 
-  el.querySelector('#crl-off-air-close')?.addEventListener('click', () => _hideOverlay());
-  el.querySelector('#crl-off-air-view-channel')?.addEventListener('click', async () => {
+  // "Back to Live Now" — close overlay and switch to live-now tab
+  el.querySelector('#crl-off-air-back')?.addEventListener('click', () => {
     _hideOverlay();
-    // Navigate to the creator's channel in the TV network
-    try {
-      const { initTvNetwork: _i, ...tvMod } = await import('./snx-tv-network.js');
-      // Dispatch a custom event so the TV network can open the channel view
-      window.dispatchEvent(new CustomEvent('snx:openChannelView', { detail: { channelName } }));
-    } catch (_) {}
-    // Fallback: switch to channels tab
-    window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'channels' } }));
+    window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'live-now' } }));
+  });
+
+  // "View Channel" — navigate to the creator's channel page
+  el.querySelector('#crl-off-air-view-channel')?.addEventListener('click', () => {
+    _hideOverlay();
+    if (ownerUid) {
+      // Use the canonical event the TV network already listens for
+      window.dispatchEvent(new CustomEvent('snx:openCreatorChannel', { detail: { uid: ownerUid } }));
+    } else {
+      // Fallback: switch to channels tab
+      window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'channels' } }));
+    }
   });
 }
 
