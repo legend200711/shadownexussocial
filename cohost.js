@@ -1,5 +1,5 @@
 /**
- * Shadow Nexus Social Live — cohost.js  (v2)
+ * Shadow Nexus Wave — cohost.js  (v2)
  *
  * Co-Host feature — completely self-contained.
  * Does NOT touch live.js internals, chat, comments, feed, guest boxes,
@@ -124,9 +124,6 @@
     _injectButton();
     _injectSettingsPanel();
     _injectInviteCard();
-    if (_isHost) {
-      _injectSettingsSection();
-    }
   }
 
   /* ── "Co-Host Settings" button — only visible to host, in bottom bar ── */
@@ -243,19 +240,6 @@
     if (acceptBtn) acceptBtn.addEventListener('click', _acceptInvite);
     if (denyBtn)   denyBtn.addEventListener('click',   _declineInvite);
 
-    // Settings toggles (host only)
-    if (_isHost) {
-      const toggleAllow = document.getElementById('toggleAllowCohost');
-      if (toggleAllow) toggleAllow.addEventListener('change', e => {
-        _cohostSettings.allowCohosts = e.target.checked;
-        _saveSettings();
-      });
-      const selectWho = document.getElementById('selectWhoCanCohost');
-      if (selectWho) selectWho.addEventListener('change', e => {
-        _cohostSettings.whoCanCohost = e.target.value;
-        _saveSettings();
-      });
-    }
 
     // Close panel on outside click
     document.addEventListener('click', e => {
@@ -433,7 +417,7 @@
       row.innerHTML = `
         <div class="cohost-user-avatar" style="${avatarBg}">${avatarBg ? '' : initials}</div>
         <div style="flex:1;min-width:0;">
-          <div class="cohost-user-name">${_esc(f.displayName || f.username || 'User')}</div>
+          <div class="cohost-user-name">${_esc((window.snxGetNameFromData || (d => d?.displayName?.trim() || d?.username?.trim() || 'User'))(f))}</div>
           <div class="cohost-user-status">
             <span class="cohost-status-dot ${statusCls}"></span>
             <span class="cohost-status-label">${statusLabel}</span>
@@ -501,7 +485,7 @@
 
       // ── Check 2: friend allows co-host invites ──
       if (friendData.allowCoHostInvites === false) {
-        _liveToast(`${friend.displayName || 'User'} has disabled co-host invites.`);
+        _liveToast(`${(window.snxGetNameFromData || (d => d?.displayName?.trim() || d?.username?.trim() || 'User'))(friend)} has disabled co-host invites.`);
         _resetInviteBtn(btns);
         return;
       }
@@ -523,12 +507,14 @@
       }
 
       // ── All checks passed — write RTDB invite first (instant delivery) ──
+      const _resolveName = window.snxGetDisplayName || ((p, u) => p?.displayName?.trim() || p?.username?.trim() || u?.displayName?.trim() || u?.email?.split('@')[0]?.trim() || 'User');
+      const _resolveDataName = window.snxGetNameFromData || (d => d?.displayName?.trim() || d?.username?.trim() || 'User');
       await rtSet(rtRef(_liveDB, `cohosts/${_roomId}/requests/${friend.uid}`), {
         from:       _user.uid,
-        fromName:   _userData.displayName || _user.email?.split('@')[0] || 'Host',
+        fromName:   _resolveName(_userData, _user),
         fromAvatar: _userData.avatar || _userData.profilePicture || '',
         toUid:      friend.uid,
-        toName:     friend.displayName || friend.username || 'User',
+        toName:     _resolveDataName(friend),
         roomId:     _roomId,
         status:     'pending',
         timestamp:  Date.now(),
@@ -540,10 +526,10 @@
         await fsSetDoc(fsDoc(_db, 'coHostRequests', requestId), {
           liveId:     _roomId,
           hostId:     _user.uid,
-          hostName:   _userData.displayName || _user.email?.split('@')[0] || 'Host',
+          hostName:   _resolveName(_userData, _user),
           hostAvatar: _userData.avatar || _userData.profilePicture || '',
           guestId:    friend.uid,
-          guestName:  friend.displayName || friend.username || 'User',
+          guestName:  _resolveDataName(friend),
           status:     'pending',
           createdAt:  fsST(),
         });
