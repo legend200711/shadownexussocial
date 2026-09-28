@@ -450,6 +450,13 @@ function _hostStartWebRTC() {
   // Viewer registers itself at liveConnections/{roomId}/viewers/{viewerUid}
   const viewersRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers`);
 
+  console.log('[SNX-WEBRTC HOST] ── SIGNALING PATHS ──');
+  console.log('[SNX-WEBRTC HOST] OFFER PATH:       liveConnections/' + rtdbRoomId + '/viewers/{viewerUid}/offer');
+  console.log('[SNX-WEBRTC HOST] ANSWER PATH:      liveConnections/' + rtdbRoomId + '/answers/{viewerUid}');
+  console.log('[SNX-WEBRTC HOST] HOST ICE PATH:    liveConnections/' + rtdbRoomId + '/hostCandidates/{viewerUid}/{key}');
+  console.log('[SNX-WEBRTC HOST] VIEWER ICE PATH:  liveConnections/' + rtdbRoomId + '/viewerCandidates/{viewerUid}/{key}');
+  console.log('[SNX-WEBRTC HOST] ROOM ID:          ' + rtdbRoomId);
+
   if (_hostState.signalUnsub) { try { _hostState.signalUnsub(); } catch (_) {} }
 
   _hostState.signalUnsub = onValue(viewersRef, async snap => {
@@ -457,10 +464,12 @@ function _hostStartWebRTC() {
     if (!snap.exists()) return;
     const viewers = snap.val() || {};
     for (const [viewerUid, viewerData] of Object.entries(viewers)) {
-      if (!viewerData || _hostState.viewerPeers[viewerUid]) continue;
-      console.log('[SNX-WEBRTC] Host detected viewer', viewerUid);
+      // skip nodes that are only the 'offer' child (not a viewer registration)
+      if (!viewerData || typeof viewerData !== 'object') continue;
+      if (_hostState.viewerPeers[viewerUid]) continue;
+      console.log('[SNX-WEBRTC HOST] STEP 1 — Viewer detected:', viewerUid);
       await _hostCreateViewerPeer(viewerUid).catch(err => {
-        console.warn('[SNX-WEBRTC] Failed to create viewer peer for', viewerUid, err);
+        console.warn('[SNX-WEBRTC HOST] Failed to create viewer peer for', viewerUid, err);
       });
     }
   });
@@ -470,78 +479,113 @@ async function _hostCreateViewerPeer(viewerUid) {
   if (!_hostState) return;
   const { rtdbRoomId, localStream } = _hostState;
 
-  console.log('[SNX-WEBRTC] Host peer created for', viewerUid);
-
+  console.log('[SNX-WEBRTC HOST] STEP 2 — RTCPeerConnection created for viewer', viewerUid);
   const pc = new RTCPeerConnection(ICE);
   _hostState.viewerPeers[viewerUid] = { pc, appliedCandKeys: new Set(), pendingCands: [] };
 
   // HOST is the offerer — it has the local tracks to transmit
   if (localStream) {
     const tracks = localStream.getTracks();
-    console.log('[SNX-WEBRTC] Host tracks added:', tracks.map(t => `${t.kind}(${t.readyState})`).join(', '));
+    console.log('[SNX-WEBRTC HOST] STEP 3 — Camera/audio tracks added:', tracks.map(t => `${t.kind}(${t.readyState})`).join(', '));
     tracks.forEach(t => pc.addTrack(t, localStream));
   } else {
-    console.warn('[SNX-WEBRTC] Host localStream is null — no tracks to add!');
+    console.warn('[SNX-WEBRTC HOST] STEP 3 — ❌ localStream is null — no tracks to add!');
   }
 
   // Write host ICE candidates to RTDB for this viewer
+  let _hostIceCount = 0;
   pc.onicecandidate = e => {
-    if (!e.candidate) return;
+    if (!e.candidate) {
+      console.log('[SNX-WEBRTC HOST] Host ICE gathering complete. Total candidates:', _hostIceCount);
+      return;
+    }
+    _hostIceCount++;
     const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const candRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${viewerUid}/${key}`);
-    set(candRef, e.candidate.toJSON()).catch(() => {});
-    console.log('[SNX-WEBRTC] Host ICE candidate written for viewer', viewerUid);
+    const icePath = `liveConnections/${rtdbRoomId}/hostCandidates/${viewerUid}/${key}`;
+    set(ref(liveDB, icePath), e.candidate.toJSON()).catch(err => {
+      console.error('[SNX-WEBRTC HOST] ICE candidate write FAILED:', err.message);
+    });
+    console.log('[SNX-WEBRTC HOST] Host ICE candidate #' + _hostIceCount + ' written → ' + icePath);
   };
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
-    console.log('[SNX-WEBRTC] Host connectionState →', s, 'viewer:', viewerUid);
+    console.log('[SNX-WEBRTC HOST] STEP 10 — connectionState:', s,
+      '| iceGatheringState:', pc.iceGatheringState,
+      '| iceConnectionState:', pc.iceConnectionState,
+      '| signalingState:', pc.signalingState,
+      '| viewer:', viewerUid);
     if (s === 'failed' || s === 'disconnected' || s === 'closed') {
       _hostRebuildViewerPeer(viewerUid);
     }
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log('[SNX-WEBRTC] Host iceConnectionState →', pc.iceConnectionState, 'viewer:', viewerUid);
+    console.log('[SNX-WEBRTC HOST] iceConnectionState →', pc.iceConnectionState, 'viewer:', viewerUid);
     if (pc.iceConnectionState === 'failed') {
       try { pc.restartIce(); } catch (_) {}
     }
   };
 
-  // HOST creates the offer (offerer sends tracks)
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  console.log('[SNX-WEBRTC] Offer created for viewer', viewerUid);
+  // STEP 4 — HOST creates the offer (offerer sends tracks)
+  let offer;
+  try {
+    offer = await pc.createOffer();
+    console.log('[SNX-WEBRTC HOST] STEP 4 — Offer created for viewer', viewerUid);
+  } catch (e) {
+    console.error('[SNX-WEBRTC HOST] STEP 4 — createOffer FAILED:', e.message);
+    throw e;
+  }
 
-  // Write offer under liveConnections/{roomId}/viewers/{viewerUid}/offer
-  await set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/offer`),
-    { type: offer.type, sdp: offer.sdp });
-  console.log('[SNX-WEBRTC] Offer written for viewer', viewerUid);
+  // STEP 5 — Set local description
+  try {
+    await pc.setLocalDescription(offer);
+    console.log('[SNX-WEBRTC HOST] STEP 5 — Local description set. signalingState:', pc.signalingState);
+  } catch (e) {
+    console.error('[SNX-WEBRTC HOST] STEP 5 — setLocalDescription FAILED:', e.message);
+    throw e;
+  }
 
-  // Listen for viewer answer
-  const answerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${viewerUid}`);
+  // STEP 6 — Write offer under liveConnections/{roomId}/viewers/{viewerUid}/offer
+  const offerPath = `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/offer`;
+  try {
+    await set(ref(liveDB, offerPath), { type: offer.type, sdp: offer.sdp });
+    console.log('[SNX-WEBRTC HOST] STEP 6 — Offer written to RTDB path:', offerPath);
+  } catch (e) {
+    console.error('[SNX-WEBRTC HOST] STEP 6 — Offer write FAILED:', e.message);
+    throw e;
+  }
+
+  // STEP 7/8 — Listen for viewer answer
+  const answerPath = `liveConnections/${rtdbRoomId}/answers/${viewerUid}`;
+  const answerRef = ref(liveDB, answerPath);
   const answerUnsub = onValue(answerRef, async snap => {
     if (!snap.exists() || !_hostState) return;
     const peer = _hostState.viewerPeers[viewerUid];
     if (!peer || peer.pc.remoteDescription) return; // already applied
-    console.log('[SNX-WEBRTC] Host received answer for viewer', viewerUid);
+    console.log('[SNX-WEBRTC HOST] STEP 7 — Viewer answer received from path:', answerPath);
     try {
       await peer.pc.setRemoteDescription(new RTCSessionDescription(snap.val()));
-      console.log('[SNX-WEBRTC] Host set remote description for viewer', viewerUid);
+      console.log('[SNX-WEBRTC HOST] STEP 8 — Remote description set. signalingState:', peer.pc.signalingState);
       // Flush pending viewer ICE candidates
-      for (const c of peer.pendingCands) {
-        await peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => {
-          console.warn('[SNX-WEBRTC] Host flush pendingCand error:', e.message);
-        });
+      if (peer.pendingCands.length) {
+        console.log('[SNX-WEBRTC HOST] Flushing', peer.pendingCands.length, 'queued viewer ICE candidates');
+        for (const c of peer.pendingCands) {
+          await peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => {
+            console.warn('[SNX-WEBRTC HOST] Flush pendingCand error:', e.message);
+          });
+        }
+        peer.pendingCands = [];
       }
-      peer.pendingCands = [];
     } catch (e) {
-      console.error('[SNX-WEBRTC] Host setRemoteDescription (answer) FAILED:', e.message);
+      console.error('[SNX-WEBRTC HOST] STEP 8 — setRemoteDescription (answer) FAILED:', e.message);
     }
   });
 
-  // Subscribe to viewer ICE candidates — queue if remoteDescription not yet ready
-  const vCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${viewerUid}`);
+  // STEP 9 — Subscribe to viewer ICE candidates — queue if remoteDescription not yet ready
+  const vCandPath = `liveConnections/${rtdbRoomId}/viewerCandidates/${viewerUid}`;
+  const vCandRef = ref(liveDB, vCandPath);
+  let _viewerIceCount = 0;
   const vCandUnsub = onValue(vCandRef, snap => {
     if (!snap.exists()) return;
     const cands = snap.val() || {};
@@ -550,12 +594,15 @@ async function _hostCreateViewerPeer(viewerUid) {
     for (const [key, cand] of Object.entries(cands)) {
       if (peer.appliedCandKeys.has(key)) continue;
       peer.appliedCandKeys.add(key);
+      _viewerIceCount++;
       if (peer.pc.remoteDescription) {
         peer.pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => {
-          console.warn('[SNX-WEBRTC] Host addIceCandidate error:', e.message);
+          console.warn('[SNX-WEBRTC HOST] STEP 9 — addIceCandidate error:', e.message);
         });
+        console.log('[SNX-WEBRTC HOST] STEP 9 — Viewer ICE candidate #' + _viewerIceCount + ' applied immediately');
       } else {
         peer.pendingCands.push(cand);
+        console.log('[SNX-WEBRTC HOST] STEP 9 — Viewer ICE candidate #' + _viewerIceCount + ' queued (no remoteDescription yet)');
       }
     }
   });
@@ -827,32 +874,74 @@ async function _viewerStartWebRTC(roomData, onEvent) {
   if (!_viewerState) return;
   const { uid, rtdbRoomId } = _viewerState;
 
-  console.log('[SNX-WEBRTC] Viewer entered room', rtdbRoomId);
-  console.log('[SNX-WEBRTC] Viewer ID created', uid);
+  // ── Diagnostic paths (printed on viewer side AND dispatched to UI) ──────
+  const _offerPath   = `liveConnections/${rtdbRoomId}/viewers/${uid}/offer`;
+  const _answerPath  = `liveConnections/${rtdbRoomId}/answers/${uid}`;
+  const _hIcePath    = `liveConnections/${rtdbRoomId}/hostCandidates/${uid}/{key}`;
+  const _vIcePath    = `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}/{key}`;
 
+  console.log('[SNX-WEBRTC VIEWER] ── SIGNALING PATHS ──');
+  console.log('[SNX-WEBRTC VIEWER] ROOM ID:         ', rtdbRoomId);
+  console.log('[SNX-WEBRTC VIEWER] VIEWER ID:       ', uid);
+  console.log('[SNX-WEBRTC VIEWER] OFFER PATH:      ', _offerPath);
+  console.log('[SNX-WEBRTC VIEWER] ANSWER PATH:     ', _answerPath);
+  console.log('[SNX-WEBRTC VIEWER] HOST ICE PATH:   ', _hIcePath);
+  console.log('[SNX-WEBRTC VIEWER] VIEWER ICE PATH: ', _vIcePath);
+
+  // Dispatch diagnostic info to the UI overlay
+  onEvent?.({ type: '_diag', roomId: rtdbRoomId, viewerId: uid,
+    offerPath: _offerPath, answerPath: _answerPath,
+    hIcePath: _hIcePath, vIcePath: _vIcePath });
+
+  // STEP 1 — roomId confirmed
+  console.log('[SNX-WEBRTC VIEWER] STEP 1 — Correct roomId received:', rtdbRoomId);
+
+  // STEP 2 — create RTCPeerConnection
   const pc = new RTCPeerConnection(ICE);
   _viewerState.rtcPc = pc;
-  console.log('[SNX-WEBRTC] RTCPeerConnection created');
+  console.log('[SNX-WEBRTC VIEWER] STEP 2 — RTCPeerConnection created');
 
   // Pending host ICE candidates that arrive before remoteDescription is set
   const pendingHostCands = [];
   const appliedHostCandKeys = new Set();
+  let _hostIceCount  = 0;
+  let _viewerIceCount = 0;
 
+  // Accumulated remote stream (all tracks merged into one MediaStream)
+  let _remoteStream = null;
+
+  // STEP 9 — ontrack
   pc.ontrack = e => {
-    const stream = e.streams?.[0] || new MediaStream([e.track]);
-    console.log('[SNX-WEBRTC] Viewer ontrack fired — kind:', e.track.kind);
-    console.log('[SNX-WEBRTC] Remote stream attached');
-    onEvent?.({ type: 'stream', stream });
+    console.log('[SNX-WEBRTC VIEWER] STEP 9 — ontrack fired — kind:', e.track.kind,
+      'streams:', e.streams.length);
+    onEvent?.({ type: '_diagTrack', kind: e.track.kind });
+
+    if (e.streams && e.streams[0]) {
+      _remoteStream = e.streams[0];
+    } else {
+      if (!_remoteStream) _remoteStream = new MediaStream();
+      _remoteStream.addTrack(e.track);
+    }
+
+    // STEP 10 — video.srcObject assigned (dispatched to UI which does the actual assignment)
+    console.log('[SNX-WEBRTC VIEWER] STEP 10 — video.srcObject assigned, stream tracks:',
+      _remoteStream.getTracks().map(t => t.kind).join(', '));
+    onEvent?.({ type: 'stream', stream: _remoteStream });
   };
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
-    console.log('[SNX-WEBRTC] Viewer connectionState →', s,
+    console.log('[SNX-WEBRTC VIEWER] STEP 10 — connectionState:', s,
+      '| iceGatheringState:', pc.iceGatheringState,
       '| iceConnectionState:', pc.iceConnectionState,
       '| signalingState:', pc.signalingState);
     onEvent?.({ type: 'connState', state: s });
+    onEvent?.({ type: '_diagConn', connectionState: s,
+      iceConnectionState: pc.iceConnectionState,
+      signalingState: pc.signalingState,
+      iceGatheringState: pc.iceGatheringState });
     if (s === 'connected') {
-      console.log('[SNX-WEBRTC] ICE connected');
+      console.log('[SNX-WEBRTC VIEWER] ✅ WebRTC connected');
     }
     if (s === 'failed' || s === 'disconnected') {
       _viewerScheduleReconnect(roomData, onEvent);
@@ -860,7 +949,8 @@ async function _viewerStartWebRTC(roomData, onEvent) {
   };
 
   pc.oniceconnectionstatechange = () => {
-    console.log('[SNX-WEBRTC] Viewer iceConnectionState →', pc.iceConnectionState);
+    console.log('[SNX-WEBRTC VIEWER] iceConnectionState →', pc.iceConnectionState);
+    onEvent?.({ type: '_diagIceState', iceConnectionState: pc.iceConnectionState });
     if (pc.iceConnectionState === 'failed') {
       try { pc.restartIce(); } catch (_) {}
     }
@@ -868,52 +958,82 @@ async function _viewerStartWebRTC(roomData, onEvent) {
 
   // Write viewer ICE candidates to RTDB
   pc.onicecandidate = e => {
-    if (!e.candidate) return;
+    if (!e.candidate) {
+      console.log('[SNX-WEBRTC VIEWER] Viewer ICE gathering complete. Total:', _viewerIceCount);
+      return;
+    }
+    _viewerIceCount++;
     const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}/${key}`),
-      e.candidate.toJSON()).catch(() => {});
-    console.log('[SNX-WEBRTC] Viewer ICE candidate written');
+    const icePath = `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}/${key}`;
+    set(ref(liveDB, icePath), e.candidate.toJSON()).catch(err => {
+      console.error('[SNX-WEBRTC VIEWER] Viewer ICE candidate write FAILED:', err.message);
+    });
+    console.log('[SNX-WEBRTC VIEWER] Viewer ICE candidate #' + _viewerIceCount + ' written → ' + icePath);
+    onEvent?.({ type: '_diagViewerIce', count: _viewerIceCount });
   };
 
-  // Register viewer presence so host's onValue fires
-  await set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}`), { uid, joinedAt: Date.now() });
+  // STEP 1 (presence) — Register viewer at liveConnections/{roomId}/viewers/{uid}
+  // This triggers the host's onValue listener which starts _hostCreateViewerPeer
+  const presencePath = `liveConnections/${rtdbRoomId}/viewers/${uid}`;
+  try {
+    await set(ref(liveDB, presencePath), { uid, joinedAt: Date.now() });
+    console.log('[SNX-WEBRTC VIEWER] STEP 1 — Viewer presence written to:', presencePath);
+  } catch (e) {
+    console.error('[SNX-WEBRTC VIEWER] STEP 1 — Viewer presence write FAILED:', e.message);
+    onEvent?.({ type: '_diagError', step: 1, error: e.message });
+  }
 
   // Helper: apply host offer, create and write answer, flush queued ICE candidates
   async function _applyOfferAndAnswer(offerVal) {
     if (pc.remoteDescription) return; // idempotent
     try {
+      // STEP 4 — Set remote description (offer)
       await pc.setRemoteDescription(new RTCSessionDescription(offerVal));
-      console.log('[SNX-WEBRTC] Viewer set remote description');
+      console.log('[SNX-WEBRTC VIEWER] STEP 4 — Remote description set. signalingState:', pc.signalingState);
+      onEvent?.({ type: '_diagOffer', state: 'SET' });
 
       // Flush host candidates that arrived before the offer
-      for (const c of pendingHostCands) {
-        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => {
-          console.warn('[SNX-WEBRTC] Viewer flush pendingCand error:', e.message);
-        });
+      if (pendingHostCands.length) {
+        console.log('[SNX-WEBRTC VIEWER] Flushing', pendingHostCands.length, 'queued host ICE candidates');
+        for (const c of pendingHostCands) {
+          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => {
+            console.warn('[SNX-WEBRTC VIEWER] Flush pendingCand error:', e.message);
+          });
+        }
+        pendingHostCands.length = 0;
       }
-      pendingHostCands.length = 0;
 
+      // STEP 5 — Create answer
       const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      console.log('[SNX-WEBRTC] Viewer answer created');
+      console.log('[SNX-WEBRTC VIEWER] STEP 5 — Answer created');
 
-      await set(ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${uid}`),
-        { type: answer.type, sdp: answer.sdp });
-      console.log('[SNX-WEBRTC] Viewer answer written');
+      // STEP 6 — Set local description
+      await pc.setLocalDescription(answer);
+      console.log('[SNX-WEBRTC VIEWER] STEP 6 — Local description set. signalingState:', pc.signalingState);
+      onEvent?.({ type: '_diagAnswer', state: 'CREATED' });
+
+      // STEP 7 — Write answer to RTDB
+      const answerPath = `liveConnections/${rtdbRoomId}/answers/${uid}`;
+      await set(ref(liveDB, answerPath), { type: answer.type, sdp: answer.sdp });
+      console.log('[SNX-WEBRTC VIEWER] STEP 7 — Answer written to RTDB path:', answerPath);
+      onEvent?.({ type: '_diagAnswer', state: 'SENT' });
+
     } catch (e) {
-      console.error('[SNX-WEBRTC] Viewer offer/answer FAILED:', e.message);
+      console.error('[SNX-WEBRTC VIEWER] STEP 4-7 offer/answer FAILED:', e.message, e);
+      onEvent?.({ type: '_diagError', step: '4-7', error: e.message });
     }
   }
 
-  // Wait for host's offer — host is now the offerer
-  const offerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}/offer`);
+  // STEP 3 — Wait for host's offer
+  const offerRef = ref(liveDB, _offerPath);
   const offerUnsub = onValue(offerRef, async snap => {
     if (!snap.exists() || !_viewerState || _viewerState.leftFlag) return;
-    console.log('[SNX-WEBRTC] Viewer received offer');
+    console.log('[SNX-WEBRTC VIEWER] STEP 3 — Offer received from RTDB path:', _offerPath);
+    onEvent?.({ type: '_diagOffer', state: 'RECEIVED' });
     await _applyOfferAndAnswer(snap.val());
   });
 
-  // Subscribe to host ICE candidates — queue until offer applied
+  // STEP 8 — Subscribe to host ICE candidates — queue until remote description is set
   const hCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${uid}`);
   const hCandUnsub = onValue(hCandRef, snap => {
     if (!snap.exists()) return;
@@ -921,12 +1041,18 @@ async function _viewerStartWebRTC(roomData, onEvent) {
     for (const [key, cand] of Object.entries(cands)) {
       if (appliedHostCandKeys.has(key)) continue;
       appliedHostCandKeys.add(key);
+      _hostIceCount++;
+      console.log('[SNX-WEBRTC VIEWER] STEP 8 — Host ICE candidate #' + _hostIceCount + ' received');
+      onEvent?.({ type: '_diagHostIce', count: _hostIceCount });
       if (pc.remoteDescription) {
         pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => {
-          console.warn('[SNX-WEBRTC] Viewer addIceCandidate error:', e.message);
+          console.warn('[SNX-WEBRTC VIEWER] STEP 8 — addIceCandidate error:', e.message);
+          onEvent?.({ type: '_diagError', step: 8, error: e.message });
         });
+        console.log('[SNX-WEBRTC VIEWER] STEP 8 — Host ICE candidate #' + _hostIceCount + ' applied immediately');
       } else {
         pendingHostCands.push(cand);
+        console.log('[SNX-WEBRTC VIEWER] STEP 8 — Host ICE candidate #' + _hostIceCount + ' queued (no remoteDescription yet)');
       }
     }
   });
@@ -941,9 +1067,10 @@ async function _viewerStartWebRTC(roomData, onEvent) {
     if (!_viewerState || _viewerState.leftFlag) return;
     const s = pc.connectionState;
     if (s !== 'connected' && s !== 'completed') {
-      console.warn('[SNX-WEBRTC] Connection timeout. connectionState:', s,
-        'iceConnectionState:', pc.iceConnectionState,
-        'signalingState:', pc.signalingState);
+      console.warn('[SNX-WEBRTC VIEWER] Connection timeout. connectionState:', s,
+        '| iceConnectionState:', pc.iceConnectionState,
+        '| signalingState:', pc.signalingState,
+        '| iceGatheringState:', pc.iceGatheringState);
       onEvent?.({ type: 'timeout' });
     }
   }, 30000);

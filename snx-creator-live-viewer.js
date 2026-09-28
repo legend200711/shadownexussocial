@@ -752,16 +752,134 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
 
   let chatSending = false;
 
+  // ── Diagnostic panel state ────────────────────────────────────────────────
+  // Injected as a floating overlay so it's visible on mobile without DevTools.
+  let _diagEl = null;
+  const _diagState = {
+    roomId: '…', viewerId: '…',
+    offerState: 'WAITING', remoteDescState: 'WAITING',
+    answerState: 'WAITING',
+    hostIce: 0, viewerIce: 0,
+    iceState: '…', connState: '…',
+    trackKinds: [], videoPlay: 'WAITING',
+  };
+
+  function _renderDiag() {
+    if (!_diagEl) return;
+    const trackStr = _diagState.trackKinds.length
+      ? _diagState.trackKinds.join(', ')
+      : 'WAITING';
+    _diagEl.innerHTML = `
+      <div style="font-weight:700;margin-bottom:4px;letter-spacing:.05em;">📡 WebRTC Diagnostics</div>
+      <div>ROOM ID: <b>${_diagEl.__roomId || _diagState.roomId}</b></div>
+      <div>VIEWER ID: <b>${_diagEl.__viewerId || _diagState.viewerId}</b></div>
+      <div>OFFER: <b style="color:${_diagState.offerState==='RECEIVED'?'#4ade80':'#fbbf24'}">${_diagState.offerState}</b></div>
+      <div>REMOTE DESC: <b style="color:${_diagState.remoteDescState==='SET'?'#4ade80':'#fbbf24'}">${_diagState.remoteDescState}</b></div>
+      <div>ANSWER: <b style="color:${_diagState.answerState==='SENT'?'#4ade80':'#fbbf24'}">${_diagState.answerState}</b></div>
+      <div>HOST ICE: <b>${_diagState.hostIce}</b></div>
+      <div>VIEWER ICE: <b>${_diagState.viewerIce}</b></div>
+      <div>ICE STATE: <b>${_diagState.iceState}</b></div>
+      <div>CONN STATE: <b style="color:${_diagState.connState==='connected'?'#4ade80':_diagState.connState==='failed'?'#f87171':'#fbbf24'}">${_diagState.connState}</b></div>
+      <div>REMOTE TRACK: <b style="color:${trackStr!=='WAITING'?'#4ade80':'#fbbf24'}">${trackStr}</b></div>
+      <div>VIDEO PLAY: <b style="color:${_diagState.videoPlay==='PLAYING'?'#4ade80':_diagState.videoPlay.startsWith('ERR')?'#f87171':'#fbbf24'}">${_diagState.videoPlay}</b></div>
+    `.trim();
+  }
+
+  function _injectDiagPanel() {
+    if (_diagEl) return;
+    _diagEl = document.createElement('div');
+    _diagEl.id = 'snx-webrtc-diag';
+    _diagEl.style.cssText = [
+      'position:fixed', 'top:8px', 'left:8px', 'z-index:99999',
+      'background:rgba(0,0,0,0.82)', 'color:#e2e8f0',
+      'font-family:monospace', 'font-size:11px', 'line-height:1.55',
+      'padding:8px 10px', 'border-radius:8px',
+      'border:1px solid rgba(255,255,255,0.15)',
+      'max-width:92vw', 'pointer-events:none',
+      'white-space:nowrap',
+    ].join(';');
+    document.body.appendChild(_diagEl);
+    _renderDiag();
+  }
+
+  function _removeDiagPanel() {
+    if (_diagEl) { _diagEl.remove(); _diagEl = null; }
+  }
+
+  _injectDiagPanel();
+
   async function _onLiveEvent(event) {
     const { type } = event;
 
+    // ── Diagnostic events (internal — update panel only) ────────────────
+    if (type === '_diag') {
+      _diagState.roomId   = event.roomId   || '…';
+      _diagState.viewerId = event.viewerId || '…';
+      if (_diagEl) { _diagEl.__roomId = event.roomId; _diagEl.__viewerId = event.viewerId; }
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagOffer') {
+      if (event.state === 'RECEIVED') _diagState.offerState = 'RECEIVED';
+      if (event.state === 'SET')      _diagState.remoteDescState = 'SET';
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagAnswer') {
+      if (event.state === 'CREATED') _diagState.answerState = 'CREATED';
+      if (event.state === 'SENT')    _diagState.answerState = 'SENT';
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagHostIce') {
+      _diagState.hostIce = event.count;
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagViewerIce') {
+      _diagState.viewerIce = event.count;
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagIceState') {
+      _diagState.iceState = event.iceConnectionState;
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagConn') {
+      _diagState.connState = event.connectionState;
+      _diagState.iceState  = event.iceConnectionState;
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagTrack') {
+      if (!_diagState.trackKinds.includes(event.kind)) {
+        _diagState.trackKinds.push(event.kind);
+      }
+      _renderDiag();
+      return;
+    }
+    if (type === '_diagError') {
+      console.error('[SNX-WEBRTC VIEWER DIAG] Step', event.step, 'ERROR:', event.error);
+      if (_diagEl) {
+        const errEl = document.createElement('div');
+        errEl.style.cssText = 'color:#f87171;margin-top:4px;white-space:normal;';
+        errEl.textContent = `❌ Step ${event.step}: ${event.error}`;
+        _diagEl.appendChild(errEl);
+      }
+      return;
+    }
+
+    // ── Normal live events ────────────────────────────────────────────────
     if (type === 'not_found') {
+      _removeDiagPanel();
       _hideConnBanner(overlay);
       _showOffAirScreen(overlay, channel?.channelName || 'Creator', false, channel?.ownerUid || channel?.id);
       if (_viewerDurationTimer) clearInterval(_viewerDurationTimer);
       return;
     }
     if (type === 'ended') {
+      _removeDiagPanel();
       _hideConnBanner(overlay);
       _showOffAirScreen(overlay, channel?.channelName || 'Creator', true, channel?.ownerUid || channel?.id);
       if (_viewerDurationTimer) clearInterval(_viewerDurationTimer);
@@ -782,22 +900,31 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
         videoEl.srcObject = event.stream;
         videoEl.autoplay  = true;
         videoEl.playsInline = true;
+        _diagState.videoPlay = 'ATTEMPTING';
+        _renderDiag();
         videoEl.play().then(() => {
-          console.log('[SNX-WEBRTC] VIDEO PLAYING');
+          console.log('[SNX-WEBRTC VIEWER] STEP 11 — video.play() resolved — VIDEO PLAYING ✅');
+          _diagState.videoPlay = 'PLAYING';
+          _renderDiag();
           _hideConnBanner(overlay);
           const unmuteEl = overlay.querySelector('.crl-unmute-prompt');
           if (unmuteEl) unmuteEl.style.display = 'block';
         }).catch(err => {
+          console.warn('[SNX-WEBRTC VIEWER] STEP 11 — video.play() error:', err.name, err.message);
+          _diagState.videoPlay = `ERR: ${err.name}`;
+          _renderDiag();
           if (err.name === 'NotAllowedError') {
             // Autoplay blocked — show tap-to-play instead of "Connecting"
             _hideConnBanner(overlay);
-            _showConnBanner(overlay, 'Tap to play Live', 'Browser blocked autoplay');
+            _showConnBanner(overlay, 'TAP TO PLAY LIVE', 'Browser blocked autoplay');
             const tapBtn = document.createElement('button');
-            tapBtn.textContent = '▶ Tap to Play';
-            tapBtn.style.cssText = 'margin-top:12px;padding:10px 24px;font-size:16px;border-radius:8px;border:none;background:#e11d48;color:#fff;cursor:pointer;';
+            tapBtn.textContent = '▶ TAP TO PLAY LIVE';
+            tapBtn.style.cssText = 'margin-top:12px;padding:12px 28px;font-size:16px;font-weight:700;border-radius:8px;border:none;background:#e11d48;color:#fff;cursor:pointer;letter-spacing:.05em;';
             tapBtn.onclick = () => {
               videoEl.play().then(() => {
-                console.log('[SNX-WEBRTC] VIDEO PLAYING (tap)');
+                console.log('[SNX-WEBRTC VIEWER] STEP 11 — video.play() resolved (tap) — VIDEO PLAYING ✅');
+                _diagState.videoPlay = 'PLAYING (tap)';
+                _renderDiag();
                 _hideConnBanner(overlay);
                 const unmuteEl = overlay.querySelector('.crl-unmute-prompt');
                 if (unmuteEl) unmuteEl.style.display = 'block';
@@ -807,7 +934,7 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
             const banner = overlay.querySelector('.crl-conn-banner');
             if (banner) banner.appendChild(tapBtn);
           } else {
-            console.warn('[SNX-WEBRTC] video.play() error:', err.name, err.message);
+            console.warn('[SNX-WEBRTC VIEWER] video.play() error:', err.name, err.message);
             _hideConnBanner(overlay);
           }
         });
@@ -817,6 +944,10 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
     }
     if (type === 'connected') {
       _hideConnBanner(overlay);
+    }
+    if (type === 'connState') {
+      if (event.state === 'connected') _diagState.connState = 'connected';
+      _renderDiag();
     }
     if (type === 'timeout') {
       _showConnBanner(overlay, 'Unable to connect to this Live.', 'Connection timed out');
@@ -885,6 +1016,7 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
   // Close/leave
   overlay.querySelector('.crl-close-btn')?.addEventListener('click', async () => {
     if (_viewerDurationTimer) clearInterval(_viewerDurationTimer);
+    _removeDiagPanel();
     await leaveCreatorLive();
     _hideOverlay();
   });
