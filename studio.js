@@ -3771,6 +3771,10 @@ window.snxSQJumpTo = function(idx) {
 
 /* ── Bridge: expose internal track/queue state to outer IIFEs ── */
 window._snxStudioTracks        = function() { return _music ? (_music.tracks || []) : []; };
+window._snxStudioQueueIndex    = function() { return _music ? (_music.queueIndex || 0) : 0; };
+window._snxStudioIsPlaying     = function() { return _music ? !!_music.playing : false; };
+window._snxStudioAudio         = function() { return _music ? _music.currentAudio : null; };
+window._snxCSMusicPlaylists    = function() { return _csMusic ? (_csMusic.playlists || []) : []; };
 window._snxSQHasTrack          = function(id) { return _sq && Array.isArray(_sq.queue) && _sq.queue.some(function(q) { return q.id === id; }); };
 window._snxInitMusicLibrary    = function() { _initMusicLibrary(); };
 window._snxCsMusicLoadPl       = function() { _csMusicLoadPlaylists(); };
@@ -3781,11 +3785,16 @@ window._snxRenderCSLib         = function() { _renderCSLibrary(); };
 window._snxSqRenderQueue       = function() { _sqRenderQueue(); };
 window._snxRenderNowPlaying    = function() { _renderNowPlayingBar(); };
 
-// After track list changes, refresh the Queue tab library list if it's open
+// After track list changes, refresh the Queue tab library list AND Music Hub Home if open
 var _origRenderLibrary = _renderLibrary;
 _renderLibrary = function() {
   _origRenderLibrary.apply(this, arguments);
   if (typeof window.snxStudioRefreshQueueLib === 'function') window.snxStudioRefreshQueueLib();
+  // Refresh Home tab recent list if it is visible
+  var home = document.getElementById('snxStudioTab_home');
+  if (home && home.style.display !== 'none' && typeof window.snxMHRefreshHome === 'function') {
+    window.snxMHRefreshHome();
+  }
 };
 
 })(); // end IIFE
@@ -4155,7 +4164,7 @@ window.snxsStartStream = function() {};
 
 (function() {
 
-var _STUDIO_TABS = ['music', 'upload', 'playlists', 'queue', 'nowplaying', 'stream'];
+var _STUDIO_TABS = ['home', 'music', 'upload', 'playlists', 'queue', 'nowplaying', 'stream'];
 var _studioTabLibInit = false;
 
 /* ── Public tab switch function ─────────────────────── */
@@ -4197,6 +4206,9 @@ window.snxStudioTabSwitch = function(tab, btn) {
   if (tab === 'playlists') {
     if (typeof window._snxRenderCSPl  === 'function') setTimeout(window._snxRenderCSPl, 30);
     if (typeof window._snxRenderCSLib === 'function') setTimeout(window._snxRenderCSLib, 60);
+  }
+  if (tab === 'home') {
+    setTimeout(snxMHRefreshHome, 60);
   }
   if (tab === 'queue') {
     if (typeof window._snxSqRenderQueue === 'function') setTimeout(window._snxSqRenderQueue, 30);
@@ -4281,9 +4293,9 @@ window.snxStudioRefreshQueueLib = function() {
     var wrapped = function(pageId) {
       orig.apply(this, arguments);
       if (pageId === 'studioPage') {
-        // Show Music tab by default; init library
+        // Show Home tab by default; init library
         setTimeout(function() {
-          snxStudioTabSwitch('music', document.getElementById('snxStudioTabBtn_music'));
+          snxStudioTabSwitch('home', document.getElementById('snxStudioTabBtn_home'));
         }, 150);
       }
     };
@@ -4309,3 +4321,289 @@ window.snxNPSkip        = function() {};
 window.snxNPPrev        = function() {};
 window.snxNPStopChannel = function() {};
 
+
+/* ═══════════════════════════════════════════════════════
+   34. MUSIC HUB — HOME TAB LOGIC
+   ─────────────────────────────────────────────────────
+   Reads from the existing _music / _csMusic state.
+   Does NOT create any duplicate playback system.
+   Radio "Listen Live" reuses the existing _music queue player.
+═══════════════════════════════════════════════════════ */
+
+(function() {
+
+/* ── Radio state (single audio instance) ── */
+var _mhRadio = { playing: false };
+
+/* ── Public: refresh the entire Home tab ── */
+window.snxMHRefreshHome = function snxMHRefreshHome() {
+  _mhRenderNowPlaying();
+  _mhRenderPlaylists();
+  _mhRenderRecent();
+  _mhShowAdminPanel();
+};
+
+/* ── Now Playing: mirrors the existing _music playback state ── */
+function _mhRenderNowPlaying() {
+  // _music is defined in the outer IIFE; access via bridge
+  var tracks = typeof window._snxStudioTracks === 'function' ? window._snxStudioTracks() : [];
+  var qIdx   = typeof window._snxStudioQueueIndex === 'function' ? window._snxStudioQueueIndex() : 0;
+  var playing = typeof window._snxStudioIsPlaying === 'function' ? window._snxStudioIsPlaying() : false;
+  var track   = tracks.length > qIdx && qIdx >= 0 ? tracks[qIdx] : null;
+
+  var titleEl   = document.getElementById('snxMHNPTitle');
+  var artistEl  = document.getElementById('snxMHNPArtist');
+  var playBtn   = document.getElementById('snxMHPlayBtn');
+  var eqRow     = document.getElementById('snxMHNPEQRow');
+  var fillEl    = document.getElementById('snxMHNPFill');
+  var curEl     = document.getElementById('snxMHNPCurrentTime');
+  var durEl     = document.getElementById('snxMHNPDuration');
+  var upNextEl  = document.getElementById('snxMHUpNext');
+  var upNextTEl = document.getElementById('snxMHUpNextTitle');
+
+  if (track) {
+    if (titleEl)  titleEl.textContent  = track.title  || 'Untitled';
+    if (artistEl) artistEl.textContent = track.artist || 'Unknown Artist';
+    if (durEl)    durEl.textContent    = _mhFmt(track.duration || 0);
+    // Artwork: show image if artworkUrl exists
+    var art = document.getElementById('snxMHArtwork');
+    if (art) {
+      if (track.artworkUrl) {
+        art.innerHTML = '<img src="' + _mhEsc(track.artworkUrl) + '" alt="">';
+      } else {
+        art.innerHTML = '<span class="snx-mh-np-artwork-icon">&#127925;</span>';
+      }
+    }
+    // UP NEXT
+    var nextTrack = tracks.length > (qIdx + 1) ? tracks[qIdx + 1] : (tracks.length > 1 ? tracks[0] : null);
+    if (nextTrack && upNextEl && upNextTEl) {
+      upNextTEl.textContent = (nextTrack.title || 'Unknown') + (nextTrack.artist ? ' — ' + nextTrack.artist : '');
+      upNextEl.style.display = '';
+    } else if (upNextEl) {
+      upNextEl.style.display = 'none';
+    }
+  } else {
+    if (titleEl)  titleEl.textContent  = 'Nothing playing';
+    if (artistEl) artistEl.textContent = 'Open Library to start listening';
+    if (durEl)    durEl.textContent    = '—';
+    if (curEl)    curEl.textContent    = '—';
+    if (fillEl)   fillEl.style.width   = '0%';
+    if (upNextEl) upNextEl.style.display = 'none';
+    var art2 = document.getElementById('snxMHArtwork');
+    if (art2) art2.innerHTML = '<span class="snx-mh-np-artwork-icon">&#127925;</span>';
+  }
+
+  if (playBtn) playBtn.innerHTML = playing ? '&#9646;&#9646;' : '&#9654;';
+  if (eqRow)   eqRow.style.display = playing ? '' : 'none';
+
+  // Mirror progress from the existing playback audio element
+  _mhSyncProgress();
+}
+
+function _mhSyncProgress() {
+  // Poll every second while Home tab is active — lightweight
+  var fill = document.getElementById('snxMHNPFill');
+  var cur  = document.getElementById('snxMHNPCurrentTime');
+  var dur  = document.getElementById('snxMHNPDuration');
+  var btn  = document.getElementById('snxMHPlayBtn');
+  if (!fill && !cur) return;
+
+  var audio = typeof window._snxStudioAudio === 'function' ? window._snxStudioAudio() : null;
+  if (audio && !audio.paused && isFinite(audio.duration) && audio.duration > 0) {
+    var pct = (audio.currentTime / audio.duration) * 100;
+    if (fill) fill.style.width = pct.toFixed(1) + '%';
+    if (cur)  cur.textContent  = _mhFmt(Math.floor(audio.currentTime));
+    if (dur)  dur.textContent  = _mhFmt(Math.floor(audio.duration));
+    if (btn)  btn.innerHTML    = '&#9646;&#9646;';
+    var eq = document.getElementById('snxMHNPEQRow');
+    if (eq) eq.style.display = '';
+  }
+}
+
+/* ── Playlist grid ── */
+function _mhRenderPlaylists() {
+  var grid = document.getElementById('snxMHPlaylistGrid');
+  if (!grid) return;
+
+  // Read from _csMusic playlists (exposed via bridge)
+  var pls = typeof window._snxCSMusicPlaylists === 'function' ? window._snxCSMusicPlaylists() : [];
+
+  if (!pls || !pls.length) {
+    grid.innerHTML = '<div class="snx-mh-empty">No playlists yet. Create one in the Playlists tab.</div>';
+    return;
+  }
+
+  // Playlist icon mapping — cycle through a set of music icons
+  var icons = ['&#127925;', '&#127908;', '&#9889;', '&#128248;', '&#127926;', '&#128251;', '&#127929;', '&#127911;'];
+  grid.innerHTML = pls.slice(0, 6).map(function(pl, i) {
+    var count = pl.trackIds ? pl.trackIds.length : 0;
+    return '<div class="snx-mh-pl-card" onclick="snxMHOpenPlaylist(\'' + _mhEsc(pl.id) + '\')">' +
+      '<div class="snx-mh-pl-icon">' + icons[i % icons.length] + '</div>' +
+      '<div class="snx-mh-pl-name">' + _mhEsc(pl.name || 'Untitled') + '</div>' +
+      '<div class="snx-mh-pl-count">' + count + ' track' + (count !== 1 ? 's' : '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+/* ── Recently added list (up to 8 most recent tracks) ── */
+function _mhRenderRecent() {
+  var list = document.getElementById('snxMHRecentList');
+  if (!list) return;
+
+  var tracks = typeof window._snxStudioTracks === 'function' ? window._snxStudioTracks() : [];
+  var recent = tracks.slice(0, 8);   // already ordered by uploadedAt desc
+
+  if (!recent.length) {
+    list.innerHTML = '<div class="snx-mh-empty">No tracks added yet. Check back soon.</div>';
+    return;
+  }
+
+  list.innerHTML = recent.map(function(t, i) {
+    return '<div class="snx-mh-recent-item" onclick="snxMusicPlayFromLibrary(\'' + _mhEsc(t.id) + '\')" title="Play">' +
+      '<span class="snx-mh-recent-num">' + (i + 1) + '</span>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div class="snx-mh-recent-title">' + _mhEsc(t.title || 'Untitled') + '</div>' +
+        '<div class="snx-mh-recent-artist">' + _mhEsc(t.artist || 'Unknown Artist') + '</div>' +
+      '</div>' +
+      '<span style="font-size:10px;color:#3a5a7a;flex-shrink:0;">' + _mhFmt(t.duration || 0) + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+/* ── Canonical founder check for Music Hub ───────────────────────────────
+ * Primary source: window._snxCurrentUser.email — this is the Firebase Auth
+ * user object set synchronously in onAuthStateChanged and is available as
+ * soon as auth resolves, before _snxRole propagates through Firestore.
+ * Secondary source: window._snxRole === 'founder' — kept as a fallback for
+ * any code path where _snxCurrentUser is not yet populated.
+ * This dual check eliminates the race condition where _snxRole is still
+ * 'member' (its default) when Music Hub first renders on slow mobile.
+ * ─────────────────────────────────────────────────────────────────────── */
+var _MH_FOUNDER_EMAIL = 'christijerina46@gmail.com';
+function _mhIsFounder() {
+  var cu = window._snxCurrentUser;
+  if (cu && cu.email) {
+    return String(cu.email).trim().toLowerCase() === _MH_FOUNDER_EMAIL;
+  }
+  // Fallback: role already resolved
+  return window._snxRole === 'founder';
+}
+
+/* ── Admin panel + management tab visibility ── */
+function _mhShowAdminPanel() {
+  var isManager = _mhIsFounder();
+
+  // Admin card on Home tab
+  var panel = document.getElementById('snxMHAdminPanel');
+  if (panel) panel.style.display = isManager ? '' : 'none';
+
+  // Upload tab button in the nav bar
+  var uploadTabBtn = document.getElementById('snxStudioTabBtn_upload');
+  if (uploadTabBtn) uploadTabBtn.style.display = isManager ? '' : 'none';
+
+  // Queue tab button in the nav bar
+  var queueTabBtn = document.getElementById('snxStudioTabBtn_queue');
+  if (queueTabBtn) queueTabBtn.style.display = isManager ? '' : 'none';
+
+  // Library tab "UPLOAD MUSIC" shortcut button
+  var libUploadBtn = document.getElementById('snxLibUploadBtn');
+  if (libUploadBtn) libUploadBtn.style.display = isManager ? 'flex' : 'none';
+}
+
+/* ── Auth-ready hook: called by onAuthStateChanged once the Firebase user
+ * and role have been resolved. Re-applies founder controls without
+ * requiring a page reload, a tab switch, or a second login. ── */
+window.snxMHReapplyFounder = function snxMHReapplyFounder() {
+  _mhShowAdminPanel();
+  // If the Home tab is currently visible, do a full refresh so the
+  // Management panel appears / disappears immediately.
+  var home = document.getElementById('snxStudioTab_home');
+  if (home && home.style.display !== 'none') {
+    if (typeof window.snxMHRefreshHome === 'function') window.snxMHRefreshHome();
+  }
+};
+
+/* ── Radio: reuses the existing _music queue player ── */
+window.snxMHRadioToggle = function() {
+  // Delegate to the existing play/pause logic
+  if (typeof window.snxMusicPlayPause === 'function') {
+    window.snxMusicPlayPause();
+  }
+  // Update button label to reflect new state
+  setTimeout(function() {
+    var playing = typeof window._snxStudioIsPlaying === 'function' && window._snxStudioIsPlaying();
+    var btn = document.getElementById('snxMHListenBtn');
+    if (btn) {
+      btn.classList.toggle('playing', !!playing);
+      btn.innerHTML = playing ? '&#9646;&#9646; PAUSE' : '&#9654; LISTEN LIVE';
+    }
+    _mhRenderNowPlaying();
+  }, 100);
+};
+
+/* ── Open a playlist (switch to Playlists tab and select it) ── */
+window.snxMHOpenPlaylist = function(playlistId) {
+  snxStudioTabSwitch('playlists', document.getElementById('snxStudioTabBtn_playlists'));
+  setTimeout(function() {
+    if (typeof window.snxCSMusicSelectPlaylist === 'function') {
+      window.snxCSMusicSelectPlaylist(playlistId);
+    }
+  }, 200);
+};
+
+/* ── Feature a track (founder only — opens library to pick) ── */
+window.snxMHToggleFeatured = function() {
+  // Delegate to the library tab for selection
+  snxStudioTabSwitch('music', document.getElementById('snxStudioTabBtn_music'));
+};
+
+/* ── Rights confirmation: enable/disable upload button ── */
+window.snxMHRightsChange = function() {
+  var cb  = document.getElementById('snxMHRightsCheck');
+  var btn = document.getElementById('snxMHUploadBtn');
+  if (!btn) return;
+  var checked = cb && cb.checked;
+  btn.style.opacity       = checked ? '1'    : '0.45';
+  btn.style.pointerEvents = checked ? 'auto' : 'none';
+};
+
+window.snxMHUploadWithRights = function() {
+  var cb = document.getElementById('snxMHRightsCheck');
+  if (!cb || !cb.checked) { return; }
+  if (typeof window.snxMusicOpenFilePicker === 'function') window.snxMusicOpenFilePicker();
+};
+
+/* ── Expose bridge references so the home tab can read inner state ── */
+// These MUST live here (outside the studio IIFE) since _music / _csMusic are inner vars.
+// The studio IIFE already exposes _snxStudioTracks / _snxCsMusicPlaylists at the bottom.
+
+/* ── Periodic sync: keep Now Playing fresh when tab is open ── */
+setInterval(function() {
+  var home = document.getElementById('snxStudioTab_home');
+  if (home && home.style.display !== 'none') {
+    _mhSyncProgress();
+    // Refresh play button state
+    var playing = typeof window._snxStudioIsPlaying === 'function' && window._snxStudioIsPlaying();
+    var playBtn = document.getElementById('snxMHPlayBtn');
+    if (playBtn) playBtn.innerHTML = playing ? '&#9646;&#9646;' : '&#9654;';
+    var eqRow = document.getElementById('snxMHNPEQRow');
+    if (eqRow) eqRow.style.display = playing ? '' : 'none';
+    var listenBtn = document.getElementById('snxMHListenBtn');
+    if (listenBtn) {
+      listenBtn.classList.toggle('playing', !!playing);
+      listenBtn.innerHTML = playing ? '&#9646;&#9646; PAUSE' : '&#9654; LISTEN LIVE';
+    }
+  }
+}, 1000);
+
+/* ── Tiny helpers ── */
+function _mhFmt(secs) {
+  secs = Math.floor(secs || 0);
+  var m = Math.floor(secs / 60), s = secs % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+function _mhEsc(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+})(); // end Music Hub Home IIFE

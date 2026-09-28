@@ -13482,6 +13482,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
             window._snxAuthReadyQueue = [];
           }
           window._snxAuthResolved = true;
+          // ── Music Hub: re-apply founder controls now that auth + user are known.
+          // This fixes the race condition on mobile where Music Hub rendered before
+          // onAuthStateChanged resolved — snxMHReapplyFounder() re-checks the
+          // canonical email identity and shows/hides founder tabs immediately.
+          if (typeof window.snxMHReapplyFounder === 'function') {
+              try { window.snxMHReapplyFounder(); } catch(_) {}
+          }
           // Notify TV Network of signed-in user (for MY CHANNEL auto-resolve)
           window.dispatchEvent(new CustomEvent('snxAuthStateChanged', { detail: { user } }));
           // Start passive invite listener for sidebar badge (deferred so arcade IIFE has loaded)
