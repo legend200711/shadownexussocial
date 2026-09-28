@@ -12361,10 +12361,9 @@ window.snxOpenTvLive = async function(creatorUid, liveId) {
   // Give UI a frame to settle, then open the live viewer
   setTimeout(async () => {
     try {
-      const [m, fs, live] = await Promise.all([
+      const [m, fs] = await Promise.all([
         import('./snx-creator-channels.js'),
         import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js'),
-        import('./snx-creator-live-viewer.js'),
       ]);
       const ch = await m.loadCreatorChannel(creatorUid);
       if (!ch) return;
@@ -12376,7 +12375,9 @@ window.snxOpenTvLive = async function(creatorUid, liveId) {
           if (snap.exists()) userData = snap.data();
         }
       } catch (_) {}
-      await live.openViewerLiveStage(window._snxCurrentUser, userData, ch, liveId);
+      // Route through the adapter — opens old working viewer
+      const { watchLive } = await import('./snx-live-adapter.js');
+      await watchLive(window._snxCurrentUser, userData, ch, liveId);
     } catch (err) {
       console.warn('[SNX TV] snxOpenTvLive deep-link error:', err.message);
     }
@@ -12836,32 +12837,21 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (overlay)  overlay.classList.remove('visible');
 
       if (!currentUser) {
-          // Not signed in — send to login then they come back to their channel
           if (typeof realmNavTo === 'function') realmNavTo('login');
           return;
       }
 
-      // Open the original Go Live setup overlay directly over the current page.
-      // This calls the same openHostLiveStage() that the My Channel "Go Live" button
-      // uses, so the full camera/mic setup → live stage → broadcast flow is identical.
-      // The resulting broadcast is registered in liveSessions / creatorChannels so it
-      // appears in 24-Hour TV → LIVE NOW automatically — no page navigation required.
+      // Navigate to the working live.html broadcast engine.
+      // live.html + live.js handles ALL camera/mic/WebRTC.
+      // live.js calls broadcastStarted() which writes creatorChannels status=live,
+      // so the host automatically appears in 24-Hour TV → LIVE NOW.
       try {
-          // Ensure the creator channel doc exists (idempotent — creates once then reuses)
-          const { ensureCreatorChannel } = await import('./snx-creator-channels.js');
-          const channel = await ensureCreatorChannel(currentUser);
-
-          // Load user profile data (displayName, avatar, username)
-          const userData = window._snxUserData || null;
-
-          // Open the live setup overlay immediately over the current page
-          const { openHostLiveStage } = await import('./snx-creator-live-viewer.js');
-          await openHostLiveStage(currentUser, userData, channel);
+          const { goLive } = await import('./snx-live-adapter.js');
+          goLive(currentUser);
       } catch (err) {
-          // Log the real exception so developers can diagnose the root cause.
-          // The user-facing message intentionally stays generic (no secrets/tokens exposed).
-          console.error('[goLiveOrWatch] Failed to open live setup:', err);
-          toastNotification('⚠️ Could not open live setup. Please try again.');
+          console.error('[goLiveOrWatch] Failed to navigate to live.html:', err);
+          // Fallback: navigate directly if adapter import fails
+          window.location.href = 'live.html';
       }
   };
 
@@ -13289,11 +13279,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       // ── Step 1: Creator Live cleanup — must happen before signOut so RTDB
       //    writes still have auth. Use a tight timeout so a stalled cleanup
       //    never blocks the sign-out.
+      // If the host is on live.html, the beforeunload handler there cleans up.
+      // This covers the case where they sign out without ending the broadcast.
       try {
-          const { getHostState, endCreatorBroadcast } = await import('./snx-creator-live.js');
-          if (getHostState() && !getHostState()?.endedFlag) {
+          const uid = currentUser?.uid;
+          if (uid) {
+              const { endActiveBroadcast } = await import('./snx-live-adapter.js');
               await Promise.race([
-                  endCreatorBroadcast(currentUser?.uid || ''),
+                  endActiveBroadcast(uid),
                   new Promise(r => setTimeout(r, 4000))   // 4 s hard cap
               ]);
           }
@@ -17071,12 +17064,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                   const _creatorUid = uid;
                   watchLiveAction = async () => {
                     try {
-                      const { ensureCreatorChannel } = await import('./snx-creator-channels.js');
-                      const _viewerUser    = window._snxCurrentUser;
-                      const _viewerData    = window._snxUserData || null;
-                      const _creatorCh     = await ensureCreatorChannel({ uid: _creatorUid });
-                      const { openViewerLiveStage } = await import('./snx-creator-live-viewer.js');
-                      await openViewerLiveStage(_viewerUser, _viewerData, _creatorCh, _liveId);
+                      const { loadCreatorChannel } = await import('./snx-creator-channels.js');
+                      const _viewerUser = window._snxCurrentUser;
+                      const _viewerData = window._snxUserData || null;
+                      const _creatorCh  = await loadCreatorChannel(_creatorUid);
+                      // Route through the adapter — opens old working viewer
+                      const { watchLive } = await import('./snx-live-adapter.js');
+                      await watchLive(_viewerUser, _viewerData, _creatorCh, _liveId);
                     } catch (_wlErr) {
                       console.error('[SNX Profile] Watch Live failed:', _wlErr);
                       if (typeof toastNotification === 'function') toastNotification('⚠️ Could not open live stream.');

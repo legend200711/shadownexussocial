@@ -694,19 +694,29 @@ export function getHostState()  { return _hostState; }
 export async function joinCreatorLive(user, liveId, videoEl, onEvent) {
   if (_viewerState && !_viewerState.leftFlag) await leaveCreatorLive();
 
-  // Load liveSessions doc to get RTDB room id
-  const sessionSnap = await getDoc(doc(db, 'liveSessions', liveId));
-  if (!sessionSnap.exists()) throw new Error('Live session not found');
-  const sessionData = sessionSnap.data();
-  if (sessionData.status !== 'live') throw new Error('This live has ended');
+  // Resolve liveId → rtdbRoomId.
+  // Two cases:
+  //   A) liveId is a liveSessions doc ID (overlay path via snx-creator-live.js)
+  //   B) liveId IS the rtdbRoomId directly (live.html bridge path — currentLiveId = rtdbRoomId)
+  let rtdbRoomId = null;
+  let roomData = null;
 
-  const rtdbRoomId = sessionData.rtdbRoomId;
-  if (!rtdbRoomId) throw new Error('No RTDB room id in session');
+  // Try case A first: look up liveSessions
+  const sessionSnap = await getDoc(doc(db, 'liveSessions', liveId)).catch(() => null);
+  if (sessionSnap && sessionSnap.exists()) {
+    const sessionData = sessionSnap.data();
+    if (sessionData.status !== 'live') throw new Error('This live has ended');
+    rtdbRoomId = sessionData.rtdbRoomId;
+    if (!rtdbRoomId) throw new Error('No RTDB room id in session');
+  } else {
+    // Case B: liveId may be the rtdbRoomId itself
+    rtdbRoomId = liveId;
+  }
 
   // Check RTDB room is still live
   const roomSnap = await get(ref(liveDB, `liveRooms/${rtdbRoomId}`));
   if (!roomSnap.exists()) throw new Error('Live room not found in RTDB');
-  const roomData = roomSnap.val();
+  roomData = roomSnap.val();
   if (!roomData.isLive) throw new Error('Live room is no longer active');
 
   _viewerState = {

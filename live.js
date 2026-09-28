@@ -314,7 +314,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   D.endedBackBtn && D.endedBackBtn.addEventListener('click', () => {
-    window.location.href = 'index.html';
+    // Requirement 12: after END LIVE the host returns to their Creator Channel.
+    // Do NOT logout, do NOT close the website.
+    // channel.html loads 24-Hour TV which includes MY CHANNEL tab.
+    window.location.href = 'channel.html';
   });
 
   document.getElementById('liveCloseBtn') &&
@@ -581,10 +584,13 @@ async function _startCreatorSetup(autostart = false) {
   // In autostart (iframe) mode the setup UI is hidden — live engine runs silently.
   if (!autostart && D.setup) D.setup.style.display = 'block';
 
-  // Pre-fill title when arriving from 24-Hour Studio Go Live
+  // Pre-fill title — check both the new adapter key and the legacy Studio key
   try {
-    const _studioTitle = localStorage.getItem('snx_studio_title');
-    if (_studioTitle && D.setupTitle) { D.setupTitle.value = _studioTitle; }
+    const _adapterTitle = localStorage.getItem('snx_live_title_prefill');
+    const _studioTitle  = localStorage.getItem('snx_studio_title');
+    const _prefill = _adapterTitle || _studioTitle;
+    if (_prefill && D.setupTitle) { D.setupTitle.value = _prefill; }
+    localStorage.removeItem('snx_live_title_prefill');
     localStorage.removeItem('snx_studio_title');
   } catch(_) {}
 
@@ -894,6 +900,23 @@ async function startLive() {
   try {
     await updateDoc(doc(_db, 'users', _user.uid), { isLive: true, liveRoomId: _roomId });
   } catch (_) {}
+
+  // ── Adapter bridge: notify the social layer that this broadcast is live.
+  //    broadcastStarted() writes creatorChannels status=live, currentLiveId=roomId
+  //    so the creator appears in Live Now / Creator Channel on the main website.
+  //    Fire-and-forget — the RTDB room and Live Hub work even if this write fails. ──
+  ;(async () => {
+    try {
+      const { broadcastStarted } = await import('./snx-live-adapter.js');
+      await broadcastStarted(_user.uid, _roomId, {
+        displayName: _userData?.displayName || _user.email?.split('@')[0] || 'Creator',
+        username:    _userData?.username || '',
+        avatar:      _userData?.avatar   || _userData?.profilePicture || null,
+      });
+    } catch (_bridgeErr) {
+      console.warn('[live.js] broadcastStarted bridge failed (non-critical):', _bridgeErr.message);
+    }
+  })();
 
   // ── RTDB users/{uid} presence: mark as live ──
   try {
@@ -1220,6 +1243,19 @@ async function endLive() {
 
   // ── Co-host cleanup (no-op if cohost.js is not loaded) ──
   if (typeof window._cohostCleanup === 'function') { try { window._cohostCleanup(); } catch(_){} }
+
+  // ── Adapter bridge: notify the social layer that the broadcast has ended.
+  //    broadcastEnded() clears creatorChannels so creator leaves Live Now. ──
+  if (_user) {
+    ;(async () => {
+      try {
+        const { broadcastEnded } = await import('./snx-live-adapter.js');
+        await broadcastEnded(_user.uid, _endedRoomId);
+      } catch (_bridgeErr) {
+        console.warn('[live.js] broadcastEnded bridge failed (non-critical):', _bridgeErr.message);
+      }
+    })();
+  }
 
   _showEndedOverlay(true);
 }

@@ -351,13 +351,17 @@ async function _cleanupHostStage(overlay, user, liveId, timerInterval, evtTypes,
   const { getHostState: ghs } = await import('./snx-creator-live.js');
   const peakViewers = ghs()?.peakViewers || 0;
 
-  console.log('[SNX LIVE] END_CONFIRMED — calling endCreatorBroadcast for uid:', user.uid);
+  // Note: live.js is the authoritative broadcast engine.
+  // If this cleanup path is reached (legacy snx-creator-live.js host path),
+  // end the broadcast via the adapter which handles creatorChannels offline.
+  console.log('[SNX LIVE] END_CONFIRMED — calling endActiveBroadcast for uid:', user.uid);
   try {
-    await endCreatorBroadcast(user.uid);
-    console.log('[SNX LIVE] END_CREATOR_BROADCAST_FINISHED — success');
+    const { endActiveBroadcast } = await import('./snx-live-adapter.js');
+    await endActiveBroadcast(user.uid);
+    console.log('[SNX LIVE] END_ACTIVE_BROADCAST_FINISHED — success');
   } catch (_endErr) {
-    console.error('[SNX LIVE] END_CREATOR_BROADCAST_FAILED:', _endErr);
-    // Still proceed to replay modal — broadcast engine logs the specific failure
+    console.error('[SNX LIVE] END_ACTIVE_BROADCAST_FAILED:', _endErr);
+    // Still proceed to replay modal
   }
 
   // Show "YOUR LIVE HAS ENDED" replay decision modal

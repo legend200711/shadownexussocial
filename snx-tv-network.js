@@ -123,8 +123,9 @@ export function initTvNetwork(user) {
           const snap = await gd(d(snsDb, 'users', user.uid));
           userData = snap.exists() ? snap.data() : null;
         } catch (_) {}
-        const live = await _getLiveModule();
-        await live.openViewerLiveStage(user, userData, ch, deepLiveId);
+        // Route through adapter — opens old working viewer
+        const { watchLive } = await import('./snx-live-adapter.js');
+        await watchLive(user, userData, ch, deepLiveId);
       } catch (e) { console.warn('[SNX TV] deep-link open failed:', e.message); }
     }, 600);
     _switchTab('live-now', true);
@@ -555,8 +556,9 @@ async function _openLiveNowCard(uid) {
     const snap = await gd(d(snsDb, 'users', _user.uid));
     userData = snap.exists() ? snap.data() : null;
   } catch (_) {}
-  const live = await _getLiveModule();
-  await live.openViewerLiveStage(_user, userData, ch, liveId);
+  // Route through adapter — opens old working viewer (live.html#watch=rtdbRoomId)
+  const { watchLive } = await import('./snx-live-adapter.js');
+  await watchLive(_user, userData, ch, liveId);
 }
 
 /* ════════════════════════════════════
@@ -746,17 +748,13 @@ function _renderMyChannelSection() {
     _showGoLiveDialog(ch);
   });
 
-  // Manage Live (watch own stream from MY CHANNEL)
-  document.getElementById('snx-tn-watch-own-live-btn')?.addEventListener('click', async () => {
+  // Manage Live — returns host to live.html (the working broadcast engine)
+  // The host is already live; this just navigates back to the live stage.
+  document.getElementById('snx-tn-watch-own-live-btn')?.addEventListener('click', () => {
     if (!ch.currentLiveId || !_user) return;
-    let userData = null;
-    try {
-      const { getDoc: gd, doc: d } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
-      const snap = await gd(d(snsDb, 'users', _user.uid));
-      userData = snap.exists() ? snap.data() : null;
-    } catch (_) {}
-    const live = await _getLiveModule();
-    await live.openHostLiveStage(_user, userData, ch);
+    // Open live.html — the host is already broadcasting there.
+    // live.html will detect the existing RTDB room and rejoin the creator stage.
+    window.open('live.html', '_blank', 'noopener');
   });
 
   // End Live
@@ -918,9 +916,9 @@ function _renderMyChannelInner(tab, ch, isLive) {
 }
 
 /* ════════════════════════════════════
-   GO LIVE — launches real live stage
+   GO LIVE — navigates to working live.html
 ════════════════════════════════════ */
-async function _showGoLiveDialog(ch) {
+function _showGoLiveDialog(ch) {
   if (!_user) { _toast('Sign in required'); return; }
   // Check the feature gate (mirrors live.html's check)
   try {
@@ -931,16 +929,14 @@ async function _showGoLiveDialog(ch) {
     }
   } catch (_) {}
 
-  // Load userData
-  let userData = null;
-  try {
-    const { getDoc: gd, doc: d } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
-    const snap = await gd(d(snsDb, 'users', _user.uid));
-    userData = snap.exists() ? snap.data() : null;
-  } catch (_) {}
-
-  const live = await _getLiveModule();
-  await live.openHostLiveStage(_user, userData, ch);
+  // Navigate to the working live.html broadcast engine.
+  // live.js handles ALL camera/mic/WebRTC and calls broadcastStarted()
+  // so the creator appears in Live Now automatically.
+  import('./snx-live-adapter.js').then(({ goLive }) => {
+    goLive(_user, ch?.channelName);
+  }).catch(() => {
+    window.location.href = 'live.html';
+  });
 }
 
 /* ════════════════════════════════════
@@ -984,8 +980,10 @@ async function _confirmEndLive(ch) {
     const btn = document.getElementById('snx-tn-end-live-confirm');
     btn.disabled = true; btn.textContent = 'Ending…';
     try {
-      const { endCreatorBroadcast } = await import('./snx-creator-live.js');
-      await endCreatorBroadcast(_user.uid);
+      // endActiveBroadcast: marks RTDB room ended + clears creatorChannels offline.
+      // This is the correct emergency path when live.html is not open.
+      const { endActiveBroadcast } = await import('./snx-live-adapter.js');
+      await endActiveBroadcast(_user.uid, ch?.currentLiveId || null);
       modal.remove();
       _toast('⚫ Broadcast ended.');
     } catch (err) {
@@ -1201,7 +1199,7 @@ function _renderChannelView(el, ch, profile, replays) {
   });
   document.getElementById('snx-tn-cv-handle')?.addEventListener('click', _openCreatorProfile);
 
-  // Watch live — open viewer stage
+  // Watch live — opens old working viewer via the adapter
   document.getElementById('snx-tn-watch-live-btn')?.addEventListener('click', async () => {
     const liveId = ch.currentLiveId;
     if (!liveId) { _toast('Stream not available'); return; }
@@ -1212,8 +1210,9 @@ function _renderChannelView(el, ch, profile, replays) {
       const snap = await gd(d(snsDb, 'users', _user.uid));
       userData = snap.exists() ? snap.data() : null;
     } catch (_) {}
-    const live = await _getLiveModule();
-    await live.openViewerLiveStage(_user, userData, ch, liveId);
+    // Route through adapter — opens live.html#watch=rtdbRoomId (old working viewer)
+    const { watchLive } = await import('./snx-live-adapter.js');
+    await watchLive(_user, userData, ch, liveId);
   });
 
   // Follow area
@@ -1317,8 +1316,8 @@ function _renderViewerInner(tab, ch, replays) {
           const snap = await gd(d(snsDb, 'users', _user.uid));
           userData = snap.exists() ? snap.data() : null;
         } catch (_) {}
-        const live = await _getLiveModule();
-        await live.openViewerLiveStage(_user, userData, ch, liveId);
+        const { watchLive } = await import('./snx-live-adapter.js');
+        await watchLive(_user, userData, ch, liveId);
       });
     }
     _wireReplayPlayerOpen(content, ch.ownerUid, false);
