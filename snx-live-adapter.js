@@ -70,10 +70,14 @@ const _CFG = {
   appId:             '1:933810617818:web:efb24f123337dd987c14e3',
 };
 const _app = getApps().find(a => a.name === '[DEFAULT]') || initializeApp(_CFG);
+// IMPORTANT: live.js (live.html) already called getFirestore(_app) before this module
+// is dynamically imported.  initializeFirestore() throws "already started" in that case
+// — catch it and fall back to getFirestore() which returns the identical instance.
 let _db;
 try { _db = initializeFirestore(_app, { localCache: memoryLocalCache() }); }
-catch (_) { _db = getFirestore(_app); }
+catch (_initErr) { _db = getFirestore(_app); }
 const _rtdb = getDatabase(_app);
+console.log('[LIVE-BRIDGE] ADAPTER MODULE LOADED — Firebase project: horr-a08f4, Firestore instance:', _db ? '[DEFAULT]' : 'MISSING');
 
 /* ══════════════════════════════════════════════════════════════
    GO LIVE
@@ -208,10 +212,12 @@ export async function broadcastStarted(uid, roomId, meta = {}) {
     return;
   }
 
-  console.log('[LIVE-BRIDGE] START — uid:', uid, 'roomId:', roomId);
+  console.log('[LIVE-BRIDGE] BROADCAST_STARTED ENTRY — uid:', uid, 'roomId:', roomId);
   console.log('[LIVE-BRIDGE] UID:', uid);
   console.log('[LIVE-BRIDGE] ROOM_ID:', roomId);
-  console.log('[LIVE-BRIDGE] Firebase project: horr-a08f4 (creatorChannels)');
+  console.log('[LIVE-BRIDGE] ADAPTER_FIRESTORE_PROJECT: horr-a08f4');
+  console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_PATH: creatorChannels/' + uid);
+  console.log('[LIVE-BRIDGE] FIRESTORE_INSTANCE:', _db ? '[DEFAULT] horr-a08f4' : 'MISSING — this will fail');
 
   const chData = {
     status:           'live',
@@ -220,14 +226,17 @@ export async function broadcastStarted(uid, roomId, meta = {}) {
     updatedAt:        serverTimestamp(),
   };
 
-  console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_START — creatorChannels/', uid);
+  console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_READ_START — getDoc creatorChannels/' + uid);
   try {
     const chRef = doc(_db, 'creatorChannels', uid);
     const snap  = await getDoc(chRef);
+    console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_READ — exists:', snap.exists(), 'current status:', snap.exists() ? snap.data().status : 'N/A');
+    console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_START — writing status:live currentLiveId:', roomId);
     if (snap.exists()) {
       await updateDoc(chRef, chData);
     } else {
       // First-time: create a minimal channel doc
+      console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_CREATE — first-time creator, using setDoc');
       await setDoc(chRef, {
         ownerUid:      uid,
         channelName:   meta.displayName || 'Creator',
@@ -236,9 +245,14 @@ export async function broadcastStarted(uid, roomId, meta = {}) {
         ...chData,
       });
     }
-    console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_SUCCESS — status:live, currentLiveId:', roomId);
+    console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_SUCCESS — status:live currentLiveId:', roomId);
   } catch (err) {
-    console.error('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_FAILED — code:', err.code, '— message:', err.message, '— full error:', err);
+    console.error('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_FAILED',
+      '\n  code:', err.code,
+      '\n  message:', err.message,
+      '\n  Firebase project: horr-a08f4',
+      '\n  document path: creatorChannels/' + uid,
+      '\n  full error:', err);
     // Re-throw so callers know it failed — silent failure is what caused the invisibility bug
     throw err;
   }
@@ -256,7 +270,8 @@ export async function broadcastEnded(uid, roomId) {
     console.error('[LIVE-BRIDGE] broadcastEnded called with no uid');
     return;
   }
-  console.log('[LIVE-BRIDGE] ADAPTER_OFFLINE_START — uid:', uid, 'roomId:', roomId);
+  console.log('[LIVE-BRIDGE] OFFLINE_WRITE_START (adapter) — uid:', uid, 'roomId:', roomId);
+  console.log('[LIVE-BRIDGE] FIRESTORE_INSTANCE (ended):', _db ? '[DEFAULT] horr-a08f4' : 'MISSING');
 
   try {
     await updateDoc(doc(_db, 'creatorChannels', uid), {
@@ -265,9 +280,14 @@ export async function broadcastEnded(uid, roomId) {
       currentStartedAt: null,
       updatedAt:        serverTimestamp(),
     });
-    console.log('[LIVE-BRIDGE] ADAPTER_OFFLINE_DONE — creatorChannels status:offline ✓');
+    console.log('[LIVE-BRIDGE] OFFLINE_WRITE_SUCCESS — creatorChannels status:offline ✓');
   } catch (err) {
-    console.error('[LIVE-BRIDGE] ADAPTER_OFFLINE_FAILED — code:', err.code, '— message:', err.message, '— full error:', err);
+    console.error('[LIVE-BRIDGE] OFFLINE_WRITE_FAILED',
+      '\n  code:', err.code,
+      '\n  message:', err.message,
+      '\n  Firebase project: horr-a08f4',
+      '\n  document path: creatorChannels/' + uid,
+      '\n  full error:', err);
     throw err;
   }
 }

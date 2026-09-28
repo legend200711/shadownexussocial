@@ -53,6 +53,8 @@
 <link rel="stylesheet" href="mobile.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Studio — Music Library / Upload / Playlists / Queue ── -->
 <link rel="stylesheet" href="studio.css?v=SNS-2026-MH-FOUNDER-002">
+<!-- ── Shadow Nexus Music Hub 2.0 ── -->
+<link rel="stylesheet" href="snx-music-hub.css?v=SNS-2026-MH2-001">
 <!-- ── Nexus Global Theme Engine ── -->
 <link rel="stylesheet" href="theme-engine.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Cinematic Welcome Experience ── -->
@@ -11376,6 +11378,247 @@ body.arcade-fs-ios body::after { display:none !important; }
 
  </div><!-- end Now Playing tab -->
 
+  <!-- ══════════════════════════════════════════════════════
+       MUSIC HUB 2.0 LAYER
+       Rendered on top of / alongside the legacy studio tabs.
+       MH2 initialises when studioPage opens and provides the
+       full R2 + Supabase storage-router player experience.
+  ═══════════════════════════════════════════════════════ -->
+  <div id="snxMH2Wrapper" style="display:none;">
+    <div id="snxMH2Container">
+
+      <!-- ══ HEADER ══ -->
+      <header class="mh2-header">
+        <div class="mh2-header-eyebrow">SHADOW NEXUS SOCIAL</div>
+        <div class="mh2-header-title">
+          MUSIC HUB
+          <span class="mh2-header-eq" id="snxMH2HeaderEQ" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span>
+          </span>
+        </div>
+        <div class="mh2-header-sub">MUSIC NEVER SLEEPS</div>
+      </header>
+
+      <!-- ══ PRIMARY NAV ══ -->
+      <nav class="mh2-tab-bar" role="tablist" aria-label="Music Hub navigation">
+        <button class="mh2-tab-btn active" id="snxMH2TabBtn_home"      onclick="snxMH2SwitchTab('home')"      role="tab" aria-selected="true">HOME</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_library"   onclick="snxMH2SwitchTab('library')"   role="tab" aria-selected="false">LIBRARY</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_playlists" onclick="snxMH2SwitchTab('playlists')" role="tab" aria-selected="false">PLAYLISTS</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_radio"     onclick="snxMH2SwitchTab('radio')"     role="tab" aria-selected="false">RADIO</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_queue"     onclick="snxMH2SwitchTab('queue')"     role="tab" aria-selected="false">QUEUE</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_playing"   onclick="snxMH2SwitchTab('playing')"   role="tab" aria-selected="false">NOW PLAYING</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_upload"    onclick="snxMH2SwitchTab('upload')"    role="tab" aria-selected="false" style="display:none;">UPLOAD</button>
+      </nav>
+
+      <!-- ══════════════════════════════════════════
+           HOME TAB
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_home">
+
+        <!-- NEXUS PLAYER CORE — Now Playing card -->
+        <div class="mh2-home-section" style="padding-top:2px;">
+          <div class="mh2-nexus-player-card" id="snxMH2NPCard" onclick="snxMH2SwitchTab('playing')" role="button" tabindex="0" aria-label="Open full player">
+            <!-- Blurred art glow (set by JS when track plays) -->
+            <div class="mh2-npc-art-glow" id="snxMH2NPArtGlow"></div>
+            <!-- Empty state -->
+            <div id="snxMH2NPEmpty" class="mh2-npc-empty">
+              <div class="mh2-npc-empty-icon">&#127925;</div>
+              <div class="mh2-npc-empty-label">Nothing playing yet</div>
+              <button class="mh2-npc-browse-btn" onclick="event.stopPropagation();snxMH2SwitchTab('library')" aria-label="Browse library">BROWSE LIBRARY</button>
+            </div>
+            <!-- Active now-playing state -->
+            <div id="snxMH2NPActive" class="mh2-npc-active" style="display:none;">
+              <div class="mh2-npc-cover" id="snxMH2NPCover">
+                <div class="mh2-art-fallback"><span class="mh2-art-fallback-icon">&#9835;</span></div>
+              </div>
+              <div class="mh2-npc-meta">
+                <div class="mh2-npc-label">NOW PLAYING</div>
+                <div class="mh2-npc-title" id="snxMH2NPTitle">Track Title</div>
+                <div class="mh2-npc-artist" id="snxMH2NPArtist"></div>
+                <div class="mh2-npc-eq" id="snxMH2NPEq" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span><span></span>
+                </div>
+              </div>
+              <button class="mh2-npc-open" onclick="event.stopPropagation();snxMH2SwitchTab('playing')" aria-label="Open full player">&#8599;</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SHADOW NEXUS RADIO REALM -->
+        <div class="mh2-home-section">
+          <div class="mh2-section-header">
+            <span class="mh2-section-title">&#128251; SHADOW NEXUS RADIO</span>
+          </div>
+          <div class="mh2-radio-realm">
+            <div class="mh2-radio-realm-inner">
+              <div class="mh2-radio-icon-wrap" aria-hidden="true">&#128251;</div>
+              <div class="mh2-radio-realm-info">
+                <div class="mh2-radio-realm-title">SHADOW NEXUS RADIO</div>
+                <div class="mh2-radio-realm-sub">24-HOUR SOUND REALM</div>
+                <div class="mh2-radio-air">
+                  <div class="mh2-radio-dot" id="snxMH2HomeDot"></div>
+                  <span id="snxMH2HomeAirLabel">OFF AIR</span>
+                </div>
+              </div>
+              <button class="mh2-radio-btn-sm" id="snxMH2HomeRadioBtn" onclick="snxMH2SwitchTab('radio')" aria-label="Enter radio">ENTER RADIO</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MUSIC REALMS -->
+        <div class="mh2-home-section">
+          <div class="mh2-section-header">
+            <span class="mh2-section-title">&#9889; MUSIC REALMS</span>
+          </div>
+          <div class="mh2-realms-scroll" id="snxMH2RealmsScroll" role="list" aria-label="Music realms">
+            <div class="mh2-realm-pill active" data-realm="all" onclick="snxMH2FilterRealm('all')" role="listitem" tabindex="0">
+              <span class="mh2-realm-icon">&#127758;</span>
+              <div class="mh2-realm-name">ALL</div>
+              <div class="mh2-realm-genre">Everything</div>
+            </div>
+            <div class="mh2-realm-pill" data-realm="rock" onclick="snxMH2FilterRealm('rock')" role="listitem" tabindex="0">
+              <span class="mh2-realm-icon">&#9889;</span>
+              <div class="mh2-realm-name">VOLT REALM</div>
+              <div class="mh2-realm-genre">Rock / Metal</div>
+            </div>
+            <div class="mh2-realm-pill" data-realm="dark" onclick="snxMH2FilterRealm('dark')" role="listitem" tabindex="0">
+              <span class="mh2-realm-icon">&#127761;</span>
+              <div class="mh2-realm-name">MIDNIGHT</div>
+              <div class="mh2-realm-genre">Dark / Emotional</div>
+            </div>
+            <div class="mh2-realm-pill" data-realm="hiphop" onclick="snxMH2FilterRealm('hiphop')" role="listitem" tabindex="0">
+              <span class="mh2-realm-icon">&#128293;</span>
+              <div class="mh2-realm-name">INFERNO</div>
+              <div class="mh2-realm-genre">Rap / Hip-Hop</div>
+            </div>
+            <div class="mh2-realm-pill" data-realm="chill" onclick="snxMH2FilterRealm('chill')" role="listitem" tabindex="0">
+              <span class="mh2-realm-icon">&#127756;</span>
+              <div class="mh2-realm-name">ECHO REALM</div>
+              <div class="mh2-realm-genre">Chill / Atmospheric</div>
+            </div>
+            <div class="mh2-realm-pill" data-realm="beats" onclick="snxMH2FilterRealm('beats')" role="listitem" tabindex="0">
+              <span class="mh2-realm-icon">&#127897;</span>
+              <div class="mh2-realm-name">BEAT FORGE</div>
+              <div class="mh2-realm-genre">Beats / Instrumentals</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FEATURED IN THE NEXUS -->
+        <div class="mh2-home-section">
+          <div class="mh2-section-header">
+            <span class="mh2-section-title">&#11088; FEATURED IN THE NEXUS</span>
+          </div>
+          <div id="snxMH2FeaturedList">
+            <div class="mh2-empty"><span class="mh2-empty-icon">&#11088;</span>No featured tracks yet.</div>
+          </div>
+        </div>
+
+        <!-- PLAYLIST UNIVERSE -->
+        <div class="mh2-home-section">
+          <div class="mh2-section-header">
+            <span class="mh2-section-title">&#127756; PLAYLIST UNIVERSE</span>
+            <button class="mh2-section-see-all" onclick="snxMH2SwitchTab('playlists')" aria-label="View all playlists">View all</button>
+          </div>
+          <div class="mh2-pl-scroll" id="snxMH2HomePlaylistScroll" aria-label="Playlists">
+            <!-- populated by JS -->
+          </div>
+        </div>
+
+        <!-- RECENTLY ADDED -->
+        <div class="mh2-home-section">
+          <div class="mh2-section-header">
+            <span class="mh2-section-title">&#128336; RECENTLY ADDED</span>
+            <button class="mh2-section-see-all" onclick="snxMH2SwitchTab('library')" aria-label="View full library">See all</button>
+          </div>
+          <div id="snxMH2RecentList"></div>
+        </div>
+
+        <!-- FOUNDER MUSIC MANAGEMENT (founder only, hidden for listeners) -->
+        <div id="snxMH2MgmtSection" style="display:none; margin-bottom:20px;">
+          <div class="mh2-mgmt-toggle" id="snxMH2MgmtToggle" onclick="snxMH2ToggleMgmt()" role="button" tabindex="0" aria-expanded="false" aria-controls="snxMH2MgmtPanel">
+            <span aria-hidden="true">&#128081;</span>
+            <span class="mh2-mgmt-toggle-label">MUSIC MANAGEMENT</span>
+            <span class="mh2-mgmt-toggle-arrow" aria-hidden="true">&#8964;</span>
+          </div>
+          <div class="mh2-mgmt-panel" id="snxMH2MgmtPanel" role="region" aria-label="Music management">
+            <div class="mh2-mgmt-grid">
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('upload')" aria-label="Upload music">&#11014; Upload Music</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('library')" aria-label="Manage library">&#127925; Manage Library</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('playlists')" aria-label="Manage playlists">&#128203; Manage Playlists</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('radio')" aria-label="Radio control">&#128251; Radio Control</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('queue')" aria-label="View queue">&#127926; Queue</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2RefreshStorageHealth()" aria-label="Storage health">&#128276; Storage Health</button>
+            </div>
+            <div id="snxMH2StorageHealth" style="margin-top:12px;"></div>
+          </div>
+        </div>
+
+      </div><!-- end home tab -->
+
+      <!-- ══════════════════════════════════════════
+           LIBRARY TAB
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_library" style="display:none;" role="tabpanel" aria-label="Library">
+        <div class="mh2-lib-toolbar">
+          <input type="search" class="mh2-lib-search" placeholder="&#128269; Search the Nexus…"
+            oninput="snxMH2LibSearch(this.value)" id="snxMH2LibSearchInput" aria-label="Search music">
+          <select class="mh2-lib-filter" onchange="snxMH2LibFilter(this.value)" aria-label="Filter by provider">
+            <option value="all">All Tracks</option>
+            <option value="cloudflare">&#9729; Cloudflare R2</option>
+            <option value="supabase">&#9670; Supabase</option>
+            <option value="legacy">Legacy</option>
+          </select>
+          <span class="mh2-lib-count" id="snxMH2LibCount" aria-live="polite">0 tracks</span>
+        </div>
+        <div id="snxMH2LibraryList"></div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           PLAYLISTS TAB
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_playlists" style="display:none;" role="tabpanel" aria-label="Playlists">
+        <div class="mh2-pl-toolbar">
+          <button class="mh2-pl-create-btn" id="snxMH2CreatePlBtn" onclick="snxMH2CreatePlaylist()" style="display:none;" aria-label="Create new playlist">+ NEW PLAYLIST</button>
+        </div>
+        <div class="mh2-pl-grid" id="snxMH2PlaylistGrid" role="list" aria-label="Playlists"></div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           RADIO TAB
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_radio" style="display:none;" role="tabpanel" aria-label="Radio"></div>
+
+      <!-- ══════════════════════════════════════════
+           QUEUE TAB
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_queue" style="display:none;" role="tabpanel" aria-label="Queue">
+        <div class="mh2-queue-toolbar">
+          <span class="mh2-queue-label">ACTIVE QUEUE</span>
+          <button class="mh2-queue-clear-btn" onclick="snxMH2QueueClear()" aria-label="Clear queue">&#10005; Clear All</button>
+        </div>
+        <div id="snxMH2QueueList"></div>
+      </div>
+
+      <!-- ══════════════════════════════════════════
+           PLAYING TAB (Nexus Player Full Screen)
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_playing" style="display:none;" role="tabpanel" aria-label="Now Playing"></div>
+
+      <!-- ══════════════════════════════════════════
+           UPLOAD TAB (founder only)
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_upload" style="display:none;" role="tabpanel" aria-label="Upload Music">
+        <div id="snxMH2UploadForm"></div>
+      </div>
+
+    </div><!-- end snxMH2Container -->
+
+    <!-- Persistent Nexus Player Bar — ONE audio engine, fixed above bottom nav -->
+    <div id="snxMH2PlayerBar" role="region" aria-label="Now playing controls"></div>
+
+  </div><!-- end snxMH2Wrapper -->
+
 </div><!-- end studioPage -->
 
 <!-- ████████████████████████████████████████████████████████
@@ -22169,6 +22412,25 @@ function navTo(pageId) {
         if (typeof window.snxNexusInit === 'function') window.snxNexusInit();
         if (typeof window.snxStudioInit === 'function') window.snxStudioInit();
     }
+    // Initialize Music Hub 2.0 on studioPage — on-demand, isolated from other pages
+    if (pageId === 'studioPage') {
+        var mh2Wrapper = document.getElementById('snxMH2Wrapper');
+        if (mh2Wrapper) {
+            // Hide old studio tabs, show MH2 (progressive replacement)
+            ['snxStudioTab_home','snxStudioTab_music','snxStudioTab_upload',
+             'snxStudioTab_playlists','snxStudioTab_queue','snxStudioTab_nowplaying',
+             'snxStudioTabBar','snxMHHeader'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el) el.style.display = 'none';
+            });
+            mh2Wrapper.style.display = '';
+            if (typeof window.snxMH2Init === 'function') window.snxMH2Init();
+        }
+    }
+    // Stop Music Hub 2.0 audio when leaving studio
+    if (pageId !== 'studioPage' && typeof window.snxMH2Stop === 'function') {
+        window.snxMH2Stop();
+    }
     // Initialize Global Search when search page opens
     if (pageId === 'searchPage') {
         if (typeof window._snxUpgradeSearchOpen === 'function') window._snxUpgradeSearchOpen();
@@ -25821,6 +26083,11 @@ function _supportStopCanvas() {
 
 <!-- ── Shadow Nexus 24-Hour Studio — Music Library, Upload, Playlists, Queue ── -->
 <script src="studio.js?v=SNS-2026-MH-FOUNDER-002"></script>
+
+<!-- ── Music Hub 2.0: Storage Router (loads before snx-music-hub.js) ── -->
+<script src="snx-music-storage.js?v=SNS-2026-MH2-001"></script>
+<!-- ── Music Hub 2.0: Main Module ── -->
+<script src="snx-music-hub.js?v=SNS-2026-MH2-001"></script>
 
 <!-- ── Shadow Nexus NEXUS — channel discovery and management ── -->
 <script src="nexus.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>

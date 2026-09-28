@@ -1203,6 +1203,161 @@ async function handleR2Delete(request, env, cors, sec) {
   }
 }
 
+// ── POST /supabase-upload ─────────────────────────────────────────────────────
+// Proxies an authenticated music upload to Supabase Storage.
+// The Supabase service-role key lives ONLY here in the Worker — never in the browser.
+// Auth: requires valid Firebase ID token (Bearer).
+// FormData fields: file, path (storage key), bucket (optional, default: snx-music)
+async function handleSupabaseUpload(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  // Verify Firebase identity
+  let verifiedUid;
+  try { verifiedUid = await _requireAuth(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  // Supabase service-role key required
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+    return new Response(JSON.stringify({ error: 'Supabase not configured on this Worker (set SUPABASE_URL and SUPABASE_SERVICE_KEY secrets)' }), {
+      status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  let formData;
+  try { formData = await request.formData(); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid form data: ' + e.message }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  const file   = formData.get('file');
+  const bucket = (formData.get('bucket') || 'snx-music').replace(/[^a-zA-Z0-9_-]/g, '');
+  let   key    = (formData.get('path')   || '').replace(/\.\./g, '').trim();
+
+  if (!file || typeof file === 'string') {
+    return new Response(JSON.stringify({ error: 'No file received' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  // Validate path ownership
+  if (!key || !key.startsWith(`music/${verifiedUid}/`)) {
+    key = `music/${verifiedUid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${(file.name.split('.').pop()||'mp3').toLowerCase()}`;
+  }
+
+  // MIME + size check
+  let mime = file.type || 'application/octet-stream';
+  const extMime = mimeFromExt(file.name);
+  if ((!mime || mime === 'application/octet-stream') && extMime) mime = extMime;
+  const cleanMime = mime.split(';')[0].trim();
+
+  const buffer = await file.arrayBuffer();
+  const sizeLimit = cleanMime.startsWith('image/') ? MAX_SIZE_IMAGE : MAX_SIZE_AUDIO;
+  if (buffer.byteLength > sizeLimit) {
+    return new Response(JSON.stringify({ error: `File too large (max ${Math.round(sizeLimit/1024/1024)} MB)` }), {
+      status: 413, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  // Upload to Supabase Storage using service-role key
+  const supabaseUploadUrl = `${env.SUPABASE_URL}/storage/v1/object/${bucket}/${key}`;
+  let sbRes;
+  try {
+    sbRes = await fetch(supabaseUploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization':  `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+        'Content-Type':   cleanMime,
+        'x-upsert':       'false',
+      },
+      body: buffer
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Supabase upload failed: ' + e.message }), {
+      status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  if (!sbRes.ok) {
+    let detail = '(no details)';
+    try { const d = await sbRes.json(); detail = d.message || d.error || JSON.stringify(d); } catch(_) {}
+    return new Response(JSON.stringify({ error: `Supabase upload failed (HTTP ${sbRes.status}): ${detail}` }), {
+      status: sbRes.status >= 500 ? 502 : sbRes.status,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  const publicUrl = `${env.SUPABASE_URL}/storage/v1/object/public/${bucket}/${key}`;
+  return new Response(JSON.stringify({ url: publicUrl, key }), {
+    status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+  });
+}
+
+// ── POST /supabase-delete ─────────────────────────────────────────────────────
+// Deletes an object from Supabase Storage.
+// Auth: requires valid Firebase ID token (Bearer).
+// Body JSON: { key, bucket }
+async function handleSupabaseDelete(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  let verifiedUid;
+  try { verifiedUid = await _requireAuth(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
+    return new Response(JSON.stringify({ error: 'Supabase not configured' }), {
+      status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  let body;
+  try { body = await request.json(); } catch (_) { body = {}; }
+  const key    = (body.key    || '').replace(/\.\./g, '');
+  const bucket = (body.bucket || 'snx-music').replace(/[^a-zA-Z0-9_-]/g, '');
+
+  if (!key.startsWith(`music/${verifiedUid}/`)) {
+    return new Response(JSON.stringify({ error: 'Forbidden: key does not belong to your account' }), {
+      status: 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  const delUrl = `${env.SUPABASE_URL}/storage/v1/object/${bucket}/${key}`;
+  try {
+    const res = await fetch(delUrl, {
+      method:  'DELETE',
+      headers: { 'Authorization': `Bearer ${env.SUPABASE_SERVICE_KEY}` }
+    });
+    if (!res.ok && res.status !== 404) {
+      return new Response(JSON.stringify({ error: 'Supabase delete failed (HTTP ' + res.status + ')' }), {
+        status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+      });
+    }
+    return new Response(JSON.stringify({ deleted: true, key }), {
+      status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Supabase delete failed: ' + e.message }), {
+      status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+}
 
 
 // ── Admin endpoints ──
@@ -1216,6 +1371,10 @@ async function handleR2Delete(request, env, cors, sec) {
     // ── Chunked / resumable upload endpoints ──
     if (url.pathname === '/upload-chunk')    return handleUploadChunk(request, env, cors, sec);
     if (url.pathname === '/upload-complete') return handleUploadComplete(request, env, cors, sec);
+
+    // ── Supabase proxy endpoints (Music Hub 2.0) ──
+    if (url.pathname === '/supabase-upload') return handleSupabaseUpload(request, env, cors, sec);
+    if (url.pathname === '/supabase-delete') return handleSupabaseDelete(request, env, cors, sec);
 
     // ── POST /upload-music | /upload-artwork | /upload-theme ─────────────────
     // Shared handler for audio, artwork, and theme background uploads.

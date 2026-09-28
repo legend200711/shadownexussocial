@@ -1009,18 +1009,35 @@ async function startLive() {
   //    Fire-and-forget — the RTDB room and Live Hub work even if this write fails.
   //    All errors are now surfaced (no silent catch) so root cause is visible in console. ──
   ;(async () => {
-    console.log('[LIVE-BRIDGE] BRIDGE CALL START — uid:', _user.uid, 'roomId:', _roomId);
+    console.log('[LIVE-BRIDGE] IMPORT_START — importing snx-live-adapter.js');
+    console.log('[LIVE-BRIDGE] UID:', _user.uid);
+    console.log('[LIVE-BRIDGE] ROOM_ID:', _roomId);
+    let _adapterMod;
     try {
-      const { broadcastStarted } = await import('./snx-live-adapter.js');
+      _adapterMod = await import('./snx-live-adapter.js');
+      console.log('[LIVE-BRIDGE] IMPORT_SUCCESS — adapter module loaded');
+    } catch (_importErr) {
+      console.error('[LIVE-BRIDGE] IMPORT_FAILED — could not load snx-live-adapter.js',
+        'code:', _importErr.code, 'message:', _importErr.message, _importErr);
+      return;
+    }
+    try {
+      const { broadcastStarted } = _adapterMod;
+      console.log('[LIVE-BRIDGE] BROADCAST_STARTED_CALL — uid:', _user.uid, 'roomId:', _roomId);
       await broadcastStarted(_user.uid, _roomId, {
         displayName: _userData?.displayName || _user.email?.split('@')[0] || 'Creator',
         username:    _userData?.username || '',
         avatar:      _userData?.avatar   || _userData?.profilePicture || null,
       });
-      console.log('[LIVE-BRIDGE] BRIDGE CALL SUCCESS — creator now visible in Live Now');
+      console.log('[LIVE-BRIDGE] BROADCAST_STARTED_SUCCESS — creatorChannels status:live currentLiveId:', _roomId);
+      console.log('[LIVE-BRIDGE] CREATOR NOW VISIBLE IN LIVE NOW');
     } catch (_bridgeErr) {
-      console.error('[LIVE-BRIDGE] BRIDGE CALL FAILED — creator will NOT appear in Live Now until fixed!',
-        'code:', _bridgeErr.code, 'message:', _bridgeErr.message, _bridgeErr);
+      console.error('[LIVE-BRIDGE] BROADCAST_STARTED_FAILED — creator will NOT appear in Live Now!',
+        '\n  code:', _bridgeErr.code,
+        '\n  message:', _bridgeErr.message,
+        '\n  Firebase project: horr-a08f4',
+        '\n  document path: creatorChannels/' + _user.uid,
+        '\n  full error:', _bridgeErr);
     }
   })();
 
@@ -1424,12 +1441,19 @@ async function endLive() {
   //    CRITICAL: this is awaited (not fire-and-forget) so the creator channel is guaranteed
   //    offline BEFORE the ended overlay is shown. Failure is logged, not silently swallowed. ──
   console.log('[END-LIVE] ADAPTER_OFFLINE_START — clearing creatorChannels');
+  console.log('[LIVE-BRIDGE] BROADCAST_ENDED_CALL — uid:', _user?.uid, 'endedRoomId:', _endedRoomId);
   if (_user) {
     try {
+      console.log('[LIVE-BRIDGE] OFFLINE_WRITE_START — importing adapter');
       const { broadcastEnded } = await import('./snx-live-adapter.js');
       await broadcastEnded(_user.uid, _endedRoomId);
+      console.log('[LIVE-BRIDGE] OFFLINE_WRITE_SUCCESS — creatorChannels status:offline ✓');
       console.log('[END-LIVE] ADAPTER_OFFLINE_DONE — creatorChannels status:offline ✓');
     } catch (_bridgeErr) {
+      console.error('[LIVE-BRIDGE] OFFLINE_WRITE_FAILED — creator may still appear in Live Now!',
+        '\n  code:', _bridgeErr.code,
+        '\n  message:', _bridgeErr.message,
+        '\n  document path: creatorChannels/' + _user.uid);
       console.error('[END-LIVE] ADAPTER_OFFLINE_FAILED — creator may still appear in Live Now!',
         'code:', _bridgeErr.code, 'message:', _bridgeErr.message);
       // Best-effort fallback: try direct Firestore write without the adapter module overhead

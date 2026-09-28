@@ -1,0 +1,1458 @@
+/*
+ * snx-music-hub.css — Shadow Nexus Music Realm 3.0
+ *
+ * Shadow Nexus design language:
+ *   BLACK     : #02040a, #071428
+ *   DEEP BLUE : #0B1F3A, #0a1c35
+ *   ELEC BLUE : #00AEEF, #33c8ff
+ *   NEON GREEN: #39ff14
+ *   SURFACE   : rgba(7,20,40,0.92)
+ *   GLASS     : rgba(10,28,55,0.78)
+ *
+ * Mobile-first. One audio engine. Zero duplicate players.
+ */
+
+/* ════════════════════════════════════════════════════════
+   PAGE SHELL
+════════════════════════════════════════════════════════ */
+#snxMH2Wrapper {
+  --mh-bg:         #02040a;
+  --mh-surface:    rgba(7,20,40,0.92);
+  --mh-glass:      rgba(10,28,55,0.78);
+  --mh-border:     rgba(0,174,239,0.18);
+  --mh-border-hi:  rgba(0,174,239,0.45);
+  --mh-blue:       #00AEEF;
+  --mh-green:      #39ff14;
+  --mh-text:       #d8eeff;
+  --mh-muted:      #4a7a9a;
+  --mh-dim:        #5a90b8;
+  --mh-danger:     #ff3355;
+}
+
+#snxMH2Container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  padding-bottom: 160px; /* player bar + bottom nav clearance */
+}
+
+/* ════════════════════════════════════════════════════════
+   LIVING BACKGROUND HAZE
+   Very subtle — music atmosphere without performance cost
+════════════════════════════════════════════════════════ */
+#snxMH2Container::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 20%, rgba(0,80,180,0.07) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 80%, rgba(57,255,20,0.04) 0%, transparent 65%);
+}
+#snxMH2Container > * { position: relative; z-index: 1; }
+
+/* ════════════════════════════════════════════════════════
+   HEADER — SHADOW NEXUS MUSIC REALM
+════════════════════════════════════════════════════════ */
+.mh2-header {
+  background: linear-gradient(160deg, rgba(2,4,14,0.96) 0%, rgba(7,20,40,0.97) 60%, rgba(3,8,22,0.98) 100%);
+  border-bottom: 1px solid var(--mh-border);
+  padding: 20px 16px 16px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.mh2-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 100% 120% at 50% -10%, rgba(0,174,239,0.13) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 80% at 10% 50%, rgba(0,80,200,0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 30% 80% at 90% 50%, rgba(57,255,20,0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+/* Subtle waveform lines in header */
+.mh2-header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(0,174,239,0.6) 20%,
+    rgba(57,255,20,0.4) 50%,
+    rgba(0,174,239,0.6) 80%,
+    transparent 100%
+  );
+}
+.mh2-header-eyebrow {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: var(--mh-green);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin: 0 0 6px;
+  opacity: 0.8;
+}
+.mh2-header-title {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 0 24px rgba(0,174,239,0.65), 0 0 60px rgba(0,174,239,0.2);
+  margin: 0 0 4px;
+  line-height: 1.1;
+}
+.mh2-header-sub {
+  font-size: 10px;
+  color: var(--mh-muted);
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+}
+/* Header EQ bars — decorative only */
+.mh2-header-eq {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 14px;
+  vertical-align: middle;
+}
+.mh2-header-eq span {
+  display: block;
+  width: 2px;
+  background: var(--mh-blue);
+  border-radius: 1px;
+  opacity: 0.6;
+  animation: mh2-eq 0.9s ease-in-out infinite alternate;
+}
+.mh2-header-eq span:nth-child(1){ height:40%;  animation-delay:0s; }
+.mh2-header-eq span:nth-child(2){ height:80%;  animation-delay:0.12s; }
+.mh2-header-eq span:nth-child(3){ height:100%; animation-delay:0.24s; }
+.mh2-header-eq span:nth-child(4){ height:60%;  animation-delay:0.36s; }
+.mh2-header-eq span:nth-child(5){ height:90%;  animation-delay:0.48s; }
+@keyframes mh2-eq {
+  from { transform: scaleY(0.25); opacity:0.4; }
+  to   { transform: scaleY(1);    opacity:0.9; }
+}
+
+/* ════════════════════════════════════════════════════════
+   PRIMARY NAV — HOME / DISCOVER / LIBRARY / PLAYLISTS / RADIO
+════════════════════════════════════════════════════════ */
+.mh2-tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 10px 12px 8px;
+  background: rgba(4,10,28,0.96);
+  border-bottom: 1px solid rgba(0,174,239,0.10);
+  overflow-x: auto;
+  scrollbar-width: none;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.mh2-tab-bar::-webkit-scrollbar { display: none; }
+.mh2-tab-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--mh-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 6px 14px 8px;
+  cursor: pointer;
+  transition: color 0.18s, border-color 0.18s;
+  white-space: nowrap;
+  border-radius: 0;
+}
+.mh2-tab-btn:hover { color: var(--mh-blue); }
+.mh2-tab-btn.active {
+  color: var(--mh-blue);
+  border-bottom-color: var(--mh-blue);
+  text-shadow: 0 0 14px rgba(0,174,239,0.5);
+}
+
+/* ════════════════════════════════════════════════════════
+   PERSISTENT NEXUS PLAYER BAR
+   Fixed above bottom navigation. ONE instance only.
+════════════════════════════════════════════════════════ */
+#snxMH2PlayerBar {
+  position: fixed;
+  bottom: 60px; /* above SNS bottom nav */
+  left: 0;
+  right: 0;
+  z-index: 80;
+  background: linear-gradient(180deg, rgba(4,10,24,0.0) 0%, rgba(4,10,24,0.98) 20%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-top: 1px solid rgba(0,174,239,0.20);
+}
+.mh2-player {
+  padding: 8px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.mh2-player-top-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mh2-player-art {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--mh-glass);
+  border: 1px solid var(--mh-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+/* Fallback artwork — Shadow Nexus style */
+.mh2-art-fallback {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #050e22 0%, #0a1c35 50%, #071228 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.mh2-art-fallback::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 120% 60% at 50% 110%, rgba(57,255,20,0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 80% at 20% 20%, rgba(0,100,200,0.22) 0%, transparent 65%);
+}
+.mh2-art-fallback-icon {
+  font-size: 18px;
+  position: relative;
+  z-index: 1;
+  color: var(--mh-blue);
+  opacity: 0.8;
+}
+.mh2-player-art img { width: 100%; height: 100%; object-fit: cover; }
+.mh2-player-info {
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+.mh2-player-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--mh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 1px;
+}
+.mh2-player-artist {
+  font-size: 11px;
+  color: var(--mh-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mh2-player-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mh2-player-time {
+  font-size: 10px;
+  color: var(--mh-muted);
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mh2-player-seek {
+  flex: 1;
+  height: 3px;
+  background: rgba(0,174,239,0.15);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+}
+.mh2-player-seek-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--mh-blue), rgba(57,255,20,0.7));
+  border-radius: 3px;
+  transition: width 0.25s linear;
+  pointer-events: none;
+}
+.mh2-player-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.mh2-ctrl-btn {
+  background: none;
+  border: none;
+  color: var(--mh-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 8px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 1;
+}
+.mh2-ctrl-btn:hover { color: var(--mh-blue); background: rgba(0,174,239,0.08); }
+.mh2-ctrl-btn.mh2-ctrl-play {
+  background: rgba(0,174,239,0.14);
+  border: 1px solid rgba(0,174,239,0.32);
+  color: var(--mh-blue);
+  font-size: 16px;
+  padding: 6px 16px;
+  border-radius: 20px;
+}
+.mh2-ctrl-btn.mh2-ctrl-play:hover { background: rgba(0,174,239,0.26); box-shadow: 0 0 16px rgba(0,174,239,0.3); }
+.mh2-ctrl-btn.active { color: var(--mh-green); }
+
+/* ════════════════════════════════════════════════════════
+   SHARED COMPONENTS
+════════════════════════════════════════════════════════ */
+.mh2-empty {
+  text-align: center;
+  color: var(--mh-muted);
+  padding: 32px 16px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.mh2-empty-icon {
+  font-size: 30px;
+  display: block;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+/* Section header */
+.mh2-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px 10px;
+}
+.mh2-section-title {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--mh-blue);
+  opacity: 0.9;
+}
+.mh2-section-see-all {
+  font-size: 11px;
+  color: var(--mh-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  letter-spacing: 0.5px;
+  transition: color 0.15s;
+}
+.mh2-section-see-all:hover { color: var(--mh-blue); }
+
+/* Track row */
+.mh2-track-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-radius: 10px;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.mh2-track-item:hover { background: rgba(0,174,239,0.05); }
+.mh2-track-item.mh2-track-playing { background: rgba(0,174,239,0.09); }
+
+/* Track artwork */
+.mh2-track-art {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--mh-glass);
+  border: 1px solid var(--mh-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+.mh2-track-art-sm {
+  width: 36px;
+  height: 36px;
+}
+.mh2-track-art img { width:100%; height:100%; object-fit:cover; display:block; }
+.mh2-track-play-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,10,28,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mh-blue);
+  font-size: 15px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.mh2-track-art:hover .mh2-track-play-overlay { opacity: 1; }
+.mh2-track-item.mh2-track-playing .mh2-track-play-overlay { opacity: 1; }
+.mh2-track-info { flex: 1; min-width: 0; }
+.mh2-track-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mh-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.mh2-track-meta-line {
+  font-size: 11px;
+  color: var(--mh-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mh2-track-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.mh2-act-btn {
+  background: none;
+  border: none;
+  color: var(--mh-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 1;
+}
+.mh2-act-btn:hover { color: var(--mh-blue); background: rgba(0,174,239,0.09); }
+
+/* Animated EQ playing indicator (beside track title) */
+.mh2-eq-inline {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 12px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.mh2-eq-inline span {
+  display: block;
+  width: 2px;
+  background: var(--mh-green);
+  border-radius: 1px;
+  animation: mh2-eq 0.85s ease-in-out infinite alternate;
+}
+.mh2-eq-inline span:nth-child(1){ height:40%; animation-delay:0s; }
+.mh2-eq-inline span:nth-child(2){ height:100%; animation-delay:0.15s; }
+.mh2-eq-inline span:nth-child(3){ height:65%; animation-delay:0.3s; }
+
+/* ════════════════════════════════════════════════════════
+   HOME TAB
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_home {
+  padding: 14px 0 20px;
+}
+.mh2-home-section {
+  margin-bottom: 28px;
+}
+
+/* ── NEXUS PLAYER CORE (Now Playing card on Home) ── */
+.mh2-nexus-player-card {
+  margin: 0 14px 4px;
+  background: linear-gradient(140deg, rgba(0,30,70,0.65) 0%, rgba(4,14,36,0.88) 100%);
+  border: 1px solid rgba(0,174,239,0.26);
+  border-radius: 18px;
+  padding: 20px 18px;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.mh2-nexus-player-card:hover { border-color: rgba(0,174,239,0.5); }
+.mh2-nexus-player-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 80% at 50% 0%, rgba(0,174,239,0.08) 0%, transparent 65%);
+  pointer-events: none;
+}
+/* Blurred artwork glow behind */
+.mh2-npc-art-glow {
+  position: absolute;
+  top: -20px; left: -20px; right: -20px; bottom: -20px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) saturate(1.4);
+  opacity: 0.12;
+  pointer-events: none;
+  border-radius: 18px;
+}
+.mh2-npc-empty {
+  text-align: center;
+  padding: 4px 0;
+}
+.mh2-npc-empty-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.5; }
+.mh2-npc-empty-label { font-size: 12px; color: var(--mh-muted); margin-bottom: 14px; }
+.mh2-npc-browse-btn {
+  background: rgba(0,174,239,0.10);
+  border: 1px solid rgba(0,174,239,0.30);
+  border-radius: 20px;
+  color: var(--mh-blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.mh2-npc-browse-btn:hover { background: rgba(0,174,239,0.20); box-shadow: 0 0 16px rgba(0,174,239,0.2); }
+
+/* Active now-playing layout */
+.mh2-npc-active {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+}
+.mh2-npc-cover {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--mh-glass);
+  border: 1px solid rgba(0,174,239,0.22);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mh2-npc-cover img { width:100%; height:100%; object-fit:cover; display:block; }
+.mh2-npc-meta { flex: 1; min-width: 0; }
+.mh2-npc-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--mh-green);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+.mh2-npc-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+.mh2-npc-artist {
+  font-size: 12px;
+  color: var(--mh-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 8px;
+}
+.mh2-npc-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 16px;
+}
+.mh2-npc-eq span {
+  display: block;
+  width: 3px;
+  background: var(--mh-green);
+  border-radius: 2px;
+  animation: mh2-eq 0.9s ease-in-out infinite alternate;
+}
+.mh2-npc-eq span:nth-child(1){ height:50%;  animation-delay:0s; }
+.mh2-npc-eq span:nth-child(2){ height:90%;  animation-delay:0.13s; }
+.mh2-npc-eq span:nth-child(3){ height:70%;  animation-delay:0.26s; }
+.mh2-npc-eq span:nth-child(4){ height:100%; animation-delay:0.39s; }
+.mh2-npc-eq span:nth-child(5){ height:60%;  animation-delay:0.52s; }
+.mh2-npc-open {
+  background: rgba(0,174,239,0.12);
+  border: 1px solid rgba(0,174,239,0.28);
+  border-radius: 50%;
+  color: var(--mh-blue);
+  font-size: 16px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.mh2-npc-open:hover { background: rgba(0,174,239,0.22); }
+
+/* ── RADIO REALM CARD ── */
+.mh2-radio-realm {
+  margin: 0 14px;
+  background: linear-gradient(140deg, rgba(0,20,50,0.7) 0%, rgba(4,10,28,0.92) 100%);
+  border: 1px solid rgba(0,174,239,0.18);
+  border-radius: 16px;
+  padding: 18px 18px;
+  position: relative;
+  overflow: hidden;
+}
+.mh2-radio-realm::before {
+  content: '';
+  position: absolute;
+  top: -30px; right: -30px;
+  width: 120px; height: 120px;
+  background: radial-gradient(circle, rgba(57,255,20,0.07) 0%, transparent 70%);
+  pointer-events: none;
+}
+.mh2-radio-realm-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.mh2-radio-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(0,100,200,0.25) 0%, rgba(0,50,120,0.35) 100%);
+  border: 1px solid rgba(0,174,239,0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+.mh2-radio-realm-info { flex: 1; min-width: 0; }
+.mh2-radio-realm-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.mh2-radio-realm-sub {
+  font-size: 10px;
+  color: var(--mh-muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.mh2-radio-air {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.mh2-radio-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--mh-muted);
+  flex-shrink: 0;
+}
+.mh2-radio-dot.live {
+  background: #ff3355;
+  box-shadow: 0 0 8px rgba(255,51,85,0.7);
+  animation: mh2-radio-blink 1s ease-in-out infinite alternate;
+}
+@keyframes mh2-radio-blink { from { opacity:0.5; } to { opacity:1; } }
+.mh2-radio-btn-sm {
+  background: rgba(0,174,239,0.12);
+  border: 1px solid rgba(0,174,239,0.30);
+  border-radius: 20px;
+  color: var(--mh-blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.mh2-radio-btn-sm:hover { background: rgba(0,174,239,0.22); box-shadow: 0 0 16px rgba(0,174,239,0.2); }
+.mh2-radio-btn-sm.listening {
+  background: rgba(255,51,85,0.12);
+  border-color: rgba(255,51,85,0.35);
+  color: #ff5577;
+}
+.mh2-radio-btn-sm.listening:hover { background: rgba(255,51,85,0.20); }
+
+/* ── MUSIC REALMS SCROLL ── */
+.mh2-realms-scroll {
+  display: flex;
+  gap: 10px;
+  padding: 0 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.mh2-realms-scroll::-webkit-scrollbar { display: none; }
+.mh2-realm-pill {
+  flex-shrink: 0;
+  background: var(--mh-glass);
+  border: 1px solid var(--mh-border);
+  border-radius: 14px;
+  padding: 12px 16px;
+  cursor: pointer;
+  text-align: center;
+  min-width: 100px;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.mh2-realm-pill:hover {
+  border-color: var(--mh-border-hi);
+  background: rgba(0,174,239,0.08);
+  box-shadow: 0 0 18px rgba(0,174,239,0.1);
+}
+.mh2-realm-pill.active {
+  border-color: var(--mh-blue);
+  background: rgba(0,174,239,0.12);
+}
+.mh2-realm-icon { font-size: 20px; margin-bottom: 5px; display: block; }
+.mh2-realm-name {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--mh-text);
+  white-space: nowrap;
+}
+.mh2-realm-genre {
+  font-size: 9px;
+  color: var(--mh-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+/* ── FEATURED IN THE NEXUS ── */
+.mh2-featured-hero {
+  margin: 0 14px;
+  background: linear-gradient(145deg, rgba(0,40,100,0.50) 0%, rgba(3,10,28,0.90) 100%);
+  border: 1px solid rgba(0,174,239,0.22);
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.mh2-featured-hero:hover { border-color: rgba(0,174,239,0.5); }
+.mh2-featured-hero-inner {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-height: 90px;
+  position: relative;
+}
+.mh2-featured-hero-art {
+  width: 90px;
+  height: 90px;
+  flex-shrink: 0;
+  background: var(--mh-glass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  overflow: hidden;
+}
+.mh2-featured-hero-art img { width:100%; height:100%; object-fit:cover; display:block; }
+.mh2-featured-hero-info {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+}
+.mh2-featured-hero-badge {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: var(--mh-green);
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 4px;
+  opacity: 0.85;
+}
+.mh2-featured-hero-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mh2-featured-hero-artist {
+  font-size: 11px;
+  color: var(--mh-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mh2-featured-hero-action {
+  padding: 0 14px 0 4px;
+  flex-shrink: 0;
+}
+.mh2-featured-play-btn {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  background: rgba(0,174,239,0.14);
+  border: 1px solid rgba(0,174,239,0.35);
+  color: var(--mh-blue);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.mh2-featured-play-btn:hover { background: rgba(0,174,239,0.28); box-shadow: 0 0 14px rgba(0,174,239,0.3); }
+/* Additional featured tracks (smaller rows) */
+.mh2-featured-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mh2-featured-item:hover { background: rgba(0,174,239,0.06); }
+.mh2-featured-art {
+  width: 40px;
+  height: 40px;
+  background: var(--mh-glass);
+  border: 1px solid var(--mh-border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.mh2-featured-art img { width:100%; height:100%; object-fit:cover; display:block; }
+.mh2-featured-info { flex: 1; min-width: 0; }
+.mh2-featured-title { font-size: 13px; font-weight: 600; color: var(--mh-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mh2-featured-artist { font-size: 11px; color: var(--mh-muted); }
+.mh2-unfeature-btn {
+  background: none; border: none;
+  color: var(--mh-muted); cursor: pointer;
+  font-size: 13px; padding: 4px 6px;
+  transition: color 0.15s;
+}
+.mh2-unfeature-btn:hover { color: var(--mh-danger); }
+
+/* ── PLAYLIST UNIVERSE ── */
+.mh2-pl-scroll {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.mh2-pl-scroll::-webkit-scrollbar { display: none; }
+.mh2-pl-portal {
+  flex-shrink: 0;
+  width: 140px;
+  background: linear-gradient(155deg, rgba(0,30,70,0.60) 0%, rgba(4,12,32,0.92) 100%);
+  border: 1px solid var(--mh-border);
+  border-radius: 14px;
+  padding: 14px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  text-align: center;
+}
+.mh2-pl-portal:hover {
+  border-color: rgba(0,174,239,0.40);
+  box-shadow: 0 0 20px rgba(0,174,239,0.1);
+}
+/* Each portal gets a subtle accent color for variety */
+.mh2-pl-portal:nth-child(4n+1) { border-color: rgba(0,174,239,0.20); }
+.mh2-pl-portal:nth-child(4n+2) { border-color: rgba(57,255,20,0.15); }
+.mh2-pl-portal:nth-child(4n+3) { border-color: rgba(100,80,200,0.18); }
+.mh2-pl-portal:nth-child(4n+4) { border-color: rgba(0,174,239,0.14); }
+.mh2-pl-portal-icon {
+  font-size: 30px;
+  margin-bottom: 8px;
+  display: block;
+  line-height: 1;
+}
+.mh2-pl-portal-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--mh-text);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mh2-pl-portal-count {
+  font-size: 10px;
+  color: var(--mh-muted);
+}
+.mh2-pl-portal-play {
+  margin-top: 10px;
+  background: rgba(0,174,239,0.10);
+  border: 1px solid rgba(0,174,239,0.20);
+  border-radius: 20px;
+  color: var(--mh-blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: inline-block;
+  width: 100%;
+}
+.mh2-pl-portal-play:hover { background: rgba(0,174,239,0.20); }
+
+/* ── FOUNDER MUSIC MANAGEMENT ── */
+.mh2-mgmt-toggle {
+  margin: 0 14px;
+  background: linear-gradient(135deg, rgba(10,30,60,0.55) 0%, rgba(4,12,30,0.85) 100%);
+  border: 1px solid rgba(57,255,20,0.20);
+  border-radius: 14px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  user-select: none;
+}
+.mh2-mgmt-toggle:hover { border-color: rgba(57,255,20,0.38); }
+.mh2-mgmt-toggle-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--mh-green);
+}
+.mh2-mgmt-toggle-arrow {
+  color: var(--mh-green);
+  font-size: 14px;
+  transition: transform 0.2s;
+  opacity: 0.7;
+}
+.mh2-mgmt-toggle.open .mh2-mgmt-toggle-arrow { transform: rotate(180deg); }
+
+.mh2-mgmt-panel {
+  margin: 0 14px;
+  background: rgba(4,12,30,0.90);
+  border: 1px solid rgba(57,255,20,0.14);
+  border-top: none;
+  border-radius: 0 0 14px 14px;
+  padding: 14px;
+  display: none;
+}
+.mh2-mgmt-panel.open { display: block; }
+.mh2-mgmt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+.mh2-mgmt-btn {
+  background: rgba(0,174,239,0.07);
+  border: 1px solid rgba(0,174,239,0.15);
+  border-radius: 10px;
+  color: var(--mh-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  padding: 10px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.mh2-mgmt-btn:hover { background: rgba(0,174,239,0.16); color: var(--mh-blue); border-color: var(--mh-blue); }
+
+/* Storage health */
+.mh2-health-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0,174,239,0.07);
+  font-size: 12px;
+}
+.mh2-health-row:last-child { border-bottom: none; }
+.mh2-health-provider { color: var(--mh-dim); }
+.mh2-health-status { font-weight: 700; letter-spacing: 0.5px; }
+.mh2-health-status.ok  { color: var(--mh-green); }
+.mh2-health-status.err { color: var(--mh-danger); }
+
+/* ════════════════════════════════════════════════════════
+   LIBRARY TAB
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_library { padding: 12px 0 20px; }
+.mh2-lib-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mh2-lib-search {
+  flex: 1;
+  min-width: 160px;
+  background: rgba(4,12,30,0.9);
+  border: 1px solid var(--mh-border);
+  border-radius: 24px;
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 16px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.mh2-lib-search::placeholder { color: rgba(74,122,154,0.6); }
+.mh2-lib-search:focus { border-color: var(--mh-blue); box-shadow: 0 0 12px rgba(0,174,239,0.15); }
+.mh2-lib-filter {
+  background: rgba(10,28,55,0.8);
+  border: 1px solid var(--mh-border);
+  border-radius: 20px;
+  color: var(--mh-dim);
+  font-size: 11px;
+  padding: 7px 12px;
+  cursor: pointer;
+  outline: none;
+}
+.mh2-lib-filter option { background: #050e22; }
+.mh2-lib-count {
+  font-size: 10px;
+  color: var(--mh-muted);
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+}
+
+/* ════════════════════════════════════════════════════════
+   PLAYLISTS TAB
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_playlists { padding: 12px 0 20px; }
+.mh2-pl-toolbar {
+  padding: 0 14px 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+.mh2-pl-create-btn {
+  background: rgba(57,255,20,0.09);
+  border: 1px solid rgba(57,255,20,0.28);
+  border-radius: 20px;
+  color: var(--mh-green);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.mh2-pl-create-btn:hover { background: rgba(57,255,20,0.18); box-shadow: 0 0 14px rgba(57,255,20,0.15); }
+.mh2-pl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px,1fr));
+  gap: 12px;
+  padding: 0 14px;
+}
+.mh2-pl-card {
+  background: linear-gradient(155deg, rgba(0,30,70,0.60) 0%, rgba(4,12,32,0.92) 100%);
+  border: 1px solid var(--mh-border);
+  border-radius: 14px;
+  padding: 16px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.mh2-pl-card:hover { border-color: rgba(0,174,239,0.40); box-shadow: 0 0 20px rgba(0,174,239,0.08); }
+.mh2-pl-art { font-size: 28px; margin-bottom: 10px; }
+.mh2-pl-name { font-size: 12px; font-weight: 700; color: var(--mh-text); margin-bottom: 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mh2-pl-count { font-size: 10px; color: var(--mh-muted); margin-bottom: 10px; }
+.mh2-pl-actions { display: flex; justify-content: center; gap: 6px; }
+
+/* ════════════════════════════════════════════════════════
+   QUEUE TAB
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_queue { padding: 12px 0 20px; }
+.mh2-queue-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 10px;
+}
+.mh2-queue-label { font-size: 11px; color: var(--mh-dim); letter-spacing: 1px; text-transform: uppercase; font-weight: 700; }
+.mh2-queue-clear-btn {
+  background: none;
+  border: 1px solid rgba(255,51,85,0.18);
+  border-radius: 20px;
+  color: var(--mh-danger);
+  font-size: 10px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.mh2-queue-clear-btn:hover { background: rgba(255,51,85,0.09); }
+
+/* ════════════════════════════════════════════════════════
+   NEXUS PLAYER FULL SCREEN (Playing Tab)
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_playing { padding: 0; }
+.mh2-playing-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 16px 20px;
+  min-height: 400px;
+}
+.mh2-ps-art {
+  width: min(260px, 76vw);
+  height: min(260px, 76vw);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--mh-glass);
+  border: 1px solid rgba(0,174,239,0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 22px;
+  flex-shrink: 0;
+  position: relative;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4), 0 0 30px rgba(0,120,255,0.08);
+}
+/* Blurred art glow on playing screen */
+.mh2-ps-art-glow {
+  position: absolute;
+  inset: -40px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(30px) saturate(1.5);
+  opacity: 0.14;
+  pointer-events: none;
+}
+.mh2-ps-cover { width:100%; height:100%; object-fit:cover; position:relative; z-index:1; }
+.mh2-ps-meta { text-align:center; margin-bottom:16px; width:100%; max-width:340px; }
+.mh2-ps-title { font-size: 20px; font-weight: 900; color:#fff; margin-bottom:6px; letter-spacing:0.5px; }
+.mh2-ps-artist { font-size: 13px; color:var(--mh-dim); }
+.mh2-ps-badge {
+  display:inline-block; font-size:10px; padding:2px 8px; border-radius:10px;
+  background:rgba(0,174,239,0.10); border:1px solid rgba(0,174,239,0.22); color:var(--mh-blue); margin-top:6px;
+}
+.mh2-ps-progress {
+  display:flex; align-items:center; gap:10px;
+  width:100%; max-width:340px; margin-bottom:22px;
+  font-size:11px; color:var(--mh-muted); font-variant-numeric:tabular-nums;
+}
+.mh2-ps-seek {
+  flex:1; height:4px; background:rgba(0,174,239,0.15); border-radius:4px; cursor:pointer; position:relative;
+}
+.mh2-ps-seek-fill {
+  height:100%;
+  background: linear-gradient(90deg, var(--mh-blue), rgba(57,255,20,0.6));
+  border-radius:4px; pointer-events:none;
+}
+.mh2-ps-controls {
+  display:flex; align-items:center; gap:14px; margin-bottom:18px;
+}
+.mh2-ps-btn {
+  background: rgba(10,28,55,0.8);
+  border: 1px solid rgba(0,174,239,0.16);
+  border-radius: 50%;
+  color: var(--mh-dim);
+  font-size: 16px;
+  width: 42px; height: 42px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer;
+  transition: all 0.15s;
+}
+.mh2-ps-btn:hover { color:var(--mh-blue); border-color:var(--mh-blue); }
+.mh2-ps-btn.mh2-ps-play {
+  width:58px; height:58px; font-size:22px;
+  background: rgba(0,174,239,0.14);
+  border-color: rgba(0,174,239,0.40);
+  color:var(--mh-blue);
+  box-shadow: 0 0 20px rgba(0,174,239,0.15);
+}
+.mh2-ps-btn.mh2-ps-play:hover { background:rgba(0,174,239,0.28); box-shadow:0 0 28px rgba(0,174,239,0.3); }
+.mh2-ps-btn.active { color:var(--mh-green); border-color:rgba(57,255,20,0.35); }
+.mh2-ps-vol-row {
+  display:flex; align-items:center; gap:10px;
+  width:100%; max-width:280px; margin-bottom:24px;
+}
+.mh2-vol-slider {
+  flex:1; height:3px; accent-color:var(--mh-blue); cursor:pointer;
+  background:rgba(0,174,239,0.15); border-radius:3px; outline:none; border:none;
+  -webkit-appearance:none;
+}
+.mh2-ps-queue-label {
+  font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+  color:var(--mh-muted); margin-bottom:8px; align-self:flex-start; width:100%; max-width:340px;
+}
+#snxMH2PSQueue { width:100%; }
+
+/* ════════════════════════════════════════════════════════
+   UPLOAD TAB
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_upload { padding: 14px; }
+.mh2-upload-dropzone {
+  border: 2px dashed rgba(0,174,239,0.28);
+  border-radius: 16px;
+  padding: 32px 16px;
+  text-align: center;
+  cursor: pointer;
+  background: rgba(0,20,60,0.30);
+  transition: all 0.2s;
+  margin-bottom: 16px;
+}
+.mh2-upload-dropzone:hover,
+.mh2-upload-dropzone.drag-over {
+  border-color: var(--mh-blue);
+  background: rgba(0,174,239,0.07);
+  box-shadow: 0 0 24px rgba(0,174,239,0.12);
+}
+.mh2-upload-icon { font-size: 32px; margin-bottom: 10px; }
+.mh2-upload-label { font-size: 13px; color: var(--mh-dim); line-height: 1.7; }
+.mh2-upload-label span { color: var(--mh-blue); font-weight: 600; }
+.mh2-field-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.mh2-field { display:flex; flex-direction:column; gap:4px; }
+.mh2-field-full { grid-column: 1 / -1; }
+.mh2-field label {
+  font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--mh-dim);
+}
+.mh2-field input,
+.mh2-field select,
+.mh2-field textarea {
+  background: rgba(4,12,30,0.9);
+  border: 1px solid var(--mh-border);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.mh2-field input:focus,
+.mh2-field select:focus { border-color: var(--mh-blue); }
+.mh2-field select option { background: #050e22; }
+.mh2-rights-row { margin: 12px 0; }
+.mh2-rights-label {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 12px; color: var(--mh-muted); line-height: 1.5; cursor: pointer;
+}
+.mh2-rights-label input { flex-shrink:0; margin-top:2px; accent-color:var(--mh-green); }
+.mh2-upload-btn {
+  width:100%; background: rgba(0,174,239,0.10); border: 1px solid rgba(0,174,239,0.28);
+  border-radius: 12px; color: var(--mh-blue); font-size: 13px; font-weight: 700;
+  letter-spacing: 1px; text-transform: uppercase; padding: 12px;
+  cursor: pointer; transition: all 0.15s; margin-top: 4px;
+}
+.mh2-upload-btn:not([disabled]):hover { background: rgba(0,174,239,0.22); box-shadow: 0 0 20px rgba(0,174,239,0.2); }
+.mh2-upload-prog { margin-top: 14px; }
+.mh2-upload-prog-bar {
+  height: 4px; background: rgba(0,174,239,0.15); border-radius: 4px; overflow: hidden; margin-bottom: 6px;
+}
+.mh2-upload-status { font-size: 12px; color: var(--mh-dim); }
+.mh2-upload-retry { margin-top: 8px; }
+.mh2-upload-retry button {
+  background: rgba(255,51,85,0.08); border: 1px solid rgba(255,51,85,0.22);
+  border-radius: 8px; color: var(--mh-danger); font-size: 11px;
+  padding: 5px 14px; cursor: pointer;
+}
+.mh2-upload-retry button:hover { background: rgba(255,51,85,0.18); }
+
+/* ════════════════════════════════════════════════════════
+   RADIO TAB (full screen)
+════════════════════════════════════════════════════════ */
+#snxMH2Tab_radio { padding: 0; }
+.mh2-radio-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 20px;
+  min-height: 340px;
+  position: relative;
+  overflow: hidden;
+}
+.mh2-radio-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(57,255,20,0.05) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 80% at 50% 100%, rgba(0,174,239,0.06) 0%, transparent 60%);
+  pointer-events: none;
+}
+.mh2-radio-logo {
+  width: 80px; height: 80px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(0,50,120,0.5), rgba(4,18,50,0.8));
+  border: 1px solid rgba(0,174,239,0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  margin-bottom: 18px;
+  box-shadow: 0 0 40px rgba(0,174,239,0.1);
+  position: relative;
+}
+.mh2-radio-title {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(0,174,239,0.4);
+  margin-bottom: 4px;
+  text-align: center;
+}
+.mh2-radio-subtitle {
+  font-size: 10px;
+  color: var(--mh-muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+.mh2-radio-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 24px;
+}
+.mh2-radio-btn {
+  background: rgba(0,174,239,0.12);
+  border: 1px solid rgba(0,174,239,0.32);
+  border-radius: 28px;
+  color: var(--mh-blue);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 13px 32px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.mh2-radio-btn:hover { background: rgba(0,174,239,0.24); box-shadow: 0 0 24px rgba(0,174,239,0.25); }
+.mh2-radio-btn.listening {
+  background: rgba(255,51,85,0.12);
+  border-color: rgba(255,51,85,0.35);
+  color: #ff5577;
+}
+.mh2-radio-btn.listening:hover { background: rgba(255,51,85,0.22); }
+.mh2-station-note { font-size: 11px; color: rgba(74,122,154,0.6); padding: 14px 0 4px; text-align:center; }
+
+/* ════════════════════════════════════════════════════════
+   TRACK CONTEXT MENU
+════════════════════════════════════════════════════════ */
+.mh2-track-menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 10000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.mh2-track-menu {
+  background: linear-gradient(170deg, rgba(7,20,45,0.98) 0%, rgba(3,9,25,0.99) 100%);
+  border: 1px solid rgba(0,174,239,0.22);
+  border-bottom: none;
+  border-radius: 20px 20px 0 0;
+  padding: 16px 14px 32px;
+  width: min(480px, 100vw);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.mh2-menu-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--mh-text);
+  text-align: center;
+  padding: 4px 0 14px;
+  border-bottom: 1px solid rgba(0,174,239,0.10);
+  margin-bottom: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mh2-menu-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(0,174,239,0.06);
+  color: var(--mh-text);
+  font-size: 14px;
+  text-align: left;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-radius: 8px;
+}
+.mh2-menu-btn:hover { background: rgba(0,174,239,0.10); }
+.mh2-menu-btn:last-child { border-bottom: none; }
+.mh2-menu-danger { color: #ff5577; }
+.mh2-menu-danger:hover { background: rgba(255,51,85,0.10); }
+.mh2-menu-cancel { color: var(--mh-muted); margin-top: 6px; }
+
+/* ════════════════════════════════════════════════════════
+   RESPONSIVE — TABLET +
+════════════════════════════════════════════════════════ */
+@media (min-width: 600px) {
+  .mh2-field-row { flex-direction: row; }
+  .mh2-field { flex: 1; }
+  #snxMH2PlayerBar { max-width: 600px; left: 50%; transform: translateX(-50%); border-radius: 14px 14px 0 0; }
+  .mh2-track-menu-overlay { align-items: center; }
+  .mh2-track-menu { border-radius: 16px; border: 1px solid rgba(0,174,239,0.22); }
+  .mh2-pl-portal { width: 160px; }
+}
+
+@media (min-width: 900px) {
+  .mh2-pl-grid { grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); }
+  #snxMH2PlayerBar { max-width: 700px; }
+  .mh2-realms-scroll { flex-wrap: wrap; overflow-x: visible; }
+  .mh2-pl-scroll { flex-wrap: wrap; overflow-x: visible; }
+  .mh2-pl-portal { width: auto; min-width: 140px; flex: 0 0 auto; }
+}
+
+/* ════════════════════════════════════════════════════════
+   PROVIDER BADGE — founder-only technical label
+════════════════════════════════════════════════════════ */
+.mh2-provider-badge {
+  display: inline-block; font-size: 9px;
+  padding: 1px 5px; border-radius: 10px;
+  background: rgba(0,174,239,0.10); color: var(--mh-blue);
+  border: 1px solid rgba(0,174,239,0.20);
+  margin-left: 4px; vertical-align: middle;
+}
