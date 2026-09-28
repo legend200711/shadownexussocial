@@ -48,6 +48,13 @@ async function _getLiveModule() {
   return _liveModule;
 }
 
+// Theater — lazy-loaded so it doesn't block network init
+let _theaterModule = null;
+async function _getTheaterModule() {
+  if (!_theaterModule) _theaterModule = await import('./snx-theater.js');
+  return _theaterModule;
+}
+
 /* ════════════════════════════════════
    STATE
 ════════════════════════════════════ */
@@ -83,6 +90,9 @@ export function initTvNetwork(user) {
     _ensureMyChannel();
     _subscribeMyProfile();
   }
+
+  // Mount theater presentation (idempotent — safe to call on auth change)
+  _getTheaterModule().then(m => m.mountTheater()).catch(() => {});
 
   // Handle deep-links from notifications / external entry points
   const params = new URLSearchParams(location.search);
@@ -396,6 +406,8 @@ function _startSubscriptions() {
       if (_activeTab === 'live-now') _renderLiveNowSection();
       _updateLivePreview();
       _updateLiveBadge();
+      // Notify theater ticker — real live data, no faking
+      _getTheaterModule().then(m => m.notifyLiveChannels(channels)).catch(() => {});
     },
     err => {
       console.error('[SNX TV] subscribeLiveChannels error:', err.code, err.message);
@@ -514,13 +526,16 @@ function _renderLiveNowSection() {
   if (!_liveChannels.length) {
     el.innerHTML = `
       <div class="snx-tn-page-header">
-        <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
-        <div class="snx-tn-page-sub">No creators are live right now</div>
+        <div class="snx-tn-page-title">
+          <span class="snx-tn-live-dot" aria-hidden="true"></span>
+          🔴 LIVE NOW
+        </div>
+        <div class="snx-tn-page-sub">Creators broadcasting across Shadow Nexus</div>
       </div>
       <div class="snx-tn-live-now-empty" role="status" aria-live="polite">
         <div class="snx-tn-live-now-empty-icon" aria-hidden="true">📡</div>
         <div class="snx-tn-live-now-empty-title">THE NEXUS IS QUIET</div>
-        <div class="snx-tn-live-now-empty-sub">No creators are Live right now.</div>
+        <div class="snx-tn-live-now-empty-sub">No creators are broadcasting right now.</div>
         <button class="snx-tn-btn-go-live snx-tn-live-now-go-live-btn" id="snx-tn-lnow-go-live-btn"
                 aria-label="Go Live — start your own broadcast">🔴 GO LIVE</button>
       </div>`;
@@ -534,8 +549,11 @@ function _renderLiveNowSection() {
   const cards = _liveChannels.map(ch => _buildLiveNowCard(ch)).join('');
   el.innerHTML = `
     <div class="snx-tn-page-header">
-      <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
-      <div class="snx-tn-page-sub">${_liveChannels.length} creator${_liveChannels.length !== 1 ? 's' : ''} broadcasting</div>
+      <div class="snx-tn-page-title">
+        <span class="snx-tn-live-dot" aria-hidden="true"></span>
+        🔴 LIVE NOW
+      </div>
+      <div class="snx-tn-page-sub">${_liveChannels.length} creator${_liveChannels.length !== 1 ? 's' : ''} broadcasting across Shadow Nexus</div>
     </div>
     <div class="snx-tn-live-now-grid" role="list" aria-label="Live channels">${cards}</div>`;
 
@@ -673,12 +691,12 @@ function _renderChannelsSection() {
 
   el.innerHTML = `
     <div class="snx-tn-page-header">
-      <div class="snx-tn-page-title">CHANNELS</div>
-      <div class="snx-tn-page-sub">Browse creator channels, follow, and watch</div>
+      <div class="snx-tn-page-title">CREATOR CHANNELS</div>
+      <div class="snx-tn-page-sub">Explore the creators broadcasting across the Nexus</div>
     </div>
     <div class="snx-tn-search-wrap">
       <input class="snx-tn-search" id="snx-tn-dir-search" type="search"
-             placeholder="Search by channel name or username…"
+             placeholder="Search channels…"
              value="${_esc(_dirSearch)}" autocomplete="off"
              aria-label="Search channels">
     </div>
@@ -747,35 +765,44 @@ function _renderMyChannelSection() {
 
   el.innerHTML = `
     <div class="snx-tn-my-profile-card">
-      <!-- Cover image -->
+      <!-- Cover image — wide cinematic strip -->
       <div class="snx-tn-cover" id="snx-tn-cover-wrap"
            style="${ch.coverImage ? `background-image:url('${_esc(ch.coverImage)}');background-size:cover;background-position:center;` : ''}">
         ${!ch.coverImage ? '<div class="snx-tn-cover-placeholder">SHADOW NEXUS TV NETWORK</div>' : ''}
       </div>
 
-      <!-- Profile row -->
+      <!-- Profile row: avatar overlaps cover, info + actions beside it -->
       <div class="snx-tn-profile-row">
-        <div class="snx-tn-channel-avatar" id="snx-tn-my-avatar">
-          ${snsAvatar ? `<img src="${_esc(snsAvatar)}" alt="channel avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">` : avatarLetter}
+        <div class="snx-tn-channel-avatar" id="snx-tn-my-avatar" aria-label="Channel avatar">
+          ${snsAvatar
+            ? `<img src="${_esc(snsAvatar)}" alt="channel avatar" loading="eager"
+                    onerror="this.style.display='none'">`
+            : `<span aria-hidden="true">${avatarLetter}</span>`}
         </div>
         <div class="snx-tn-profile-info">
           <div class="snx-tn-channel-name">${_esc(ch.channelName)}</div>
           <div class="snx-tn-channel-handle">@${_esc(snsUsername)}</div>
           <div class="snx-tn-status-row">
-            <span class="snx-tn-status-badge ${isLive ? 'live' : 'offline'}">
+            <span class="snx-tn-status-badge ${isLive ? 'live' : 'offline'}"
+                  aria-label="${isLive ? 'Currently live' : 'Off air'}">
               ${isLive ? '🔴 LIVE' : '⚫ OFF AIR'}
             </span>
-            <span class="snx-tn-followers-count">Followers: ${followerCount}</span>
+            <span class="snx-tn-followers-count" aria-label="${followerCount} followers">
+              ${followerCount.toLocaleString()} followers
+            </span>
           </div>
+          ${ch.channelDescription
+            ? `<div class="snx-tn-channel-desc">${_esc(ch.channelDescription)}</div>`
+            : ''}
         </div>
         <div class="snx-tn-profile-actions">
-          <button class="snx-tn-btn-edit" id="snx-tn-edit-btn" aria-label="Edit channel settings">Edit</button>
+          <button class="snx-tn-btn-edit" id="snx-tn-edit-btn" aria-label="Edit channel">✏️ Edit</button>
         </div>
       </div>
 
       <!-- Live stats bar (shown only when live) -->
       ${isLive ? `
-      <div class="snx-tn-live-stats-bar" id="snx-tn-live-stats-bar">
+      <div class="snx-tn-live-stats-bar" id="snx-tn-live-stats-bar" aria-label="Live broadcast statistics">
         <div class="snx-tn-live-stat-item">
           <span class="snx-tn-live-stat-label">Status</span>
           <span class="snx-tn-live-stat-value live-red">🔴 LIVE</span>
@@ -793,18 +820,34 @@ function _renderMyChannelSection() {
       <!-- Actions — show only what's relevant to current state -->
       <div class="snx-tn-go-live-wrap">
         ${isLive ? `
-          <button class="snx-tn-btn-end-live" id="snx-tn-watch-own-live-btn" aria-label="Manage your live broadcast">Manage Live</button>
-          <button class="snx-tn-btn-ghost" id="snx-tn-end-live-btn" aria-label="End your live broadcast" style="color:var(--snx-red);border-color:var(--snx-red-rim);">■ End Broadcast</button>
-        ` : `<button class="snx-tn-btn-go-live" id="snx-tn-go-live-btn" aria-label="Start a live broadcast">🔴 Go Live</button>`}
+          <button class="snx-tn-btn-go-live" id="snx-tn-watch-own-live-btn"
+                  aria-label="Manage your live broadcast"
+                  style="background:rgba(255,51,68,0.18);border:1px solid rgba(255,51,68,0.55);">
+            📺 Manage Live
+          </button>
+          <button class="snx-tn-btn-ghost" id="snx-tn-end-live-btn"
+                  aria-label="End your live broadcast"
+                  style="color:var(--snx-red);border-color:var(--snx-red-rim);">
+            ■ End Broadcast
+          </button>
+        ` : `
+          <button class="snx-tn-btn-go-live" id="snx-tn-go-live-btn"
+                  aria-label="Start a live broadcast">
+            🔴 Go Live
+          </button>
+        `}
       </div>
 
       <!-- Channel tabs -->
-      <div class="snx-tn-channel-inner-tabs">
-        <button class="snx-tn-inner-tab active" data-inner="home">HOME</button>
-        <button class="snx-tn-inner-tab" data-inner="replays">REPLAYS</button>
-        <button class="snx-tn-inner-tab" data-inner="about">ABOUT</button>
+      <div class="snx-tn-channel-inner-tabs" role="tablist" aria-label="Channel sections">
+        <button class="snx-tn-inner-tab active" data-inner="home"
+                role="tab" aria-selected="true">HOME</button>
+        <button class="snx-tn-inner-tab" data-inner="replays"
+                role="tab" aria-selected="false">REPLAYS</button>
+        <button class="snx-tn-inner-tab" data-inner="about"
+                role="tab" aria-selected="false">ABOUT</button>
       </div>
-      <div id="snx-tn-inner-content"></div>
+      <div id="snx-tn-inner-content" role="tabpanel"></div>
     </div>
   `;
 
@@ -820,8 +863,12 @@ function _renderMyChannelSection() {
   // Inner tab events
   el.querySelectorAll('.snx-tn-inner-tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      el.querySelectorAll('.snx-tn-inner-tab').forEach(b => b.classList.remove('active'));
+      el.querySelectorAll('.snx-tn-inner-tab').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+      });
       btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
       _renderMyChannelInner(btn.dataset.inner, ch, isLive);
     });
   });

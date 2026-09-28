@@ -209,21 +209,24 @@
 
 #snx-tn-tabs {
   position: sticky;
-  top: 0;
+  /* Stick below the fixed back-bar (50px) and channel nav (58px) */
+  top: 108px;
   z-index: 900;
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 0 10px;
   height: 44px;
-  background: rgba(2,4,10,0.96);
+  background: rgba(2,4,10,0.97);
   border-bottom: 1px solid var(--snx-border);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   overflow-x: auto;
   scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  /* Tabs fill the available width on larger screens */
+  justify-content: flex-start;
 }
 #snx-tn-tabs::-webkit-scrollbar { display: none; }
 
@@ -233,11 +236,12 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 0 14px;
-  height: 34px;
+  padding: 0 16px;
+  height: 36px;
   background: none;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--snx-text-muted);
   font-size: 11px;
   font-weight: 700;
@@ -245,16 +249,16 @@
   text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: color 0.18s, border-color 0.18s;
+  /* Accessible touch target */
+  min-height: 44px;
 }
 .snx-tn-tab:hover {
-  background: var(--snx-blue-dim);
   color: var(--snx-blue);
 }
 .snx-tn-tab.active {
-  background: var(--snx-blue-dim);
-  border-color: var(--snx-blue-rim);
   color: var(--snx-blue);
+  border-bottom-color: var(--snx-blue);
 }
 /* LIVE NOW dot — only pulse when channels are live */
 .snx-tn-tab.snx-tn-tab-live .snx-tn-live-dot {
@@ -389,12 +393,26 @@
   position: relative;
   flex-shrink: 0;
   width: 46px; height: 46px;
+  min-width: 46px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   background: var(--snx-surface-hi);
   border: 2px solid var(--snx-blue-rim);
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; font-weight: 800; color: var(--snx-blue);
+  /* overflow:visible keeps the live ring visible outside the circle */
   overflow: visible;
+}
+/* Avatar image inside card — clip to circle, not the container */
+.snx-tn-card-avatar > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 50%;
+  display: block;
 }
 .snx-tn-card-live-ring {
   position: absolute;
@@ -492,20 +510,36 @@
 
 .snx-tn-my-profile-card {
   background: var(--snx-panel);
+  /* Use box-shadow + outline for the border so we can use overflow:visible */
   border: 1px solid var(--snx-border);
   border-radius: var(--snx-radius-lg);
-  overflow: hidden;
+  /* overflow:visible lets the avatar overlap the cover without being clipped.
+     The card background / border still paint within the border-box.
+     Only CHILDREN that overflow (the avatar) will be visible outside. */
+  overflow: visible;
   max-width: 720px;
   margin: 0 auto;
+  position: relative;
+}
+/* ── Inner card background: fill all but cover area ──
+   A pseudo-element fills the card from top (covering bg), sitting behind content.
+   We don't need this — the card background: var(--snx-panel) already does it.
+   Just ensure the LAST element in the card clips the bottom radius. */
+.snx-tn-my-profile-card > *:last-child {
+  border-radius: 0 0 var(--snx-radius-lg) var(--snx-radius-lg);
+  overflow: hidden;
 }
 
-/* Cover strip */
+/* Cover strip — clipped independently so it doesn't bleed at top corners */
 .snx-tn-cover {
-  height: 130px;
+  height: 160px;
   background: linear-gradient(135deg, #05091a 0%, #0a1426 60%, #080f1e 100%);
   display: flex;
   align-items: center; justify-content: center;
-  position: relative; overflow: hidden;
+  position: relative;
+  /* Clip only the cover image to the card's top corners */
+  overflow: hidden;
+  border-radius: var(--snx-radius-lg) var(--snx-radius-lg) 0 0;
 }
 .snx-tn-cover-placeholder {
   font-size: 10px; font-weight: 900; letter-spacing: 4px;
@@ -513,26 +547,48 @@
   text-transform: uppercase; user-select: none;
 }
 
-/* Profile row */
+/* Profile row — avatar sits on top of the cover's bottom edge */
 .snx-tn-profile-row {
   display: flex;
   align-items: flex-start;
   gap: 14px;
   padding: 0 18px 14px;
-  margin-top: -28px;
+  /* Pull row up so avatar visually overlaps cover bottom */
+  margin-top: -34px;
   flex-wrap: wrap;
+  /* Allow avatar to overflow the row without clipping */
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
 .snx-tn-channel-avatar {
-  width: 62px; height: 62px;
+  width: 68px; height: 68px;
+  /* Guarantee square: never oval, never squashed */
+  min-width: 68px;
+  aspect-ratio: 1 / 1;
   border-radius: 50%;
   background: var(--snx-surface-hi);
+  /* White border ring separates avatar from cover image */
   border: 3px solid var(--snx-panel);
   outline: 2px solid var(--snx-blue-rim);
   display: flex; align-items: center; justify-content: center;
   font-size: 24px; font-weight: 900; color: var(--snx-blue);
-  flex-shrink: 0; overflow: hidden;
+  flex-shrink: 0;
+  /* Clip image to circle, but DO NOT clip the element itself from parent */
+  overflow: hidden;
+  /* Lift above the cover */
+  position: relative;
+  z-index: 3;
 }
-.snx-tn-profile-info { flex: 1; min-width: 0; padding-top: 30px; }
+.snx-tn-channel-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 50%;
+  display: block;
+}
+.snx-tn-profile-info { flex: 1; min-width: 0; padding-top: 36px; }
 .snx-tn-channel-name {
   font-size: 17px; font-weight: 900; color: var(--snx-text);
   letter-spacing: 0.4px; word-break: break-word;
@@ -547,10 +603,15 @@
 .snx-tn-followers-count {
   font-size: 12px; color: var(--snx-text-dim); font-weight: 600;
 }
+.snx-tn-channel-desc {
+  font-size: 12px; color: var(--snx-text-muted); margin-top: 6px;
+  line-height: 1.55; max-width: 400px; word-break: break-word;
+}
 
 /* Profile actions (edit / follow) */
 .snx-tn-profile-actions {
-  margin-top: 34px;
+  /* Align with the profile info row — push down past the avatar overlap area */
+  margin-top: 40px;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -560,12 +621,19 @@
 
 /* Go Live / Manage Live area */
 .snx-tn-go-live-wrap {
-  padding: 12px 16px;
+  padding: 14px 18px;
   border-top: 1px solid var(--snx-border);
+  background: rgba(255,51,68,0.02);
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+/* Go Live label context */
+.snx-tn-go-live-wrap .snx-tn-btn-go-live {
+  min-height: 44px;
+  font-size: 13px;
+  letter-spacing: 1px;
 }
 
 /* ── Main TV Feature toggle ── */
@@ -1276,20 +1344,48 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
   .snx-tn-section { padding: 14px 12px 80px; }
   .snx-tn-card-grid { grid-template-columns: 1fr; }
   .snx-tn-modal-box { padding: 16px 14px; }
-  .snx-tn-profile-row { padding: 0 12px 12px; }
-  .snx-tn-channel-avatar { width: 52px; height: 52px; font-size: 20px; }
+  .snx-tn-profile-row {
+    padding: 0 12px 12px;
+    gap: 10px;
+    /* keep enough space so avatar is fully visible above the row */
+    margin-top: -28px;
+  }
+  /* Avatar: always square, always fully visible on small screens */
+  .snx-tn-channel-avatar {
+    width: 56px;
+    height: 56px;
+    min-width: 56px;
+    aspect-ratio: 1 / 1;
+    font-size: 20px;
+    /* Always maintain the border ring so it shows on the cover */
+    border-width: 2px;
+  }
+  .snx-tn-profile-info { padding-top: 30px; }
+  .snx-tn-profile-actions { margin-top: 32px; }
   .snx-tn-channel-name { font-size: 15px; }
-  .snx-tn-cover { height: 100px; }
+  .snx-tn-cover { height: 110px; }
   .snx-tn-tab { padding: 0 11px; font-size: 10px; }
   .snx-tv-info-row { grid-template-columns: 1fr; }
   #crl-founder-feature-bar { bottom: 80px; padding: 4px 8px; }
   .snx-tn-featured-badge { font-size: 8px; padding: 1px 5px; }
   #snx-featured-live-layer video { object-fit: contain; }
+  /* Live Now cards: single column on small phones */
+  .snx-tn-live-now-grid { grid-template-columns: 1fr; }
 }
 
+/* 360px and below: extra small phones */
 @media (max-width: 360px) {
   .snx-tn-tab { padding: 0 9px; font-size: 10px; letter-spacing: 1px; }
   .snx-tn-card-grid { grid-template-columns: 1fr; }
+  .snx-tn-channel-avatar {
+    width: 50px;
+    height: 50px;
+    min-width: 50px;
+    aspect-ratio: 1 / 1;
+    font-size: 18px;
+  }
+  .snx-tn-profile-row { margin-top: -24px; }
+  .snx-tn-cover { height: 90px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1297,9 +1393,28 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
    ═══════════════════════════════════════════════════════════════ */
 
 @media (min-width: 900px) {
-  .snx-tn-my-profile-card { max-width: 840px; }
-  .snx-tn-card-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  /* Wider channel card on large screens */
+  .snx-tn-my-profile-card { max-width: 900px; }
+  /* Channel cover taller on desktop — cinematic */
+  .snx-tn-cover { height: 200px; }
+  .snx-tn-channel-avatar { width: 80px; height: 80px; min-width: 80px; font-size: 28px; }
+  .snx-tn-profile-info { padding-top: 42px; }
+  .snx-tn-profile-actions { margin-top: 46px; }
+  .snx-tn-profile-row { margin-top: -40px; }
+  /* Channel cards grid: 3 columns minimum */
+  .snx-tn-card-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .snx-tv-info-row { grid-template-columns: 1fr 1fr; }
+  /* Live Now: 3 column grid */
+  .snx-tn-live-now-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LARGE DESKTOP — min-width 1366px
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 1366px) {
+  .snx-tn-my-profile-card { max-width: 1000px; }
+  .snx-tn-cover { height: 220px; }
+  .snx-tn-card-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
 }
 
 /* ── Overflow guard ── */
@@ -1482,31 +1597,41 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 60px 24px 80px;
+  gap: 14px;
+  padding: 80px 24px 100px;
   text-align: center;
 }
 .snx-tn-live-now-empty-icon {
-  font-size: 52px;
-  opacity: 0.55;
-  filter: grayscale(0.3);
-  margin-bottom: 4px;
+  font-size: 56px;
+  opacity: 0.4;
+  filter: grayscale(0.4);
+  margin-bottom: 6px;
+  /* Subtle atmospheric animation */
+  animation: snxNexusQuiet 4s ease-in-out infinite;
+}
+@keyframes snxNexusQuiet {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 0.55; transform: scale(1.04); }
 }
 .snx-tn-live-now-empty-title {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 900;
-  letter-spacing: 3px;
+  letter-spacing: 4px;
   color: var(--snx-text);
   text-transform: uppercase;
 }
 .snx-tn-live-now-empty-sub {
   font-size: 13px;
   color: var(--snx-text-muted);
-  max-width: 280px;
-  line-height: 1.6;
+  max-width: 300px;
+  line-height: 1.7;
 }
 .snx-tn-live-now-go-live-btn {
-  margin-top: 8px;
+  margin-top: 6px;
+  min-height: 44px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-tn-live-now-empty-icon { animation: none !important; }
 }
 
 /* ── Mobile — single column, larger touch targets ── */
@@ -1521,4 +1646,529 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
 /* ── Tablet — two columns ── */
 @media (min-width: 481px) and (max-width: 768px) {
   .snx-tn-live-now-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   NEXUS ON-AIR THEATER — Visual Upgrade
+   Layered on top of the existing broadcast system.
+   Does NOT override any functional styles — presentation only.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Back-bar theater identity ── */
+.snx-back-bar {
+  background: rgba(2,4,10,0.97) !important;
+  border-bottom: 1px solid rgba(0,174,239,0.13) !important;
+  backdrop-filter: blur(18px) !important;
+  -webkit-backdrop-filter: blur(18px) !important;
+}
+.snx-back-bar-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #c8d0e8;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.snx-back-bar-tagline {
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+}
+.snx-back-bar-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid rgba(57,255,20,0.35);
+  background: rgba(57,255,20,0.06);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #39FF14;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.snx-back-bar-badge-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #39FF14;
+  box-shadow: 0 0 6px rgba(57,255,20,0.8);
+  animation: snxAirDotPulse 2s ease-in-out infinite;
+}
+@keyframes snxAirDotPulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(57,255,20,0.8); }
+  50%       { opacity: 0.55; box-shadow: 0 0 3px rgba(57,255,20,0.4); }
+}
+
+/* ── Theater wrapper around existing #ax-hero ── */
+#ax-hero {
+  padding: 20px 16px 32px;
+}
+
+/* ── Theater network header (injected by snx-theater.js) ── */
+.snx-theater-header {
+  max-width: 900px;
+  margin: 0 auto 18px;
+  padding: 0 4px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.snx-theater-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.snx-theater-network-name {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 3.5px;
+  color: var(--snx-blue);
+  text-transform: uppercase;
+}
+.snx-theater-title {
+  font-size: clamp(18px, 4vw, 26px);
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #dde3f5;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+.snx-theater-sub {
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+.snx-theater-on-air {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 4px;
+  background: rgba(57,255,20,0.07);
+  border: 1px solid rgba(57,255,20,0.28);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #39FF14;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.snx-theater-on-air-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #39FF14;
+  box-shadow: 0 0 8px rgba(57,255,20,0.9);
+  animation: snxAirDotPulse 2s ease-in-out infinite;
+}
+.snx-theater-on-air.connecting  { color: var(--snx-text-dim); border-color: rgba(138,155,192,0.25); background: none; }
+.snx-theater-on-air.connecting .snx-theater-on-air-dot  { background: var(--snx-text-dim); box-shadow: none; animation: none; }
+.snx-theater-on-air.off-air     { color: var(--snx-text-muted); border-color: rgba(138,155,192,0.15); background: none; }
+.snx-theater-on-air.off-air .snx-theater-on-air-dot { background: var(--snx-text-muted); box-shadow: none; animation: none; }
+
+/* ── Cinematic player frame ── */
+.snx-theater-frame {
+  position: relative;
+  max-width: 900px;
+  margin: 0 auto;
+  border-radius: 10px;
+  /* Deep-blue edge glow — subtle, not blinding */
+  box-shadow:
+    0 0 0 1px rgba(0,174,239,0.18),
+    0 0 30px rgba(0,174,239,0.09),
+    0 0 80px rgba(0,174,239,0.05),
+    0 4px 4px rgba(0,0,0,0.5),
+    inset 0 0 40px rgba(0,0,0,0.6);
+  background: #000;
+  overflow: visible;
+}
+
+/* Neon-green micro accent — bottom-right corner only */
+.snx-theater-frame::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  right: 0;
+  width: 120px;
+  height: 2px;
+  border-radius: 0 0 4px 0;
+  background: linear-gradient(90deg, transparent, rgba(57,255,20,0.55));
+  pointer-events: none;
+}
+
+/* Ambient glow behind the player — CSS only, no WebGL */
+.snx-theater-glow {
+  position: absolute;
+  inset: -24px;
+  z-index: -1;
+  border-radius: 18px;
+  background: radial-gradient(
+    ellipse 80% 60% at 50% 55%,
+    rgba(0,174,239,0.07) 0%,
+    rgba(57,255,20,0.02) 60%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* The existing .ax-player-shell inside the frame */
+.snx-theater-frame .ax-player-shell {
+  border-radius: 10px;
+  border: 1px solid rgba(0,174,239,0.16);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* ── Now Playing theater block ── */
+.snx-theater-now-playing {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 14px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.snx-theater-np-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.snx-theater-np-left {
+  flex: 1;
+  min-width: 0;
+}
+.snx-theater-np-label {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-green);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.snx-theater-np-title {
+  font-size: clamp(14px, 3vw, 18px);
+  font-weight: 700;
+  color: #dde3f5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-theater-np-meta {
+  font-size: 11px;
+  color: var(--snx-text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-theater-np-right {
+  flex-shrink: 0;
+  text-align: right;
+  padding-top: 2px;
+}
+.snx-theater-np-time {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--snx-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.snx-theater-np-remain {
+  font-size: 10px;
+  color: var(--snx-text-muted);
+}
+
+/* Progress bar — theater skin */
+.snx-theater-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.snx-theater-progress-bar {
+  height: 3px;
+  background: rgba(0,174,239,0.12);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.snx-theater-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00AEEF 0%, #39FF14 100%);
+  border-radius: 2px;
+  transition: width 0.4s linear;
+}
+.snx-theater-progress-times {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--snx-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.snx-theater-progress-elapsed {
+  color: var(--snx-text-dim);
+}
+
+/* ── Up Next ── */
+.snx-theater-up-next {
+  max-width: 900px;
+  margin: 18px auto 0;
+  padding: 14px 16px;
+  background: rgba(8,15,30,0.7);
+  border: 1px solid rgba(0,174,239,0.10);
+  border-radius: 8px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.snx-theater-up-next-label {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.snx-theater-up-next-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--snx-text-dim);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-theater-up-next-dur {
+  font-size: 10px;
+  color: var(--snx-text-muted);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Broadcast ticker ── */
+.snx-theater-ticker {
+  max-width: 900px;
+  margin: 14px auto 0;
+  height: 28px;
+  background: rgba(2,4,10,0.85);
+  border: 1px solid rgba(0,174,239,0.10);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+.snx-theater-ticker-label {
+  flex-shrink: 0;
+  padding: 0 10px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: var(--snx-blue);
+  text-transform: uppercase;
+  border-right: 1px solid rgba(0,174,239,0.14);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+.snx-theater-ticker-track {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  height: 100%;
+}
+.snx-theater-ticker-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  white-space: nowrap;
+  animation: snxTickerScroll 30s linear infinite;
+  will-change: transform;
+}
+.snx-theater-ticker-inner:hover {
+  animation-play-state: paused;
+}
+@keyframes snxTickerScroll {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.snx-theater-ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--snx-text-dim);
+  text-transform: uppercase;
+}
+.snx-theater-ticker-item-label {
+  font-size: 8px;
+  font-weight: 900;
+  color: var(--snx-blue);
+  letter-spacing: 1.5px;
+}
+.snx-theater-ticker-item-live .snx-theater-ticker-item-label {
+  color: var(--snx-red);
+}
+.snx-theater-ticker-sep {
+  display: inline-block;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: rgba(0,174,239,0.35);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-theater-ticker-inner { animation: none !important; }
+  .snx-theater-ticker-track { overflow-x: auto; }
+}
+
+/* ── Signal interrupted state ── */
+.snx-theater-signal-lost {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(2,4,10,0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.snx-theater-signal-lost.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.snx-theater-signal-lost-icon {
+  font-size: 32px;
+  opacity: 0.35;
+}
+.snx-theater-signal-lost-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-text-dim);
+  text-transform: uppercase;
+}
+.snx-theater-signal-lost-sub {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+}
+
+/* ── Entry signal transition ── */
+.snx-theater-signal-in {
+  position: fixed;
+  inset: 0;
+  z-index: 9990;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(0,174,239,0.18) 48%,
+    rgba(57,255,20,0.10) 50%,
+    transparent 52%
+  );
+  opacity: 0;
+  transform: translateX(-100%);
+  transition:
+    transform 0s,
+    opacity 0s;
+}
+.snx-theater-signal-in.active {
+  animation: snxSignalSweep 420ms cubic-bezier(0.22,0.61,0.36,1) forwards;
+}
+@keyframes snxSignalSweep {
+  0%   { opacity: 0; transform: translateX(-100%) skewX(-8deg); }
+  25%  { opacity: 1; }
+  75%  { opacity: 0.7; }
+  100% { opacity: 0; transform: translateX(110%) skewX(-8deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-theater-signal-in.active { animation: none !important; }
+}
+
+/* ── Tab bar upgrade — broadcast network feel ── */
+#snx-tn-tabs {
+  background: rgba(2,4,10,0.97) !important;
+  border-bottom-color: rgba(0,174,239,0.14) !important;
+}
+.snx-tn-tab.active {
+  color: #00AEEF !important;
+  border-bottom-color: #00AEEF !important;
+}
+.snx-tn-tab[data-tab="live-now"].snx-tn-tab-has-live {
+  color: var(--snx-red) !important;
+}
+.snx-tn-tab[data-tab="live-now"].snx-tn-tab-has-live.active {
+  border-bottom-color: var(--snx-red) !important;
+}
+
+/* ── TV Guide theater reskin ── */
+.ax-epg-panel {
+  border-color: rgba(0,174,239,0.13) !important;
+}
+.ax-epg-row.current {
+  background: rgba(0,174,239,0.06) !important;
+  border-left: 2px solid var(--snx-blue) !important;
+}
+.ax-epg-badge {
+  color: var(--snx-text-muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+}
+.ax-epg-row.current .ax-epg-badge {
+  color: var(--snx-green) !important;
+}
+
+/* ── Up Next sidebar reskin ── */
+.ax-sched-row.current {
+  background: rgba(0,174,239,0.05) !important;
+}
+
+/* ── Mobile overrides ── */
+@media (max-width: 480px) {
+  .snx-theater-header { margin-bottom: 12px; }
+  .snx-theater-title  { font-size: 16px; letter-spacing: 2px; }
+  .snx-theater-up-next { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .snx-theater-ticker  { max-width: 100%; width: 100%; }
+  .snx-theater-frame   { border-radius: 6px; }
+  .snx-theater-now-playing { padding: 12px 0 0; }
+}
+@media (max-width: 360px) {
+  .snx-theater-title { font-size: 14px; letter-spacing: 1.5px; }
+  .snx-theater-on-air { display: none; }
+}
+
+/* ── Desktop theater expansion ── */
+@media (min-width: 900px) {
+  #ax-hero { padding: 28px 32px 40px; }
+  .snx-theater-header  { max-width: 920px; }
+  .snx-theater-frame   { max-width: 920px; }
+  .snx-theater-now-playing { max-width: 920px; }
+  .snx-theater-up-next { max-width: 920px; }
+  .snx-theater-ticker  { max-width: 920px; }
+}
+@media (min-width: 1200px) {
+  .snx-theater-header,
+  .snx-theater-frame,
+  .snx-theater-now-playing,
+  .snx-theater-up-next,
+  .snx-theater-ticker { max-width: 960px; }
 }
