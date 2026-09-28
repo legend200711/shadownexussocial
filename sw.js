@@ -10,8 +10,8 @@
  * shadownexussocial.online (/) and any local dev server (/).
  */
 
-const CACHE_VERSION = 'v62';
-const BUILD_ID      = 'SNS-2026-PERF-001';
+const CACHE_VERSION = 'v64';
+const BUILD_ID      = 'SNS-2026-WORLD-BG-002';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -51,6 +51,10 @@ const SHELL_FILES = [
   'nexus-intro.css',
   'snx-perf.js',
   'snx-perf.css',
+  'nexus-glass.css',
+  'snx-stage11.css',
+  'snx-world-bg.css',
+  'assets/images/shadow-nexus-world.webp',
   // live.html / live.js / live.css intentionally excluded — always network-fresh
 ];
 

@@ -67,6 +67,10 @@
 <link rel="stylesheet" href="nexus-glass.css?v=SNS-2026-GLASS-001">
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
+<!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
+<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-WORLD-BG-002">
+<!-- ── Preload the world background image so it appears without flash ── -->
+<link rel="preload" as="image" href="assets/images/shadow-nexus-world.webp" fetchpriority="low">
 
 <!-- ── Preconnect to Firebase + R2 CDN so first load is faster ── -->
 <link rel="preconnect" href="https://www.gstatic.com">
@@ -77,7 +81,8 @@
 
 <style>
 /* ── Prevent any white/bright flash before CSS loads ── */
-html, body { background: #02040a !important; margin: 0; }
+html { background-color: #02040a !important; margin: 0; }
+body { background: transparent !important; margin: 0; }
 :root {
     /* ── Shadow Nexus Social — Dark Blue + Bright Blue + Neon Green ── */
 
@@ -123,7 +128,7 @@ html, body { background: #02040a !important; margin: 0; }
 body {
     margin: 0;
     font-family: 'Segoe UI', Arial, sans-serif;
-    background: #0B1F3A;
+    background: transparent;
     color: #ffffff;
     overflow-x: hidden;
     -webkit-tap-highlight-color: transparent;
@@ -10993,30 +10998,158 @@ body.arcade-fs-ios body::after { display:none !important; }
      ══════════════════════════════════════════════════════════ -->
 <div class="page" id="studioPage">
 
- <!-- ── Studio page header ── -->
- <header class="csr-header" style="position:sticky;top:0;z-index:100;">
-   <div class="csr-header-center">
-     <div class="csr-logo">&#9925;</div>
+ <!-- ── Music Hub page header ── -->
+ <header class="snx-mh-header" style="position:sticky;top:0;z-index:100;">
+   <div class="snx-mh-header-inner">
+     <div class="snx-mh-logo">&#9835;</div>
      <div>
-       <div class="csr-title">STUDIO</div>
-       <div class="csr-subtitle">Music Library · Playlists · Queue</div>
+       <div class="snx-mh-title">SHADOW NEXUS MUSIC</div>
+       <div class="snx-mh-subtitle">&#9834; MUSIC NEVER SLEEPS</div>
+     </div>
+     <div class="snx-mh-eq" aria-hidden="true">
+       <span class="snx-mh-eq-bar"></span>
+       <span class="snx-mh-eq-bar"></span>
+       <span class="snx-mh-eq-bar"></span>
+       <span class="snx-mh-eq-bar"></span>
+       <span class="snx-mh-eq-bar"></span>
      </div>
    </div>
  </header>
 
-  <!-- ── Studio bottom tab bar ── -->
+  <!-- ── Music Hub tab bar ── -->
   <nav id="snxStudioTabBar" style="
     display:flex;align-items:center;justify-content:space-around;
     background:linear-gradient(180deg,#071428 0%,#050f1e 100%);
     border-bottom:1px solid rgba(0,174,239,0.22);
     padding:0;position:sticky;top:57px;z-index:99;overflow-x:auto;
     scrollbar-width:none;-webkit-overflow-scrolling:touch;">
-    <button class="snx-studio-tab active" id="snxStudioTabBtn_music"     onclick="snxStudioTabSwitch('music',this)"     style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid #00AEEF;color:#00AEEF;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127925;<br>Music</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_upload"   onclick="snxStudioTabSwitch('upload',this)"   style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#11014;<br>Upload</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_playlists" onclick="snxStudioTabSwitch('playlists',this)" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#128203;<br>Playlists</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_queue"    onclick="snxStudioTabSwitch('queue',this)"    style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127926;<br>Queue</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)" style="flex:1;min-width:56px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#9654;&#65039;<br>Playing</button>
+    <button class="snx-studio-tab active" id="snxStudioTabBtn_home"      onclick="snxStudioTabSwitch('home',this)"      style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid #00AEEF;color:#00AEEF;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127968;<br>Home</button>
+    <button class="snx-studio-tab"         id="snxStudioTabBtn_music"     onclick="snxStudioTabSwitch('music',this)"     style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127925;<br>Library</button>
+    <button class="snx-studio-tab"         id="snxStudioTabBtn_upload"   onclick="snxStudioTabSwitch('upload',this)"   style="display:none;flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#11014;<br>Upload</button>
+    <button class="snx-studio-tab"         id="snxStudioTabBtn_playlists" onclick="snxStudioTabSwitch('playlists',this)" style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#128203;<br>Playlists</button>
+    <button class="snx-studio-tab"         id="snxStudioTabBtn_queue"    onclick="snxStudioTabSwitch('queue',this)"    style="display:none;flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127926;<br>Queue</button>
+    <button class="snx-studio-tab"         id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)" style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#9654;&#65039;<br>Playing</button>
   </nav>
+
+  <!-- ══════════════════════════════════════════════════════
+       MUSIC HUB HOME TAB
+  ═══════════════════════════════════════════════════════ -->
+  <div id="snxStudioTab_home" style="padding:0 0 100px;">
+
+    <!-- ── NOW PLAYING hero ── -->
+    <div class="snx-mh-np-hero" id="snxMHNowPlayingHero">
+      <div class="snx-mh-np-glow" aria-hidden="true"></div>
+
+      <div class="snx-mh-np-label">NOW PLAYING</div>
+
+      <div class="snx-mh-np-body">
+        <!-- Artwork -->
+        <div class="snx-mh-np-artwork" id="snxMHArtwork">
+          <span class="snx-mh-np-artwork-icon">&#127925;</span>
+        </div>
+        <!-- Info -->
+        <div class="snx-mh-np-info">
+          <div class="snx-mh-np-title" id="snxMHNPTitle">Nothing playing</div>
+          <div class="snx-mh-np-artist" id="snxMHNPArtist">Open Library to start listening</div>
+          <!-- Mini EQ bars when playing -->
+          <div class="snx-mh-np-eq-row" id="snxMHNPEQRow" style="display:none;" aria-hidden="true">
+            <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+            <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+            <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Progress bar -->
+      <div class="snx-mh-np-progress-wrap">
+        <span class="snx-mh-np-time" id="snxMHNPCurrentTime">—</span>
+        <div class="snx-mh-np-progress-track">
+          <div class="snx-mh-np-progress-fill" id="snxMHNPFill" style="width:0%"></div>
+        </div>
+        <span class="snx-mh-np-time" id="snxMHNPDuration">—</span>
+      </div>
+
+      <!-- Controls -->
+      <div class="snx-mh-np-controls">
+        <button class="snx-mh-ctrl-btn" onclick="snxMusicPrev()" title="Previous">&#9198;</button>
+        <button class="snx-mh-ctrl-btn snx-mh-ctrl-play" id="snxMHPlayBtn" onclick="snxMusicPlayPause()" title="Play / Pause">&#9654;</button>
+        <button class="snx-mh-ctrl-btn" onclick="snxMusicNext()" title="Next">&#9197;</button>
+      </div>
+
+      <!-- UP NEXT -->
+      <div class="snx-mh-up-next" id="snxMHUpNext" style="display:none;">
+        UP NEXT: <span id="snxMHUpNextTitle"></span>
+      </div>
+    </div>
+
+    <!-- ── SHADOW NEXUS RADIO ── -->
+    <div class="snx-mh-section" style="padding:0 14px 4px;">
+      <div class="snx-mh-section-title">&#128251; SHADOW NEXUS RADIO</div>
+      <div class="snx-mh-radio-card">
+        <div class="snx-mh-radio-info">
+          <div class="snx-mh-radio-live-dot" id="snxMHRadioDot"></div>
+          <div>
+            <div class="snx-mh-radio-station">24 / 7 MUSIC</div>
+            <div class="snx-mh-radio-tagline">Official Shadow Nexus rotation</div>
+          </div>
+        </div>
+        <button class="snx-mh-listen-btn" id="snxMHListenBtn"
+          onclick="snxMHRadioToggle()">
+          &#9654; LISTEN LIVE
+        </button>
+      </div>
+    </div>
+
+    <!-- ── FEATURED MUSIC ── -->
+    <div class="snx-mh-section" style="padding:0 14px 4px;" id="snxMHFeaturedSection">
+      <div class="snx-mh-section-title">&#11088; FEATURED MUSIC</div>
+      <div id="snxMHFeaturedList" class="snx-mh-featured-list">
+        <div class="snx-mh-empty">No featured tracks yet.</div>
+      </div>
+    </div>
+
+    <!-- ── PLAYLISTS / STATIONS ── -->
+    <div class="snx-mh-section" style="padding:0 14px 4px;">
+      <div class="snx-mh-section-title">&#127908; PLAYLISTS &amp; STATIONS</div>
+      <div id="snxMHPlaylistGrid" class="snx-mh-playlist-grid">
+        <div class="snx-mh-empty">No playlists yet. Create one in the Playlists tab.</div>
+      </div>
+    </div>
+
+    <!-- ── RECENTLY ADDED ── -->
+    <div class="snx-mh-section" style="padding:0 14px 4px;">
+      <div class="snx-mh-section-title">&#128336; RECENTLY ADDED</div>
+      <div id="snxMHRecentList" class="snx-mh-recent-list">
+        <div class="snx-mh-empty">Upload music to see it here.</div>
+      </div>
+    </div>
+
+    <!-- ── FOUNDER/ADMIN MANAGEMENT (gated) ── -->
+    <div id="snxMHAdminPanel" class="snx-mh-section" style="display:none;padding:0 14px 4px;">
+      <div class="snx-mh-section-title snx-mh-admin-title">&#128081; MUSIC MANAGEMENT</div>
+      <div class="snx-mh-admin-card">
+        <p class="snx-mh-admin-note">These controls are only visible to authorized management. Changes affect the official Shadow Nexus Music rotation.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button class="snx-mh-admin-btn"
+            onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))">
+            &#11014; Upload Music
+          </button>
+          <button class="snx-mh-admin-btn"
+            onclick="snxStudioTabSwitch('playlists',document.getElementById('snxStudioTabBtn_playlists'))">
+            &#128203; Manage Playlists
+          </button>
+          <button class="snx-mh-admin-btn"
+            onclick="snxStudioTabSwitch('queue',document.getElementById('snxStudioTabBtn_queue'))">
+            &#127926; Manage Queue
+          </button>
+          <button class="snx-mh-admin-btn" onclick="snxMHToggleFeatured()">
+            &#11088; Feature a Track
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end Home tab -->
 
   <!-- ══════════════════════════════════════════════════════
        MUSIC LIBRARY TAB
@@ -11026,8 +11159,8 @@ body.arcade-fs-ios body::after { display:none !important; }
     <!-- Upload Music CTA -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;">&#127925; MY MUSIC LIBRARY</div>
-      <button onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))"
-        style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:22px;
+      <button id="snxLibUploadBtn" onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))"
+        style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:22px;
         background:linear-gradient(135deg,rgba(0,174,239,0.20),rgba(0,174,239,0.10));
         border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:12px;font-weight:700;
         cursor:pointer;white-space:nowrap;">&#11014; UPLOAD MUSIC</button>
@@ -11088,10 +11221,20 @@ body.arcade-fs-ios body::after { display:none !important; }
       <div style="font-size:12px;color:#4a7a9a;">Supported: MP3, M4A, AAC, OGG, WAV, FLAC, OPUS<br>Up to 1,000 files at once</div>
     </div>
 
-    <button onclick="snxMusicOpenFilePicker()"
+    <!-- Rights confirmation -->
+    <div class="snx-mh-rights-box" id="snxMHRightsBox">
+      <label class="snx-mh-rights-label">
+        <input type="checkbox" id="snxMHRightsCheck" onchange="snxMHRightsChange()">
+        <span>I confirm that I own this content or have permission / license to use and broadcast it on Shadow Nexus Social.</span>
+      </label>
+      <p class="snx-mh-rights-note">This confirmation does not independently verify copyright ownership. Upload only content you are authorized to use.</p>
+    </div>
+
+    <button id="snxMHUploadBtn" onclick="snxMHUploadWithRights()"
       style="width:100%;padding:14px;border-radius:14px;font-size:15px;font-weight:800;letter-spacing:1px;
       background:linear-gradient(135deg,rgba(0,174,239,0.25),rgba(0,174,239,0.12));
-      border:1px solid rgba(0,174,239,0.50);color:#00AEEF;cursor:pointer;margin-bottom:16px;">
+      border:1px solid rgba(0,174,239,0.50);color:#00AEEF;cursor:pointer;margin-bottom:16px;
+      opacity:0.45;pointer-events:none;">
       &#11014; SELECT MUSIC FILES
     </button>
 
@@ -23429,6 +23572,27 @@ window._showRolePanels = function() {
     const secMod  = document.getElementById('modSettingsSection');
     if (secAdm)  secAdm.style.display  = isAdm   ? 'block' : 'none';
     if (secMod)  secMod.style.display  = isMod   ? 'block' : 'none';
+
+    // Music Hub management tabs — re-evaluate whenever role is confirmed
+    if (typeof window.snxMHRefreshHome === 'function') {
+        // Only refresh if Music Hub is currently open (avoid unnecessary DOM work)
+        const studioPage = document.getElementById('studioPage');
+        if (studioPage && studioPage.style.display !== 'none') {
+            window.snxMHRefreshHome();
+        } else {
+            // Not open yet — gate the tab buttons directly so they are correct
+            // the moment the user first opens Music Hub.
+            const isManager = isFndr;
+            const uploadTabBtn = document.getElementById('snxStudioTabBtn_upload');
+            if (uploadTabBtn) uploadTabBtn.style.display = isManager ? '' : 'none';
+            const queueTabBtn = document.getElementById('snxStudioTabBtn_queue');
+            if (queueTabBtn)  queueTabBtn.style.display  = isManager ? '' : 'none';
+            const libUploadBtn = document.getElementById('snxLibUploadBtn');
+            if (libUploadBtn) libUploadBtn.style.display = isManager ? 'flex' : 'none';
+            const adminPanel = document.getElementById('snxMHAdminPanel');
+            if (adminPanel)   adminPanel.style.display   = isManager ? '' : 'none';
+        }
+    }
 };
 /* Backward-compat alias so any existing callers of _showFounderUI still work */
 window._showFounderUI = window._showRolePanels;

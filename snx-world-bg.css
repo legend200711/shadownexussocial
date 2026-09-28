@@ -1,0 +1,258 @@
+/**
+ * snx-world-bg.css
+ * Shadow Nexus Social — Global Cinematic Background
+ *
+ * ONE static background image placed at the root.
+ * NO animations, NO parallax, NO canvas, NO video.
+ * Loads after all other stylesheets so overrides land cleanly.
+ *
+ * Visual hierarchy:
+ *   SHADOW NEXUS WORLD (static image)
+ *   ↓ subtle dark overlay (readability)
+ *   ↓ interface surfaces (semi-transparent cards)
+ *   ↓ content
+ */
+
+/* ═══════════════════════════════════════════════════════
+   GLOBAL BACKGROUND
+   Applied once to <html> so it stays truly fixed beneath
+   everything and cannot be double-applied by body overrides.
+   ═══════════════════════════════════════════════════════ */
+html {
+  /* Dark fallback — shown instantly before image loads */
+  background-color: #02040a;
+
+  /* World image beneath a LIGHT dark readability overlay.
+     Kept intentionally transparent so the fantasy artwork
+     (Reaper, wolf, cats, castle, moon) is clearly visible.
+     Content cards use their own semi-transparent surfaces.  */
+  background-image:
+    linear-gradient(
+      to bottom,
+      rgba(2, 4, 14, 0.30) 0%,
+      rgba(2, 4, 14, 0.25) 30%,
+      rgba(2, 4, 14, 0.28) 60%,
+      rgba(2, 4, 14, 0.35) 100%
+    ),
+    url('assets/images/shadow-nexus-world.webp');
+
+  background-size: cover;
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* ── Remove the competing solid body backgrounds so the world shows through ── */
+/* nexus-glass.css and realm.css both set body { background: … !important }.   */
+/* We override body here to be transparent so html's world shines through.     */
+body {
+  background: transparent !important;
+  background-attachment: unset !important;
+}
+
+/* ── Kill the fog-drift animation on body::after (index.html inline style)  ── */
+/* It runs JavaScript-free but still burns a compositing layer continuously.   */
+/* The static world already provides all the atmospheric depth we need.        */
+body::after {
+  animation: none !important;
+  background: none !important;
+}
+
+/* ── Vignette (body::before) — significantly reduced so artwork shines through ── */
+/* The inline <style> has a heavy vignette (0.45–0.55 black corners).             */
+/* Override with very subtle edges only — artwork must be clearly visible.        */
+body::before {
+  background:
+    radial-gradient(ellipse at 50% 50%,   transparent 40%, rgba(0,0,0,0.18) 100%),
+    radial-gradient(ellipse at 0%   50%,  rgba(0,0,0,0.12) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 50%, rgba(0,0,0,0.12) 0%, transparent 50%),
+    radial-gradient(ellipse at 50%  100%,rgba(0,0,0,0.15) 0%, transparent 50%) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   NAVIGATION SIDEBAR — stays fully opaque / readable
+   ═══════════════════════════════════════════════════════ */
+#shadowCore {
+  background: linear-gradient(
+    180deg,
+    rgba(0, 4, 12, 0.97) 0%,
+    rgba(0, 8, 22, 0.96) 60%,
+    rgba(0, 3, 10, 0.97) 100%
+  ) !important;
+}
+
+/* Mobile slide-out drawer */
+.sidebar {
+  background: linear-gradient(
+    180deg,
+    rgba(0, 4, 12, 0.97) 0%,
+    rgba(2, 8, 22, 0.96) 100%
+  ) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   CONTENT SURFACES — world subtly visible behind cards
+   Uses a dark semi-transparent surface so the world art
+   breathes through without harming readability.
+   ═══════════════════════════════════════════════════════ */
+
+/* Feed posts */
+.postBox {
+  background: rgba(3, 7, 18, 0.80) !important;
+  border: 1px solid rgba(0, 140, 220, 0.22) !important;
+  box-shadow:
+    0 2px 16px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 80, 160, 0.06) !important;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* Section cards (Music Hub, TV, Search, etc.) */
+.section-card {
+  background: rgba(3, 7, 18, 0.82) !important;
+  border: 1px solid rgba(0, 140, 220, 0.22) !important;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.60),
+    0 0 0 1px rgba(0, 80, 160, 0.06) !important;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* Login page card — stronger opacity for readability */
+#login .section-card {
+  background: rgba(2, 5, 16, 0.94) !important;
+  border-color: rgba(0, 174, 239, 0.35) !important;
+  box-shadow:
+    0 8px 48px rgba(0, 0, 0, 0.80),
+    0 0 0 1px rgba(0, 174, 239, 0.08) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* Messages / Inbox panes — stronger readability required */
+.inbox-chat-pane,
+.inbox-list-pane {
+  background: rgba(3, 6, 18, 0.92) !important;
+}
+.inbox-split {
+  background: rgba(3, 6, 16, 0.90) !important;
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+/* Message input area — always opaque */
+.ipc-modal-input-wrap,
+.inbox-chat-input-wrap,
+.storm-footer-input-wrap {
+  background: rgba(3, 6, 20, 0.96) !important;
+}
+
+/* Notification toast */
+#notification-toast {
+  background: rgba(3, 7, 20, 0.97) !important;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* ═══════════════════════════════════════════════════════
+   FORMS & INPUTS — opaque so art doesn't bleed through text
+   ═══════════════════════════════════════════════════════ */
+input, textarea, select {
+  background: rgba(2, 5, 16, 0.94) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MODALS — very dark, world visible only as atmosphere
+   ═══════════════════════════════════════════════════════ */
+.edit-profile-inner,
+.social-list-inner,
+.badge-tooltip-inner,
+.fam-req-inner,
+.delete-modal-inner,
+.inbox-nm-card,
+.inbox-del-card {
+  background: rgba(2, 5, 16, 0.97) !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   TV / LIVE — video containers must stay solid dark
+   ═══════════════════════════════════════════════════════ */
+video {
+  /* No transparency or filters that would degrade video quality */
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   PERFORMANCE GATES
+   On lite/minimal devices: remove backdrop-filter entirely.
+   Use fully opaque cards to preserve scroll performance.
+   ═══════════════════════════════════════════════════════ */
+.snx-quality-lite .postBox,
+.snx-quality-minimal .postBox,
+.snx-quality-lite .section-card,
+.snx-quality-minimal .section-card,
+.snx-quality-lite .inbox-split,
+.snx-quality-minimal .inbox-split {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  background: #04090f !important;
+}
+
+/* During live/camera: pull back all blurs immediately */
+.snx-live-active .postBox,
+.snx-camera-active .postBox,
+.snx-live-active .section-card,
+.snx-camera-active .section-card {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════
+   MOBILE — responsive background positioning
+   The image is 1774×887 landscape. On portrait phones
+   the right half (castle/moon area) is a strong crop.
+   Shift right slightly to catch more of the Grim Reaper
+   side on the left and remain dramatic.
+   ═══════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  html {
+    /* Keep cover, shift to show a dramatic portion of the art */
+    background-position: 35% center;
+    /* No background-attachment: fixed on mobile — causes scroll lag on iOS */
+    background-attachment: scroll;
+  }
+
+  /* Remove backdrop-filter on mobile — GPU compositing cost */
+  .postBox,
+  .section-card,
+  .inbox-split {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  /* Slightly more opaque on mobile to maintain readability on small screens */
+  .postBox {
+    background: rgba(3, 7, 18, 0.90) !important;
+  }
+  .section-card {
+    background: rgba(3, 7, 18, 0.91) !important;
+  }
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+  html {
+    /* Tablet: remove fixed attachment on mid-tier devices */
+    background-attachment: scroll;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   PREVENT HORIZONTAL OVERFLOW
+   The background image is on <html>, not a child element,
+   so it cannot cause document overflow. Belt-and-suspenders:
+   ═══════════════════════════════════════════════════════ */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
