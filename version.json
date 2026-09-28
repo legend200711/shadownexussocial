@@ -1,9 +1,9 @@
 {
-  "buildId": "SNS-2026-MH-FOUNDER-001",
-  "swVersion": "v65",
-  "deployedAt": "2026-09-25T00:00:00Z",
+  "buildId": "SNS-2026-ROLLBACK-1943",
+  "swVersion": "v66",
+  "deployedAt": "2026-09-27T19:43:00Z",
   "project": "horr-a08f4",
-  "studioVersion": "3.0.2",
+  "studioVersion": "3.0.1",
   "nexusVersion": "1.0.1",
-  "note": "MH-FOUNDER-001: Fix Music Hub founder recognition race on mobile. _mhShowAdminPanel now uses canonical Firebase Auth email check instead of relying solely on window._snxRole. Added snxMHReapplyFounder hook called from onAuthStateChanged. SW v65 busts v64 cache on mobile."
+  "note": "ROLLBACK-1943: Restored to b475018 (19:35 baseline). Reverted Music Hub Home tab (studio.js/css), nexus-intro.js session-key fix, snxMHReapplyFounder hook. SW v66 busts v64+v65 caches on all devices."
 }

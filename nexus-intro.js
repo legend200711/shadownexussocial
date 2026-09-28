@@ -28,6 +28,7 @@
     window.__shadowNexusIntroStarted = true;
 
     // ── Constants ────────────────────────────────────────────────────────────
+    var SESSION_KEY     = 'snxIntroDone';
     var WELCOME_DOC     = 'welcomeConfig';   // /siteSettings/welcomeConfig
     var DEFAULT_VOLUME  = 0.45;
     // Minimum time (ms) the intro must be visible before exiting.
@@ -55,21 +56,18 @@
                     window.innerWidth < 768;
 
     // ── Session helpers ───────────────────────────────────────────────────────
-    // Uses a window-scoped flag so the intro plays on every genuine new browser/PWA
-    // session (window is always cleared on session end) but never replays during
-    // normal SPA navigation within the same running session.
     function _shouldShow() {
         if (sessionStorage.getItem('snxIntroReplay') === '1') {
             sessionStorage.removeItem('snxIntroReplay');
             return true;
         }
-        return !window.__snxIntroDoneThisSession;
+        return !sessionStorage.getItem(SESSION_KEY);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
     window.replayNexusIntro = function () {
         sessionStorage.setItem('snxIntroReplay', '1');
-        window.__snxIntroDoneThisSession = false;
+        sessionStorage.removeItem(SESSION_KEY);
         var old = document.getElementById('snxIntroOverlay');
         if (old) old.remove();
         _stopAudio();
@@ -367,9 +365,7 @@
     function _doExit(fast) {
         if (_exiting) return;
         _exiting = true;
-        // Mark intro as played for this window/session lifetime.
-        // window-scoped so it resets on every genuine new browser/PWA session.
-        window.__snxIntroDoneThisSession = true;
+        sessionStorage.setItem(SESSION_KEY, '1');
 
         // Disable enter button immediately to prevent double-tap
         var enterBtn = document.getElementById('snxIntroEnterBtn');
