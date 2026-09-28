@@ -385,14 +385,20 @@ export function showReturnToProgramming() {
 function _startSubscriptions() {
   // Subscribe to live channels (for LIVE NOW badge + section)
   if (_liveUnsub) _liveUnsub();
-  _liveUnsub = subscribeLiveChannels(channels => {
-    _liveChannels = channels;
-    // Expose live count for Network Status panel in snx-ch-adapter.js
-    window._snxLiveChannelCount = channels.length;
-    _updateLiveBadge();
-    _updateLivePreview();
-    if (_activeTab === 'live-now') _renderLiveNowSection();
-  });
+  _liveUnsub = subscribeLiveChannels(
+    channels => {
+      _liveChannels = channels;
+      // Expose live count for Network Status panel in snx-ch-adapter.js
+      window._snxLiveChannelCount = channels.length;
+      _updateLiveBadge();
+      _updateLivePreview();
+      if (_activeTab === 'live-now') _renderLiveNowSection();
+    },
+    err => {
+      // Visible error handler — surfaces permission-denied / index failures
+      console.error('[SNX TV] subscribeLiveChannels FAILED:', err.code, err.message);
+    }
+  );
 
   // Subscribe to full directory
   if (_dirUnsub) _dirUnsub();

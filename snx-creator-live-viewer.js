@@ -156,7 +156,7 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
     liveId = getHostState()?.liveId || null;
     if (!liveId) { _hideOverlay(); return; }
   } else {
-    // Start fresh broadcast
+    // Start fresh broadcast — ALL 10 steps must succeed before declaring LIVE
     try {
       liveId = await startCreatorBroadcast(user, userData, {
         localStream: setupResult.localStream,
@@ -165,10 +165,12 @@ async function _wireHostStage(overlay, user, userData, channel, setupResult) {
         facingMode:  setupResult.facingMode,
         title:       setupResult.title,
       });
-      _toast('🔴 You are LIVE!');
+      // Only reach here if creatorChannels.status === 'live' was confirmed
+      _toast('🔴 You are LIVE!', 'live');
     } catch (err) {
-      _toast('Failed to start broadcast: ' + err.message, 'error');
-      setTimeout(() => _hideOverlay(), 2000);
+      console.error('[SNX LIVE] _wireHostStage — startCreatorBroadcast FAILED:', err);
+      _toast('❌ Failed to start broadcast: ' + err.message, 'error');
+      setTimeout(() => _hideOverlay(), 3000);
       return;
     }
   }
@@ -323,9 +325,12 @@ async function _cleanupHostStage(overlay, user, liveId, timerInterval, evtTypes,
   // Idempotency guard: prevent double-end from double-click or duplicate calls
   if (overlay._crlEndingFlag) return;
   overlay._crlEndingFlag = true;
+  console.log('[SNX LIVE] END_BUTTON_CLICKED — _cleanupHostStage entered, liveId:', liveId);
 
   const endBtn = overlay.querySelector('#crl-confirm-end-btn');
   if (endBtn) { endBtn.disabled = true; endBtn.textContent = 'Ending…'; }
+
+  console.log('[SNX LIVE] END_CONFIRM_OPENED — confirmed, proceeding to teardown');
 
   if (timerInterval) clearInterval(timerInterval);
   evtTypes.forEach(t => window.removeEventListener(t, _onCrl));
@@ -346,9 +351,17 @@ async function _cleanupHostStage(overlay, user, liveId, timerInterval, evtTypes,
   const { getHostState: ghs } = await import('./snx-creator-live.js');
   const peakViewers = ghs()?.peakViewers || 0;
 
-  await endCreatorBroadcast(user.uid);
+  console.log('[SNX LIVE] END_CONFIRMED — calling endCreatorBroadcast for uid:', user.uid);
+  try {
+    await endCreatorBroadcast(user.uid);
+    console.log('[SNX LIVE] END_CREATOR_BROADCAST_FINISHED — success');
+  } catch (_endErr) {
+    console.error('[SNX LIVE] END_CREATOR_BROADCAST_FAILED:', _endErr);
+    // Still proceed to replay modal — broadcast engine logs the specific failure
+  }
 
   // Show "YOUR LIVE HAS ENDED" replay decision modal
+  // Navigation back to channel happens inside the replay modal (no window.close / logout)
   _showEndLiveReplayModal(overlay, user, liveId, liveTitle, durationSec, peakViewers);
 }
 
@@ -1280,7 +1293,7 @@ function _appendChatMsg(container, data, callerUid) {
 function _toast(msg, type = 'info') {
   const el = document.createElement('div');
   el.textContent = msg;
-  const color = type === 'error' ? '#ff3344' : '#00AEEF';
+  const color = type === 'error' ? '#ff3344' : type === 'live' ? '#ff2244' : '#00AEEF';
   el.style.cssText = `
     position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
     background:rgba(5,9,26,0.92);color:${color};

@@ -17048,32 +17048,86 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           const onlineBadge = document.getElementById("profileOnlineBadge");
           if (onlineBadge) onlineBadge.style.display = p.status === 'online' ? 'inline-flex' : 'none';
 
-          // LIVE NOW badge — link to the active stream room
-          const liveBadge = document.getElementById("profileLiveBadge");
-          if (liveBadge) {
-            if (p.isLive && p.liveRoomId) {
-              liveBadge.href = `live.html#watch=${encodeURIComponent(p.liveRoomId)}`;
-              liveBadge.style.display = 'inline-flex';
-            } else {
-              liveBadge.style.display = 'none';
-            }
-          }
-
-          // Avatar live ring — red pulsing border when the user is streaming
-          const avatarEl2 = document.getElementById("profileAvatar");
-          if (avatarEl2) avatarEl2.classList.toggle('is-live', !!(p.isLive));
-
-          // Watch Live button — shown on OTHER user's profile only when they are live
+          // ── LIVE NOW badge + Watch Live — check creatorChannels (new system) first,
+          // then fall back to legacy users.isLive / users.liveRoomId ──────────────────
+          const liveBadge   = document.getElementById("profileLiveBadge");
           const btnWatchLive = document.getElementById("btnWatchLive");
-          const isSelf = currentUser && uid === currentUser.uid;
-          if (btnWatchLive) {
-            if (!isSelf && p.isLive && p.liveRoomId) {
-              btnWatchLive.href = `live.html#watch=${encodeURIComponent(p.liveRoomId)}`;
-              btnWatchLive.style.display = 'inline-flex';
-            } else {
-              btnWatchLive.style.display = 'none';
+          const avatarEl2   = document.getElementById("profileAvatar");
+          const isSelf      = currentUser && uid === currentUser.uid;
+
+          // Async check against creatorChannels (authoritative for new Creator Live)
+          (async () => {
+            let isLiveNow = false;
+            let watchLiveAction = null; // function or null
+
+            try {
+              const _chSnap = await getDoc(doc(db, 'creatorChannels', uid));
+              if (_chSnap.exists()) {
+                const _ch = _chSnap.data();
+                if (_ch.status === 'live' && _ch.currentLiveId) {
+                  isLiveNow = true;
+                  // Watch Live: open inside the Creator Live viewer (no page navigation)
+                  const _liveId = _ch.currentLiveId;
+                  const _creatorUid = uid;
+                  watchLiveAction = async () => {
+                    try {
+                      const { ensureCreatorChannel } = await import('./snx-creator-channels.js');
+                      const _viewerUser    = window._snxCurrentUser;
+                      const _viewerData    = window._snxUserData || null;
+                      const _creatorCh     = await ensureCreatorChannel({ uid: _creatorUid });
+                      const { openViewerLiveStage } = await import('./snx-creator-live-viewer.js');
+                      await openViewerLiveStage(_viewerUser, _viewerData, _creatorCh, _liveId);
+                    } catch (_wlErr) {
+                      console.error('[SNX Profile] Watch Live failed:', _wlErr);
+                      if (typeof toastNotification === 'function') toastNotification('⚠️ Could not open live stream.');
+                    }
+                  };
+                }
+              }
+            } catch (_) {}
+
+            // Fall back to legacy users.isLive if creatorChannels not live
+            if (!isLiveNow && p.isLive && p.liveRoomId) {
+              isLiveNow = true;
+              const _legacyUrl = `live.html#watch=${encodeURIComponent(p.liveRoomId)}`;
+              watchLiveAction = () => { window.open(_legacyUrl, '_blank', 'noopener'); };
             }
-          }
+
+            // Apply LIVE badge
+            if (liveBadge) {
+              if (isLiveNow) {
+                liveBadge.removeAttribute('href');
+                liveBadge.style.cursor = 'pointer';
+                liveBadge.style.display = 'inline-flex';
+                liveBadge._snxWatchAction = watchLiveAction;
+                if (!liveBadge._snxWatchBound) {
+                  liveBadge._snxWatchBound = true;
+                  liveBadge.addEventListener('click', e => { e.preventDefault(); liveBadge._snxWatchAction?.(); });
+                }
+              } else {
+                liveBadge.style.display = 'none';
+              }
+            }
+
+            // Apply avatar live ring
+            if (avatarEl2) avatarEl2.classList.toggle('is-live', isLiveNow);
+
+            // Apply Watch Live button (other user only)
+            if (btnWatchLive) {
+              if (!isSelf && isLiveNow && watchLiveAction) {
+                btnWatchLive.removeAttribute('href');
+                btnWatchLive.style.cursor = 'pointer';
+                btnWatchLive.style.display = 'inline-flex';
+                btnWatchLive._snxWatchAction = watchLiveAction;
+                if (!btnWatchLive._snxWatchBound) {
+                  btnWatchLive._snxWatchBound = true;
+                  btnWatchLive.addEventListener('click', e => { e.preventDefault(); btnWatchLive._snxWatchAction?.(); });
+                }
+              } else {
+                btnWatchLive.style.display = 'none';
+              }
+            }
+          })();
 
           // Joined date
           const joinedEl = document.getElementById("profileJoinedText");

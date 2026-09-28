@@ -249,14 +249,20 @@ export function subscribeChannelDirectory(cb) {
  * @param {function} cb
  * @returns {function} unsubscribe
  */
-export function subscribeLiveChannels(cb) {
+export function subscribeLiveChannels(cb, onErr) {
   const q = query(
     collection(snsDb, 'creatorChannels'),
     where('status', '==', 'live'),
   );
-  return onSnapshot(q, snap => {
-    cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-  });
+  return onSnapshot(q,
+    snap => {
+      cb(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    },
+    err => {
+      console.error('[SNX LIVE] subscribeLiveChannels onSnapshot ERROR:', err.code, err.message, err);
+      if (typeof onErr === 'function') onErr(err);
+    }
+  );
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -227,8 +227,36 @@ export async function openCreatorSetup(user, userData, container, onDone) {
    EXPORTED: HOST — START BROADCAST
    Called after setup confirms GO LIVE.
    Returns liveId on success, throws on failure.
+
+   10-STEP DIAGNOSTIC SEQUENCE:
+     STEP 1  AUTH USER         — verify UID consistency
+     STEP 2  CREATE liveSessions
+     STEP 3  SET liveId
+     STEP 4  CREATE RTDB ROOM
+     STEP 5  onDisconnect
+     STEP 6  UPDATE creatorChannels  ← REQUIRED before declaring LIVE
+     STEP 7  HOST PRESENCE
+     STEP 8  WEBRTC START
+     STEP 9  VIEWER COUNT
+     STEP 10 HEARTBEAT
+
+   Only after all required steps pass is 🔴 YOU ARE LIVE displayed.
+   On any failure a full rollback is performed (no ghost sessions).
 ══════════════════════════════════════════════════════════════ */
 export async function startCreatorBroadcast(user, userData, opts = {}) {
+  // ── AUTH CONSISTENCY CHECK ──────────────────────────────────────────────
+  // window._snxCurrentUser is the canonical SNS auth reference.
+  // If there is a mismatch between caller uid and window._snxCurrentUser,
+  // abort to prevent ghost records under a stale UID.
+  const _canonicalUser = window._snxCurrentUser || null;
+  if (_canonicalUser && _canonicalUser.uid !== user.uid) {
+    const _msg = `[SNX LIVE] STEP 1 AUTH USER — UID MISMATCH: caller=${user.uid} canonical=${_canonicalUser.uid}`;
+    console.error(_msg);
+    throw new Error('Auth UID mismatch — please reload and sign in again.');
+  }
+
+  console.log('[SNX LIVE] STEP 1 AUTH USER — uid:', user.uid, 'email:', user.email);
+
   if (!user) throw new Error('Not authenticated');
   if (_hostState && !_hostState.endedFlag) throw new Error('Already live');
 
@@ -239,92 +267,161 @@ export async function startCreatorBroadcast(user, userData, opts = {}) {
   const safeUid    = user.uid.replace(/[.#$/[\]]/g, '_');
   const rtdbRoomId = `${safeUid}_${Date.now().toString(36)}`;
 
-  // Create Firestore liveSessions doc with auto-ID
-  const sessionRef = await addDoc(collection(db, 'liveSessions'), {
-    liveId:      '',
-    hostUid:     user.uid,
-    channelId:   user.uid,
-    title,
-    status:      'live',
-    rtdbRoomId,
-    startedAt:   serverTimestamp(),
-    endedAt:     null,
-    viewerCount: 0,
-    peakViewers: 0,
-    streamInfo:  null,
-    featuredOnMainTv: false,
-  });
-  const liveId = sessionRef.id;
-  await updateDoc(sessionRef, { liveId });
+  // Track partial state for rollback
+  let _sessionRef     = null;
+  let _liveId         = null;
+  let _rtdbWritten    = false;
+  let _channelWritten = false;
 
-  // Write room to RTDB (mirrors live.js startLive)
-  const roomData = {
-    roomId:       rtdbRoomId,
-    hostId:       user.uid,
-    hostName:     userData?.displayName || user.email?.split('@')[0] || 'Creator',
-    hostUsername: userData?.username || '',
-    hostAvatar:   userData?.avatar || userData?.profilePicture || '',
-    title,
-    status:       'live',
-    isLive:       true,
-    viewers:      0,
-    likes:        0,
-    createdAt:    Date.now(),
-    liveId,       // link back to Firestore doc
-    channelId:    user.uid,
-  };
+  try {
+    // ── STEP 2: CREATE liveSessions ─────────────────────────────────────
+    console.log('[SNX LIVE] STEP 2 CREATE liveSessions — rtdbRoomId:', rtdbRoomId);
+    _sessionRef = await addDoc(collection(db, 'liveSessions'), {
+      liveId:      '',
+      hostUid:     user.uid,
+      channelId:   user.uid,
+      title,
+      status:      'live',
+      rtdbRoomId,
+      startedAt:   serverTimestamp(),
+      endedAt:     null,
+      viewerCount: 0,
+      peakViewers: 0,
+      streamInfo:  null,
+      featuredOnMainTv: false,
+    });
 
-  await set(ref(liveDB, `liveRooms/${rtdbRoomId}`), roomData);
+    // ── STEP 3: SET liveId ──────────────────────────────────────────────
+    _liveId = _sessionRef.id;
+    console.log('[SNX LIVE] STEP 3 SET liveId — liveId:', _liveId);
+    await updateDoc(_sessionRef, { liveId: _liveId });
 
-  // onDisconnect: mark room ended if host drops
-  await onDisconnect(ref(liveDB, `liveRooms/${rtdbRoomId}`)).update({
-    status: 'ended', isLive: false, endedAt: Date.now(),
-  });
+    // ── STEP 4: CREATE RTDB ROOM ────────────────────────────────────────
+    const roomData = {
+      roomId:       rtdbRoomId,
+      hostId:       user.uid,
+      hostName:     userData?.displayName || user.email?.split('@')[0] || 'Creator',
+      hostUsername: userData?.username || '',
+      hostAvatar:   userData?.avatar || userData?.profilePicture || '',
+      title,
+      status:       'live',
+      isLive:       true,
+      viewers:      0,
+      likes:        0,
+      createdAt:    Date.now(),
+      liveId:       _liveId,
+      channelId:    user.uid,
+    };
+    console.log('[SNX LIVE] STEP 4 CREATE RTDB ROOM — liveRooms/', rtdbRoomId);
+    await set(ref(liveDB, `liveRooms/${rtdbRoomId}`), roomData);
+    _rtdbWritten = true;
 
-  // Update creator's permanent channel
-  await updateDoc(doc(db, 'creatorChannels', user.uid), {
-    status:           'live',
-    currentLiveId:    liveId,
-    currentStartedAt: serverTimestamp(),
-    updatedAt:        serverTimestamp(),
-  });
+    // ── STEP 5: onDisconnect ────────────────────────────────────────────
+    console.log('[SNX LIVE] STEP 5 onDisconnect — registering for:', rtdbRoomId);
+    await onDisconnect(ref(liveDB, `liveRooms/${rtdbRoomId}`)).update({
+      status: 'ended', isLive: false, endedAt: Date.now(),
+    });
 
-  // Write host presence to liveGuests (mirrors live.js)
-  await set(ref(liveDB, `liveGuests/${rtdbRoomId}/_host_`), {
-    uid: user.uid, name: roomData.hostName, avatar: roomData.hostAvatar,
-    isHost: true, camOn, micOn, joinedAt: Date.now(), hb: Date.now(),
-  });
-  onDisconnect(ref(liveDB, `liveGuests/${rtdbRoomId}`)).remove().catch(() => {});
+    // ── STEP 6: UPDATE creatorChannels ──────────────────────────────────
+    // CRITICAL: This MUST succeed before we declare the host LIVE.
+    // A live broadcast is NOT registered on the platform until this write
+    // completes — only then will it appear in Live Now / Creator Channel.
+    console.log('[SNX LIVE] STEP 6 UPDATE creatorChannels — uid:', user.uid);
+    await updateDoc(doc(db, 'creatorChannels', user.uid), {
+      status:           'live',
+      currentLiveId:    _liveId,
+      currentStartedAt: serverTimestamp(),
+      updatedAt:        serverTimestamp(),
+    });
+    _channelWritten = true;
+    console.log('[SNX LIVE] STEP 6 creatorChannels — WRITE CONFIRMED ✓  status=live  currentLiveId=' + _liveId);
 
-  // Send live notifications to channel followers
-  _sendLiveNotifications(user.uid, liveId, rtdbRoomId, title, roomData).catch(() => {});
+    // ── STEP 7: HOST PRESENCE ───────────────────────────────────────────
+    console.log('[SNX LIVE] STEP 7 HOST PRESENCE — liveGuests/', rtdbRoomId, '/_host_');
+    await set(ref(liveDB, `liveGuests/${rtdbRoomId}/_host_`), {
+      uid: user.uid, name: roomData.hostName, avatar: roomData.hostAvatar,
+      isHost: true, camOn, micOn, joinedAt: Date.now(), hb: Date.now(),
+    });
+    onDisconnect(ref(liveDB, `liveGuests/${rtdbRoomId}`)).remove().catch(() => {});
 
-  // Build host state
-  _hostState = {
-    uid: user.uid, liveId, rtdbRoomId, localStream, camOn, micOn, facingMode,
-    roomData, userData,
-    viewerPeers: {}, signalUnsub: null, viewerCountUnsub: null,
-    roomWatchRef: null, heartbeatInterval: null,
-    endedFlag: false, notifSentFlag: true,
-    peakViewers: 0,   // tracked by _hostSubscribeViewerCount, written on end
-  };
+    // Send live notifications to channel followers (non-critical — fire-and-forget)
+    _sendLiveNotifications(user.uid, _liveId, rtdbRoomId, title, roomData).catch(() => {});
 
-  // Start WebRTC listener for incoming viewers
-  _hostStartWebRTC();
+    // Build host state ONLY after all required writes succeed
+    _hostState = {
+      uid: user.uid, liveId: _liveId, rtdbRoomId, localStream, camOn, micOn, facingMode,
+      roomData, userData,
+      viewerPeers: {}, signalUnsub: null, viewerCountUnsub: null,
+      roomWatchRef: null, heartbeatInterval: null,
+      endedFlag: false, notifSentFlag: true,
+      peakViewers: 0,   // tracked by _hostSubscribeViewerCount, written on end
+    };
 
-  // Viewer count subscription
-  _hostSubscribeViewerCount();
+    // ── STEP 8: WEBRTC START ────────────────────────────────────────────
+    console.log('[SNX LIVE] STEP 8 WEBRTC START');
+    _hostStartWebRTC();
 
-  // Host heartbeat (15 s)
-  _hostState.heartbeatInterval = setInterval(() => {
-    if (_hostState?.endedFlag) return;
-    set(ref(liveDB, `liveRooms/${rtdbRoomId}/hostHb`), Date.now()).catch(() => {});
-  }, 15000);
+    // ── STEP 9: VIEWER COUNT ────────────────────────────────────────────
+    console.log('[SNX LIVE] STEP 9 VIEWER COUNT — subscribing');
+    _hostSubscribeViewerCount();
 
-  // Camera background recovery
-  document.addEventListener('visibilitychange', _hostOnVisibilityChange);
+    // ── STEP 10: HEARTBEAT ──────────────────────────────────────────────
+    console.log('[SNX LIVE] STEP 10 HEARTBEAT — starting 15s interval');
+    _hostState.heartbeatInterval = setInterval(() => {
+      if (_hostState?.endedFlag) return;
+      set(ref(liveDB, `liveRooms/${rtdbRoomId}/hostHb`), Date.now()).catch(() => {});
+    }, 15000);
 
-  return liveId;
+    document.addEventListener('visibilitychange', _hostOnVisibilityChange);
+
+    console.log('[SNX LIVE] 🔴 ALL STEPS COMPLETE — host is LIVE. liveId:', _liveId, ' rtdbRoomId:', rtdbRoomId);
+    return _liveId;
+
+  } catch (_startErr) {
+    // ── STARTUP ROLLBACK ────────────────────────────────────────────────
+    // Surface the exact failure so it is NEVER silently swallowed.
+    console.error('[SNX LIVE] ❌ STARTUP FAILED — rolling back partial state.', _startErr);
+
+    // Stop camera/mic immediately — broadcast cannot proceed
+    if (localStream) {
+      try { localStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    }
+
+    // Cancel any onDisconnect that was registered and clean up RTDB
+    if (_rtdbWritten) {
+      try { onDisconnect(ref(liveDB, `liveRooms/${rtdbRoomId}`)).cancel().catch(() => {}); } catch (_) {}
+      try { await update(ref(liveDB, `liveRooms/${rtdbRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() }); } catch (_) {}
+      setTimeout(() => remove(ref(liveDB, `liveRooms/${rtdbRoomId}`)).catch(() => {}), 2000);
+      try { remove(ref(liveDB, `liveGuests/${rtdbRoomId}`)).catch(() => {}); } catch (_) {}
+      try { remove(ref(liveDB, `liveConnections/${rtdbRoomId}`)).catch(() => {}); } catch (_) {}
+    }
+
+    // Mark liveSessions failed / delete it so no ghost session remains
+    if (_sessionRef) {
+      try {
+        await updateDoc(_sessionRef, { status: 'failed', endedAt: serverTimestamp() });
+      } catch (_) {
+        try { await deleteDoc(_sessionRef); } catch (_) {}
+      }
+    }
+
+    // Return creatorChannels to offline only if we managed to write it
+    if (_channelWritten) {
+      try {
+        await updateDoc(doc(db, 'creatorChannels', user.uid), {
+          status: 'offline', currentLiveId: null, currentStartedAt: null, updatedAt: serverTimestamp(),
+        });
+      } catch (_rollbackErr) {
+        console.error('[SNX LIVE] ROLLBACK creatorChannels ALSO FAILED:', _rollbackErr);
+      }
+    }
+
+    // Clear any partial host state
+    _hostState = null;
+
+    // Re-throw the real error so _wireHostStage displays the exact message
+    throw _startErr;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -338,103 +435,96 @@ function _hostStartWebRTC() {
   if (_hostState.signalUnsub) { try { _hostState.signalUnsub(); } catch (_) {} }
 
   _hostState.signalUnsub = onValue(viewersRef, async snap => {
-    if (!snap.exists() || !_hostState) return;
-    snap.forEach(child => {
-      const viewerUid = child.key;
-      const d = child.val() || {};
-      if (!_hostState.viewerPeers[viewerUid]) {
-        _hostCreateViewerPeer(viewerUid);
-      } else {
-        const peer = _hostState.viewerPeers[viewerUid];
-        if (d.answer && peer.pc.remoteDescription === null) {
-          peer.pc.setRemoteDescription(new RTCSessionDescription(d.answer)).catch(() => {});
-        }
-        if (peer.pc.remoteDescription && d.viewerCandidates) {
-          for (const [k, c] of Object.entries(d.viewerCandidates)) {
-            if (peer.appliedCandKeys.has(k)) continue;
-            peer.appliedCandKeys.add(k);
-            peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-          }
-        }
-        if (d.sessionId && d.sessionId !== peer.sessionId) {
-          _hostRebuildViewerPeer(viewerUid);
-        }
-      }
-    });
+    if (!_hostState || _hostState.endedFlag) return;
+    if (!snap.exists()) return;
+    const viewers = snap.val() || {};
+    for (const [viewerUid, viewerData] of Object.entries(viewers)) {
+      if (!viewerData || _hostState.viewerPeers[viewerUid]) continue;
+      await _hostCreateViewerPeer(viewerUid).catch(err => {
+        console.warn('[SNX LIVE] Failed to create viewer peer for', viewerUid, err);
+      });
+    }
   });
 }
 
 async function _hostCreateViewerPeer(viewerUid) {
-  if (!_hostState || _hostState.viewerPeers[viewerUid]) return;
-  const { rtdbRoomId, localStream } = _hostState;
-  const slotRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}`);
+  if (!_hostState) return;
+  const { rtdbRoomId, liveId, localStream } = _hostState;
+
   const pc = new RTCPeerConnection(ICE);
+  _hostState.viewerPeers[viewerUid] = { pc, appliedCandKeys: new Set() };
 
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  pc.getTransceivers().forEach(tc => { tc.direction = 'sendonly'; });
-
-  const peer = { pc, appliedCandKeys: new Set(), sessionId: null };
-  _hostState.viewerPeers[viewerUid] = peer;
-
-  const pending = [];
-  let offerWritten = false;
+  // Add all tracks from local stream
+  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   pc.onicecandidate = e => {
     if (!e.candidate) return;
-    if (!offerWritten) { pending.push(e.candidate.toJSON()); return; }
-    push(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/hostCandidates`), e.candidate.toJSON()).catch(() => {});
+    const candRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${viewerUid}/${Date.now()}`);
+    set(candRef, e.candidate.toJSON()).catch(() => {});
   };
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
-    if (s === 'failed') _hostRebuildViewerPeer(viewerUid);
-    if (s === 'closed') _hostTeardownViewerPeer(viewerUid);
+    if (s === 'failed' || s === 'disconnected' || s === 'closed') {
+      _hostRebuildViewerPeer(viewerUid);
+    }
   };
+
   pc.oniceconnectionstatechange = () => {
-    if (pc.iceConnectionState === 'failed') { try { pc.restartIce(); } catch (_) {} }
+    if (pc.iceConnectionState === 'failed') {
+      try { pc.restartIce(); } catch (_) {}
+    }
   };
 
-  let offer;
-  try { offer = await pc.createOffer(); await pc.setLocalDescription(offer); }
-  catch (_) { _hostTeardownViewerPeer(viewerUid); return; }
+  // Read viewer offer
+  const offerRef  = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/offer`);
+  const offerSnap = await get(offerRef);
+  if (!offerSnap.exists()) { _hostTeardownViewerPeer(viewerUid); return; }
 
-  try {
-    await set(slotRef, { offer: { type: offer.type, sdp: offer.sdp }, hostCandidates: {}, viewerCandidates: {} });
-    offerWritten = true;
-  } catch (_) { _hostTeardownViewerPeer(viewerUid); return; }
+  await pc.setRemoteDescription(new RTCSessionDescription(offerSnap.val()));
 
-  // Flush buffered ICE candidates
-  for (const c of pending) {
-    push(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/hostCandidates`), c).catch(() => {});
-  }
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+
+  const answerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${viewerUid}`);
+  await set(answerRef, { type: answer.type, sdp: answer.sdp });
+
+  // Subscribe to viewer ICE candidates
+  const vCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${viewerUid}`);
+  onValue(vCandRef, snap => {
+    if (!snap.exists()) return;
+    const cands = snap.val() || {};
+    for (const [key, cand] of Object.entries(cands)) {
+      if (_hostState?.viewerPeers[viewerUid]?.appliedCandKeys?.has(key)) continue;
+      _hostState?.viewerPeers[viewerUid]?.appliedCandKeys?.add(key);
+      pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+    }
+  });
 }
 
 function _hostRebuildViewerPeer(viewerUid) {
-  const old = _hostState?.viewerPeers[viewerUid];
-  if (old?.pc) { try { old.pc.close(); } catch (_) {} }
-  if (_hostState) delete _hostState.viewerPeers[viewerUid];
-  _hostCreateViewerPeer(viewerUid);
+  if (!_hostState || _hostState.endedFlag) return;
+  _hostTeardownViewerPeer(viewerUid);
+  setTimeout(() => {
+    if (_hostState && !_hostState.endedFlag) _hostCreateViewerPeer(viewerUid).catch(() => {});
+  }, 2000);
 }
 
 function _hostTeardownViewerPeer(viewerUid) {
-  const peer = _hostState?.viewerPeers[viewerUid];
+  if (!_hostState) return;
+  const peer = _hostState.viewerPeers[viewerUid];
   if (!peer) return;
   try { peer.pc.close(); } catch (_) {}
-  if (_hostState) delete _hostState.viewerPeers[viewerUid];
-  const rtdbRoomId = _hostState?.rtdbRoomId;
-  if (rtdbRoomId) remove(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}`)).catch(() => {});
+  delete _hostState.viewerPeers[viewerUid];
 }
 
 function _hostTeardownAllViewerPeers() {
   if (!_hostState) return;
-  for (const uid of Object.keys(_hostState.viewerPeers)) _hostTeardownViewerPeer(uid);
-  _hostState.viewerPeers = {};
-  if (_hostState.signalUnsub) { try { _hostState.signalUnsub(); } catch (_) {} _hostState.signalUnsub = null; }
+  for (const uid of Object.keys(_hostState.viewerPeers)) {
+    _hostTeardownViewerPeer(uid);
+  }
 }
 
-/* ══════════════════════════════════════════════════════════════
-   HOST — viewer count
-══════════════════════════════════════════════════════════════ */
 function _hostSubscribeViewerCount() {
   if (!_hostState) return;
   const { rtdbRoomId, liveId } = _hostState;
@@ -527,6 +617,7 @@ export async function endCreatorBroadcast(uid) {
   _hostState.endedFlag = true;
 
   const { liveId, rtdbRoomId } = _hostState;
+  console.log('[SNX LIVE] endCreatorBroadcast — liveId:', liveId, ' rtdbRoomId:', rtdbRoomId);
 
   // Cancel onDisconnect triggers
   onDisconnect(ref(liveDB, `liveRooms/${rtdbRoomId}`)).cancel().catch(() => {});
@@ -549,8 +640,12 @@ export async function endCreatorBroadcast(uid) {
   // Remove camera recovery listener
   document.removeEventListener('visibilitychange', _hostOnVisibilityChange);
 
-  // Mark RTDB room ended
-  await update(ref(liveDB, `liveRooms/${rtdbRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() }).catch(() => {});
+  // Mark RTDB room ended — expose failure
+  try {
+    await update(ref(liveDB, `liveRooms/${rtdbRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
+  } catch (_rtdbEndErr) {
+    console.error('[SNX LIVE] endCreatorBroadcast — RTDB room mark-ended FAILED:', _rtdbEndErr);
+  }
 
   // Cleanup RTDB signaling
   await remove(ref(liveDB, `liveConnections/${rtdbRoomId}`)).catch(() => {});
@@ -559,21 +654,32 @@ export async function endCreatorBroadcast(uid) {
   // Schedule RTDB room removal after 5 min
   setTimeout(() => remove(ref(liveDB, `liveRooms/${rtdbRoomId}`)).catch(() => {}), 5 * 60 * 1000);
 
-  // Mark Firestore liveSessions doc ended — capture peak viewers
+  // Mark Firestore liveSessions doc ended — CRITICAL: expose failure
   const peakViewers = _hostState?.peakViewers || 0;
-  await updateDoc(doc(db, 'liveSessions', liveId), {
-    status: 'ended', endedAt: serverTimestamp(),
-    peakViewers,
-  }).catch(() => {});
+  try {
+    await updateDoc(doc(db, 'liveSessions', liveId), {
+      status: 'ended', endedAt: serverTimestamp(),
+      peakViewers,
+    });
+    console.log('[SNX LIVE] endCreatorBroadcast — liveSessions marked ended ✓');
+  } catch (_sessionEndErr) {
+    console.error('[SNX LIVE] endCreatorBroadcast — liveSessions mark-ended FAILED:', _sessionEndErr);
+  }
 
-  // Return creator channel to offline
-  await updateDoc(doc(db, 'creatorChannels', uid), {
-    status: 'offline', currentLiveId: null, currentStartedAt: null, updatedAt: serverTimestamp(),
-  }).catch(() => {});
+  // Return creator channel to offline — CRITICAL: expose failure
+  try {
+    await updateDoc(doc(db, 'creatorChannels', uid), {
+      status: 'offline', currentLiveId: null, currentStartedAt: null, updatedAt: serverTimestamp(),
+    });
+    console.log('[SNX LIVE] endCreatorBroadcast — creatorChannels set offline ✓');
+  } catch (_channelEndErr) {
+    console.error('[SNX LIVE] endCreatorBroadcast — creatorChannels set-offline FAILED:', _channelEndErr);
+  }
 
   const finalPeak = peakViewers;
   _hostState = null;
   window.dispatchEvent(new CustomEvent('crl:ended', { detail: { liveId, peakViewers: finalPeak } }));
+  console.log('[SNX LIVE] endCreatorBroadcast — ⚫ broadcast ended. liveId:', liveId);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -583,443 +689,271 @@ export function getHostStream() { return _hostState?.localStream || null; }
 export function getHostState()  { return _hostState; }
 
 /* ══════════════════════════════════════════════════════════════
-   EXPORTED: VIEWER — join a creator live
-   Returns a viewer handle object, or null if stream not found.
+   EXPORTED: VIEWER — join an active creator live
 ══════════════════════════════════════════════════════════════ */
 export async function joinCreatorLive(user, liveId, videoEl, onEvent) {
-  if (!user || !liveId || !videoEl) return null;
+  if (_viewerState && !_viewerState.leftFlag) await leaveCreatorLive();
 
-  // Clean up any previous viewer session
-  await leaveCreatorLive();
-
-  // Load liveSessions doc to get rtdbRoomId
+  // Load liveSessions doc to get RTDB room id
   const sessionSnap = await getDoc(doc(db, 'liveSessions', liveId));
-  if (!sessionSnap.exists()) { onEvent?.({ type: 'not_found' }); return null; }
-  const session = sessionSnap.data();
-  if (session.status === 'ended') { onEvent?.({ type: 'ended' }); return null; }
-  const rtdbRoomId = session.rtdbRoomId;
-  if (!rtdbRoomId) { onEvent?.({ type: 'not_found' }); return null; }
+  if (!sessionSnap.exists()) throw new Error('Live session not found');
+  const sessionData = sessionSnap.data();
+  if (sessionData.status !== 'live') throw new Error('This live has ended');
 
-  // Confirm RTDB room is live
+  const rtdbRoomId = sessionData.rtdbRoomId;
+  if (!rtdbRoomId) throw new Error('No RTDB room id in session');
+
+  // Check RTDB room is still live
   const roomSnap = await get(ref(liveDB, `liveRooms/${rtdbRoomId}`));
-  if (!roomSnap.exists() || roomSnap.val().status !== 'live') {
-    onEvent?.({ type: 'ended' }); return null;
-  }
+  if (!roomSnap.exists()) throw new Error('Live room not found in RTDB');
   const roomData = roomSnap.val();
+  if (!roomData.isLive) throw new Error('Live room is no longer active');
 
   _viewerState = {
     uid: user.uid, liveId, rtdbRoomId, rtcPc: null,
-    signalUnsub: null, chatUnsub: null, roomWatchRef: null,
-    presRef: null, hbInterval: null,
-    leftFlag: false, reconnectTimer: null, reconnectAttempt: 0,
-    frozenInterval: null, videoEl,
+    signalUnsub: null, chatUnsub: null,
+    roomWatchRef: null, presRef: null,
+    hbInterval: null, leftFlag: false,
+    reconnectTimer: null, reconnectAttempt: 0,
+    frozenInterval: null,
   };
 
-  onEvent?.({ type: 'connecting', roomData });
-
-  // Register viewer presence
+  // Write viewer presence
   const presRef = ref(liveDB, `liveRooms/${rtdbRoomId}/viewerPresence/${user.uid}`);
   _viewerState.presRef = presRef;
-  await set(presRef, { joinedAt: Date.now(), hb: Date.now() }).catch(() => {});
+  await set(presRef, { uid: user.uid, joinedAt: Date.now(), hb: Date.now() }).catch(() => {});
   onDisconnect(presRef).remove().catch(() => {});
 
-  // Heartbeat every 30 s
+  // Heartbeat every 20 s
   _viewerState.hbInterval = setInterval(() => {
     if (_viewerState?.leftFlag) return;
-    set(presRef, { joinedAt: Date.now(), hb: Date.now() }).catch(() => {});
-  }, 30000);
+    set(presRef, { uid: user.uid, joinedAt: Date.now(), hb: Date.now() }).catch(() => {});
+  }, 20000);
 
-  // Watch room for stream end
-  const roomWatchRef = ref(liveDB, `liveRooms/${rtdbRoomId}`);
-  _viewerState.roomWatchRef = roomWatchRef;
-  let firstWatch = true;
-  // Store the unsubscribe handle so leaveCreatorLive can remove it properly
-  _viewerState.roomWatchUnsub = onValue(roomWatchRef, snap => {
-    if (firstWatch) { firstWatch = false; return; }
-    if (!snap.exists() || snap.val().status === 'ended') {
-      onEvent?.({ type: 'ended', hostName: roomData.hostName });
+  // Watch for room ending
+  _viewerState.roomWatchRef = ref(liveDB, `liveRooms/${rtdbRoomId}/status`);
+  onValue(_viewerState.roomWatchRef, snap => {
+    if (snap.val() === 'ended' && !_viewerState?.leftFlag) {
+      onEvent?.({ type: 'ended' });
     }
-    const d = snap.val() || {};
-    onEvent?.({ type: 'counts', viewers: d.viewers || 0, likes: d.likes || 0 });
   });
-
-  // Subscribe chat
-  _viewerSubscribeChat(rtdbRoomId, user.uid, onEvent);
-
-  // Subscribe Firestore liveSessions for viewer count updates
-  const liveSessionUnsub = onSnapshot(doc(db, 'liveSessions', liveId), snap => {
-    if (snap.exists()) onEvent?.({ type: 'sessionUpdate', data: snap.data() });
-  });
-  _viewerState.sessionUnsub = liveSessionUnsub;
 
   // Start WebRTC
   await _viewerStartWebRTC(roomData, onEvent);
+  // Subscribe to chat
+  _viewerSubscribeChat(rtdbRoomId, user.uid, onEvent);
 
-  // Frozen video watchdog
-  _viewerState.frozenInterval = setInterval(() => {
-    if (_viewerState?.leftFlag) return;
-    const v = videoEl;
-    if (!v || !v.srcObject) return;
-    const ok = !v.paused && v.readyState >= 2 && v.srcObject.getVideoTracks().some(t => t.readyState === 'live');
-    if (!ok) {
-      v.play().catch(() => {});
-      setTimeout(() => {
-        const stillBad = v.paused || v.readyState < 2;
-        if (stillBad) _viewerScheduleReconnect(roomData, onEvent);
-      }, 2000);
-    }
-  }, 12000);
-
-  return _viewerState;
+  return rtdbRoomId;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   VIEWER — WebRTC
-══════════════════════════════════════════════════════════════ */
 async function _viewerStartWebRTC(roomData, onEvent) {
   if (!_viewerState) return;
-  const { uid, rtdbRoomId, videoEl } = _viewerState;
-  const slotRef   = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}`);
-  const sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-
-  await set(slotRef, { sessionId, viewerCandidates: {} }).catch(() => {});
-
-  // Poll for offer (up to 15 s)
-  let slotSnap = null;
-  for (let i = 0; i < 30; i++) {
-    try { slotSnap = await get(slotRef); } catch (_) {}
-    if (slotSnap?.exists() && slotSnap.val().offer) break;
-    slotSnap = null;
-    await new Promise(r => setTimeout(r, 500));
-  }
-
-  if (!slotSnap) {
-    onEvent?.({ type: 'waiting' });
-    // Wait with a one-shot listener; store unsubscribe so leaveCreatorLive can cancel it
-    const waitUnsub = onValue(slotRef, async snap => {
-      if (!snap.exists() || !snap.val().offer) return;
-      try { waitUnsub(); } catch (_) {}
-      if (_viewerState) _viewerState.waitUnsub = null;
-      if (!_viewerState?.leftFlag) await _viewerStartWebRTC(roomData, onEvent);
-    });
-    if (_viewerState) _viewerState.waitUnsub = waitUnsub;
-    return;
-  }
-
-  if (_viewerState.rtcPc) {
-    _viewerState.rtcPc.ontrack = null;
-    _viewerState.rtcPc.onconnectionstatechange = null;
-    _viewerState.rtcPc.onicecandidate = null;
-    try { _viewerState.rtcPc.close(); } catch (_) {}
-    _viewerState.rtcPc = null;
-  }
-  if (_viewerState.signalUnsub) { try { _viewerState.signalUnsub(); } catch (_) {} _viewerState.signalUnsub = null; }
+  const { uid, rtdbRoomId } = _viewerState;
 
   const pc = new RTCPeerConnection(ICE);
   _viewerState.rtcPc = pc;
 
   pc.ontrack = e => {
-    const stream = e.streams[0] || new MediaStream([e.track]);
-    videoEl.srcObject = stream;
-    videoEl.muted = true;
-    videoEl.playsInline = true;
-    videoEl.play().catch(() => {});
-    onEvent?.({ type: 'stream', stream });
+    if (e.streams?.[0]) onEvent?.({ type: 'stream', stream: e.streams[0] });
   };
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
-    if (s === 'connected') {
-      _viewerState && (_viewerState.reconnectAttempt = 0);
-      onEvent?.({ type: 'connected' });
-    } else if (s === 'disconnected' || s === 'failed') {
-      onEvent?.({ type: 'reconnecting' });
-      setTimeout(() => {
-        if (_viewerState?.rtcPc?.connectionState === 'disconnected' || _viewerState?.rtcPc?.connectionState === 'failed') {
-          _viewerScheduleReconnect(roomData, onEvent);
-        }
-      }, 3000);
+    onEvent?.({ type: 'connState', state: s });
+    if (s === 'failed' || s === 'disconnected') {
+      _viewerScheduleReconnect(roomData, onEvent);
     }
   };
+
   pc.oniceconnectionstatechange = () => {
-    if (pc.iceConnectionState === 'failed') { try { pc.restartIce(); } catch (_) {} }
+    if (pc.iceConnectionState === 'failed') {
+      try { pc.restartIce(); } catch (_) {}
+    }
   };
 
-  const slotData = slotSnap.val();
-  try { await pc.setRemoteDescription(new RTCSessionDescription(slotData.offer)); }
-  catch (_) { onEvent?.({ type: 'waiting' }); return; }
-
-  const pending = [];
-  let answerWritten = false;
   pc.onicecandidate = e => {
     if (!e.candidate) return;
-    if (!answerWritten) { pending.push(e.candidate.toJSON()); return; }
-    push(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}/viewerCandidates`), e.candidate.toJSON()).catch(() => {});
+    const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}/${key}`), e.candidate.toJSON()).catch(() => {});
   };
 
-  let answer;
-  try { answer = await pc.createAnswer(); await pc.setLocalDescription(answer); }
-  catch (_) { onEvent?.({ type: 'waiting' }); return; }
+  // Create offer
+  const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+  await pc.setLocalDescription(offer);
 
-  try {
-    await update(slotRef, { answer: { type: answer.type, sdp: answer.sdp }, viewerCandidates: {} });
-    answerWritten = true;
-  } catch (_) { onEvent?.({ type: 'waiting' }); return; }
+  // Write offer to RTDB
+  await set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}/offer`), { type: offer.type, sdp: offer.sdp });
 
-  // Flush pending ICE
-  for (const c of pending) {
-    push(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}/viewerCandidates`), c).catch(() => {});
-  }
+  // Wait for answer
+  const answerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${uid}`);
+  const appliedHostCandKeys = new Set();
 
-  // Apply existing host ICE candidates
-  const appliedCands = new Set();
-  const existing = slotData.hostCandidates || {};
-  for (const [k, c] of Object.entries(existing)) {
-    appliedCands.add(k);
-    pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-  }
+  const answerUnsub = onValue(answerRef, async snap => {
+    if (!snap.exists() || !_viewerState || _viewerState.leftFlag) return;
+    if (pc.remoteDescription) return; // already applied
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(snap.val()));
+    } catch (_) {}
+  });
 
-  // Listen for new host ICE candidates
-  let lastOfferSdp = slotData.offer?.sdp || null;
-  _viewerState.signalUnsub = onValue(slotRef, async snap => {
-    if (!snap.exists() || !_viewerState) return;
-    const d = snap.val();
-    if (d.offer?.sdp && d.offer.sdp !== lastOfferSdp) {
-      lastOfferSdp = d.offer.sdp;
-      pc.ontrack = null; pc.onconnectionstatechange = null; pc.onicecandidate = null;
-      try { pc.close(); } catch (_) {}
-      if (_viewerState.signalUnsub) { try { _viewerState.signalUnsub(); } catch (_) {} _viewerState.signalUnsub = null; }
-      _viewerStartWebRTC(roomData, onEvent);
-      return;
-    }
-    if (d.hostCandidates) {
-      for (const [k, c] of Object.entries(d.hostCandidates)) {
-        if (appliedCands.has(k)) continue;
-        appliedCands.add(k);
-        _viewerState?.rtcPc?.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+  // Subscribe to host ICE candidates
+  const hCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${uid}`);
+  const hCandUnsub = onValue(hCandRef, snap => {
+    if (!snap.exists()) return;
+    const cands = snap.val() || {};
+    for (const [key, cand] of Object.entries(cands)) {
+      if (appliedHostCandKeys.has(key)) continue;
+      appliedHostCandKeys.add(key);
+      if (pc.remoteDescription) {
+        pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
       }
     }
   });
 
-  // 8 s black-screen watchdog
-  setTimeout(() => {
-    if (_viewerState?.leftFlag || _viewerState?.rtcPc !== pc) return;
-    const v = videoEl;
-    const hasVideo = v?.srcObject?.getVideoTracks().some(t => t.readyState === 'live');
-    if (!hasVideo) _viewerScheduleReconnect(roomData, onEvent);
-  }, 8000);
+  _viewerState.signalUnsub = () => { try { answerUnsub(); } catch (_) {} try { hCandUnsub(); } catch (_) {} };
 }
 
 function _viewerScheduleReconnect(roomData, onEvent) {
   if (!_viewerState || _viewerState.leftFlag) return;
-  if (_viewerState.reconnectTimer) clearTimeout(_viewerState.reconnectTimer);
-  const delay = Math.min(2000 * Math.pow(1.5, Math.min(_viewerState.reconnectAttempt, 7)), 15000);
-  _viewerState.reconnectAttempt++;
+  if (_viewerState.reconnectTimer) return;
+  _viewerState.reconnectAttempt = (_viewerState.reconnectAttempt || 0) + 1;
+  const delay = Math.min(2000 * _viewerState.reconnectAttempt, 15000);
   onEvent?.({ type: 'reconnecting', attempt: _viewerState.reconnectAttempt });
   _viewerState.reconnectTimer = setTimeout(async () => {
     _viewerState.reconnectTimer = null;
-    if (_viewerState?.leftFlag) return;
-    // Verify stream still live
-    try {
-      const snap = await get(ref(liveDB, `liveRooms/${_viewerState.rtdbRoomId}`));
-      if (!snap.exists() || snap.val().status !== 'live') {
-        onEvent?.({ type: 'ended' }); return;
-      }
-    } catch (_) {}
-    if (_viewerState?.videoEl) _viewerState.videoEl.srcObject = null;
-    await _viewerStartWebRTC(roomData, onEvent);
+    if (!_viewerState || _viewerState.leftFlag) return;
+    if (_viewerState.rtcPc) { try { _viewerState.rtcPc.close(); } catch (_) {} _viewerState.rtcPc = null; }
+    if (_viewerState.signalUnsub) { try { _viewerState.signalUnsub(); } catch (_) {} _viewerState.signalUnsub = null; }
+    await _viewerStartWebRTC(roomData, onEvent).catch(() => {});
   }, delay);
 }
 
-/* ══════════════════════════════════════════════════════════════
-   VIEWER — chat subscription
-══════════════════════════════════════════════════════════════ */
 function _viewerSubscribeChat(rtdbRoomId, callerUid, onEvent) {
   if (!_viewerState) return;
-  if (_viewerState.chatUnsub) { try { _viewerState.chatUnsub(); } catch (_) {} }
-  const q = query(
-    collection(db, 'liveRooms', rtdbRoomId, 'liveMessages'),
-    orderBy('createdAt', 'asc'),
-    limit(80),
-  );
-  _viewerState.chatUnsub = onSnapshot(q, snap => {
-    snap.docChanges().forEach(ch => {
-      if (ch.type === 'added') {
-        onEvent?.({ type: 'chat', message: { id: ch.doc.id, ...ch.doc.data() } });
-      }
+  // Chat is stored in Firestore: liveRooms/{rtdbRoomId}/liveMessages
+  // We use a dynamic import to avoid a hard dependency on Firestore chat helpers here
+  import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js').then(({ onSnapshot, collection: col, query: q, orderBy: ob, limit: lim }) => {
+    const chatQ = q(col(db, 'liveRooms', rtdbRoomId, 'liveMessages'), ob('createdAt', 'asc'), lim(80));
+    const unsub = onSnapshot(chatQ, snap => {
+      snap.docChanges().forEach(ch => {
+        if (ch.type === 'added') onEvent?.({ type: 'chat', msg: ch.doc.data() });
+      });
     });
-  }, err => {
-    console.warn('[CRL chat]', err.message);
-    setTimeout(() => { if (_viewerState && !_viewerState.leftFlag) _viewerSubscribeChat(rtdbRoomId, callerUid, onEvent); }, 5000);
-  });
+    if (_viewerState) _viewerState.chatUnsub = unsub;
+  }).catch(() => {});
 }
 
-/* ══════════════════════════════════════════════════════════════
-   EXPORTED: VIEWER — send chat message
-══════════════════════════════════════════════════════════════ */
 export async function sendViewerChat(user, userData, text) {
-  if (!_viewerState?.rtdbRoomId || !text?.trim()) return;
-  await addDoc(collection(db, 'liveRooms', _viewerState.rtdbRoomId, 'liveMessages'), {
-    userId:    user.uid,
-    userName:  userData?.displayName || 'Viewer',
-    text:      text.trim().slice(0, 200),
-    type:      'chat',
-    createdAt: serverTimestamp(),
+  if (!_viewerState || _viewerState.leftFlag) return;
+  const { rtdbRoomId } = _viewerState;
+  const { addDoc: ad, collection: col, serverTimestamp: sts } =
+    await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
+  await ad(col(db, 'liveRooms', rtdbRoomId, 'liveMessages'), {
+    uid: user.uid, name: userData?.displayName || user.email?.split('@')[0] || 'Viewer',
+    avatar: userData?.avatar || userData?.profilePicture || '',
+    text, isHost: false, createdAt: sts(),
   });
 }
 
-/* ══════════════════════════════════════════════════════════════
-   EXPORTED: VIEWER — send chat from host side
-══════════════════════════════════════════════════════════════ */
 export async function sendHostChat(user, userData, text) {
-  if (!_hostState?.rtdbRoomId || !text?.trim()) return;
-  await addDoc(collection(db, 'liveRooms', _hostState.rtdbRoomId, 'liveMessages'), {
-    userId:    user.uid,
-    userName:  userData?.displayName || 'Host',
-    text:      text.trim().slice(0, 200),
-    type:      'chat',
-    createdAt: serverTimestamp(),
+  if (!_hostState || _hostState.endedFlag) return;
+  const { rtdbRoomId } = _hostState;
+  const { addDoc: ad, collection: col, serverTimestamp: sts } =
+    await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
+  await ad(col(db, 'liveRooms', rtdbRoomId, 'liveMessages'), {
+    uid: user.uid, name: userData?.displayName || user.email?.split('@')[0] || 'Host',
+    avatar: userData?.avatar || userData?.profilePicture || '',
+    text, isHost: true, createdAt: sts(),
   });
 }
 
-/* ══════════════════════════════════════════════════════════════
-   EXPORTED: VIEWER — leave stream
-══════════════════════════════════════════════════════════════ */
 export async function leaveCreatorLive() {
-  if (!_viewerState) return;
+  if (!_viewerState || _viewerState.leftFlag) return;
   _viewerState.leftFlag = true;
 
-  if (_viewerState.reconnectTimer)  { clearTimeout(_viewerState.reconnectTimer); }
-  if (_viewerState.frozenInterval)  { clearInterval(_viewerState.frozenInterval); }
-  if (_viewerState.hbInterval)      { clearInterval(_viewerState.hbInterval); }
-  if (_viewerState.waitUnsub)       { try { _viewerState.waitUnsub(); } catch (_) {} }
-  if (_viewerState.chatUnsub)       { try { _viewerState.chatUnsub(); } catch (_) {} }
-  if (_viewerState.sessionUnsub)    { try { _viewerState.sessionUnsub(); } catch (_) {} }
-  // Use the stored onValue unsubscribe function when available; fall back to off()
-  if (_viewerState.roomWatchUnsub)  { try { _viewerState.roomWatchUnsub(); } catch (_) {} }
-  else if (_viewerState.roomWatchRef) { try { off(_viewerState.roomWatchRef); } catch (_) {} }
-  if (_viewerState.signalUnsub)     { try { _viewerState.signalUnsub(); } catch (_) {} }
+  if (_viewerState.hbInterval) clearInterval(_viewerState.hbInterval);
+  if (_viewerState.reconnectTimer) clearTimeout(_viewerState.reconnectTimer);
+  if (_viewerState.frozenInterval) clearInterval(_viewerState.frozenInterval);
+  if (_viewerState.signalUnsub) { try { _viewerState.signalUnsub(); } catch (_) {} }
+  if (_viewerState.chatUnsub)   { try { _viewerState.chatUnsub(); } catch (_) {} }
+  if (_viewerState.rtcPc) { try { _viewerState.rtcPc.close(); } catch (_) {} }
 
-  if (_viewerState.rtcPc) {
-    _viewerState.rtcPc.ontrack = null;
-    _viewerState.rtcPc.onconnectionstatechange = null;
-    _viewerState.rtcPc.onicecandidate = null;
-    try { _viewerState.rtcPc.close(); } catch (_) {}
+  // Remove viewer presence
+  if (_viewerState.presRef) {
+    onDisconnect(_viewerState.presRef).cancel().catch(() => {});
+    remove(_viewerState.presRef).catch(() => {});
   }
 
-  const { rtdbRoomId, uid, presRef } = _viewerState;
-  if (presRef) {
-    onDisconnect(presRef).cancel().catch(() => {});
-    remove(presRef).catch(() => {});
-  }
-  if (rtdbRoomId && uid) {
-    remove(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}`)).catch(() => {});
-  }
+  // Remove signaling data
+  const { uid, rtdbRoomId } = _viewerState;
+  remove(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}`)).catch(() => {});
+  remove(ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}`)).catch(() => {});
+  remove(ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${uid}`)).catch(() => {});
 
-  if (_viewerState.videoEl) _viewerState.videoEl.srcObject = null;
   _viewerState = null;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   LIVE NOTIFICATIONS
-══════════════════════════════════════════════════════════════ */
 async function _sendLiveNotifications(uid, liveId, rtdbRoomId, title, roomData) {
   try {
-    const { getDocs: gds, query: q2, collection: col2 } =
-      await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
-
-    const [channelSnap, creatorUserSnap] = await Promise.all([
-      getDoc(doc(db, 'creatorChannels', uid)),
-      getDoc(doc(db, 'users', uid)),
-    ]);
-    if (!channelSnap.exists() || !creatorUserSnap.exists()) return;
-    const channel = channelSnap.data();
-
-    // ── Use canonical SNS followers array as the source of truth ────────────
-    // This is the same list that the SNS profile follow button writes to.
-    // Do not notify the creator about their own live.
-    const allFollowers = (creatorUserSnap.data().followers || []).filter(f => f !== uid);
-    if (!allFollowers.length) return;
-
-    // Load per-channel notification prefs to respect opted-out followers
-    const notifPrefsSnap = await gds(q2(col2(db, 'channelFollows', uid, 'followers')));
-    const notifPrefs = {};
-    notifPrefsSnap.docs.forEach(d => {
-      notifPrefs[d.data().followerUid] = d.data().notificationsEnabled !== false;
-    });
-
-    const notif = {
-      type:        'creator_live',
-      fromUid:     uid,
-      channelName: channel.channelName || 'A creator',
-      liveId,
-      rtdbRoomId,
-      title,
-      text:        `🔴 ${channel.channelName || 'A creator'} is LIVE on Shadow Nexus TV`,
-      subtitle:    `"${title}"`,
-      deepLink:    `channel.html?live=${uid}&liveId=${liveId}`,
-      timestamp:   serverTimestamp(),
-      read:        false,
-    };
-
-    // Notify all canonical SNS followers, except those who explicitly opted out
-    await Promise.allSettled(
-      allFollowers
-        .filter(fUid => notifPrefs[fUid] !== false) // default: notify unless opted out
-        .map(fUid => addDoc(col2(db, 'notifications', fUid, 'items'), notif)),
-    );
-  } catch (err) {
-    console.warn('[CRL notifications]', err.message);
-  }
+    const { _writeLiveNotification } = await import('./snx-creator-channels.js').catch(() => ({}));
+    if (typeof _writeLiveNotification === 'function') {
+      await _writeLiveNotification(uid, liveId);
+    }
+  } catch (_) {}
 }
 
-/* ══════════════════════════════════════════════════════════════
-   SETUP SCREEN HTML
-══════════════════════════════════════════════════════════════ */
 function _buildSetupHTML(userData) {
+  const name = userData?.displayName || userData?.username || 'Creator';
   return `
-    <div class="crl-setup">
-      <div class="crl-setup-header">
-        <div class="crl-setup-title">🔴 GO LIVE</div>
-        <div class="crl-setup-sub">Preview before broadcasting on <strong>${_esc(userData?.displayName || 'your channel')}</strong></div>
+    <div class="crl-setup" style="padding:20px;max-width:480px;margin:0 auto;color:#fff;font-family:system-ui,sans-serif;">
+      <div style="font-size:22px;font-weight:700;margin-bottom:16px;text-align:center;">📡 Go Live</div>
+
+      <!-- Video preview -->
+      <div style="position:relative;width:100%;aspect-ratio:16/9;background:#111;border-radius:12px;overflow:hidden;margin-bottom:16px;">
+        <video id="crl-setup-preview" autoplay playsinline muted
+               style="width:100%;height:100%;object-fit:cover;display:none;"></video>
+        <div id="crl-setup-preview-off"
+             style="display:flex;align-items:center;justify-content:center;height:100%;color:#666;font-size:32px;">📷</div>
       </div>
 
-      <div class="crl-preview-wrap">
-        <video id="crl-setup-preview" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover;display:none;border-radius:inherit;"></video>
-        <div id="crl-setup-preview-off" class="crl-preview-off">
-          <div style="font-size:36px;margin-bottom:6px;">📷</div>
-          <div style="font-size:12px;color:#5a80a8;">Camera off</div>
-        </div>
-      </div>
+      <!-- Title -->
+      <input id="crl-setup-title" type="text" placeholder="Add a title…"
+             style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:12px;"
+             maxlength="80" autocomplete="off">
 
-      <div class="crl-setup-controls">
-        <button class="crl-ctrl-btn" id="crl-setup-cam-btn">
-          <span class="crl-ctrl-icon">📷</span>
+      <!-- Controls row -->
+      <div style="display:flex;gap:10px;justify-content:center;margin-bottom:16px;">
+        <button id="crl-setup-cam-btn" class="crl-setup-ctrl-btn"
+                style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 16px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;cursor:pointer;font-size:12px;min-width:72px;">
+          <span class="crl-ctrl-icon" style="font-size:20px;">📷</span>
           <span class="crl-ctrl-label">Camera</span>
         </button>
-        <button class="crl-ctrl-btn" id="crl-setup-mic-btn">
-          <span class="crl-ctrl-icon">🎤</span>
+        <button id="crl-setup-mic-btn" class="crl-setup-ctrl-btn"
+                style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 16px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;cursor:pointer;font-size:12px;min-width:72px;">
+          <span class="crl-ctrl-icon" style="font-size:20px;">🎤</span>
           <span class="crl-ctrl-label">Mic</span>
         </button>
-        <button class="crl-ctrl-btn" id="crl-setup-flip-btn">
-          <span class="crl-ctrl-icon">🔄</span>
+        <button id="crl-setup-flip-btn" class="crl-setup-ctrl-btn"
+                style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 16px;border-radius:10px;border:1px solid #333;background:#1a1a1a;color:#fff;cursor:pointer;font-size:12px;min-width:72px;">
+          <span class="crl-ctrl-icon" style="font-size:20px;">🔄</span>
           <span class="crl-ctrl-label">Flip</span>
         </button>
       </div>
 
-      <input class="crl-title-input" id="crl-setup-title"
-             type="text" placeholder="What are you broadcasting today? (optional)"
-             maxlength="80">
+      <!-- Error -->
+      <div id="crl-setup-err" style="color:#ff4455;font-size:12px;min-height:18px;text-align:center;margin-bottom:8px;"></div>
 
-      <div id="crl-setup-err" class="crl-setup-err"></div>
-
-      <div class="crl-setup-actions">
-        <button class="crl-btn-cancel" id="crl-setup-cancel">CANCEL</button>
-        <button class="crl-btn-go-live" id="crl-go-live-btn">
-          <span class="crl-live-dot"></span> GO LIVE
-        </button>
-      </div>
-    </div>`;
+      <!-- Action buttons -->
+      <button id="crl-go-live-btn"
+              style="width:100%;padding:14px;border-radius:10px;border:none;background:linear-gradient(135deg,#cc0022,#ff2244);color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-bottom:10px;letter-spacing:0.5px;">
+        🔴 GO LIVE
+      </button>
+      <button id="crl-setup-cancel"
+              style="width:100%;padding:12px;border-radius:10px;border:1px solid #333;background:transparent;color:#aaa;font-size:14px;cursor:pointer;">
+        Cancel
+      </button>
+    </div>
+  `;
 }
 
 function _esc(s) {
