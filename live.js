@@ -724,6 +724,19 @@ async function startLive() {
     return;
   }
 
+  // ── [OLD-LIVE] START_CLICK ──
+  console.log('[OLD-LIVE] START_CLICK — uid:', _user.uid);
+
+  // ── [OLD-LIVE] AUTH_CHECK ──
+  // Verify auth consistency: _user must match window._snxCurrentUser if set
+  const _canonicalUser = window._snxCurrentUser || null;
+  if (_canonicalUser && _canonicalUser.uid !== _user.uid) {
+    console.error('[OLD-LIVE] AUTH_CHECK FAIL — UID MISMATCH: live.js uid=' + _user.uid + ' canonical=' + _canonicalUser.uid);
+    toast('Authentication error — please reload and sign in again.');
+    return;
+  }
+  console.log('[OLD-LIVE] AUTH_CHECK PASS — uid matches canonical');
+
   // ── Kill any previous stuck live session for this user ──
   try {
     const userSnap = await getDoc(doc(_db, 'users', _user.uid));
@@ -750,13 +763,31 @@ async function startLive() {
     } catch (_) {}
   } catch (_) {}
 
+  // ── [OLD-LIVE] MEDIA_READY ──
+  console.log('[OLD-LIVE] MEDIA_READY — tracks:', _localStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', '));
+
   const titleVal = (D.setupTitle?.value || '').trim();
-  if (D.goLiveBtn) { D.goLiveBtn.disabled = true; D.goLiveBtn.textContent = 'Going Live…'; }
+
+  // Guard: prevent double-start (duplicate taps while async work runs)
+  if (D.goLiveBtn && D.goLiveBtn.dataset.starting === '1') {
+    console.warn('[OLD-LIVE] START_CLICK ignored — already starting');
+    return;
+  }
+  if (D.goLiveBtn) {
+    D.goLiveBtn.disabled = true;
+    D.goLiveBtn.dataset.starting = '1';
+    D.goLiveBtn.textContent = 'Going Live…';
+  }
 
   // Sanitize uid — strip any chars forbidden in RTDB keys (. # $ / [ ])
   const _safeUid = _user.uid.replace(/[.#$/\[\]]/g, '_');
   _roomId = `${_safeUid}_${Date.now().toString(36)}`;
   _roomHostId = _user.uid;   // creator is always their own host
+
+  // ── Ensure _userData is always a valid object (null-safe) ──
+  if (!_userData) {
+    _userData = { displayName: _user.email?.split('@')[0] || 'Creator', username: '' };
+  }
 
   const creatorData = {
     roomId:       _roomId,
@@ -772,25 +803,55 @@ async function startLive() {
     createdAt:    Date.now(),
   };
 
+  // ── Diagnostics timeout safety: if startLive does not complete within 30s,
+  //    abort cleanly rather than leaving the UI in "Going Live…" forever. ──
+  let _startAborted = false;
+  const _startTimeout = setTimeout(() => {
+    if (_startAborted) return;
+    _startAborted = true;
+    console.error('[OLD-LIVE] START_FAILED — stage: TIMEOUT (30s exceeded)');
+    toast('Could not start live — timed out. Please try again.');
+    if (D.goLiveBtn) {
+      D.goLiveBtn.disabled = false;
+      D.goLiveBtn.dataset.starting = '';
+      D.goLiveBtn.textContent = 'Start Live';
+    }
+    // Clean up partial room if it was written
+    if (_roomId) {
+      try { update(ref(_liveDB, `liveRooms/${_roomId}`), { status: 'ended', isLive: false, endedAt: Date.now() }); } catch(_) {}
+    }
+    _roomId = null;
+    _roomHostId = null;
+  }, 30000);
+
+  try {
+
   /* ── Write room to LIVE Realtime Database ── */
+  console.log('[OLD-LIVE] CREATE_ROOM_START — roomId:', _roomId);
   try {
     await set(ref(_liveDB, `liveRooms/${_roomId}`), creatorData);
+    console.log('[OLD-LIVE] CREATE_ROOM_SUCCESS — roomId:', _roomId);
   } catch (e) {
-    toast('Could not start live. Please try again.');
-    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
-    return;
+    console.error('[OLD-LIVE] START_FAILED — stage: CREATE_ROOM — error.code:', e.code, '— error.message:', e.message);
+    toast('Could not start live — Firebase write failed (' + (e.code || e.message) + '). Please try again.');
+    throw e;  // caught by outer try/catch/finally
   }
 
   /* ── Mirror room to Firestore so Live Hub can query it.
         Keyed by uid so only ONE doc per user ever exists —
         reconnecting simply overwrites the previous entry.   ── */
+  console.log('[OLD-LIVE] FIRESTORE_WRITE — liveRooms/', _user.uid);
   try {
     await setDoc(doc(_db, 'liveRooms', _user.uid), {
       ...creatorData,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-  } catch (_) {}
+    console.log('[OLD-LIVE] FIRESTORE_WRITE success');
+  } catch (fsErr) {
+    // Non-critical — RTDB room is authoritative; Firestore mirror is just for Live Hub cards
+    console.warn('[OLD-LIVE] FIRESTORE_WRITE failed (non-critical):', fsErr.code, fsErr.message);
+  }
 
   /* ── Guard: prevent accidental cleanup if page unloads during live ── */
   _creatorEndedFlag = false;
@@ -844,12 +905,15 @@ async function startLive() {
   _showStage();
   _attachLocalVideoToStage();
   _populateCreatorInfo(creatorData);
+  console.log('[OLD-LIVE] HOST_STAGE_BUILD — setup hidden, stage active');
 
   /* ── Initialise the audio mixer BEFORE WebRTC so peer connections
         pick up the mixed audio track rather than the raw mic track.   ── */
   await _initAudioMixer();
+  console.log('[OLD-LIVE] WEBRTC_INIT — starting creator WebRTC');
 
   await _startCreatorWebRTC();
+  console.log('[OLD-LIVE] HOST_STAGE_VISIBLE — WebRTC listener attached');
 
   _subscribeChat();
   _subscribeViewerCount();
@@ -865,6 +929,7 @@ async function startLive() {
   _attachGuestGridResizeObserver();
 
   // ── Publish host's own presence to liveGuests (viewers see cam/mic status) ──
+  console.log('[OLD-LIVE] HOST_PRESENCE — writing liveGuests/_host_');
   try {
     const hostGuestRef = ref(_liveDB, `liveGuests/${_roomId}/_host_`);
     await set(hostGuestRef, {
@@ -879,8 +944,11 @@ async function startLive() {
     });
     // If the host's page crashes / network drops, remove the whole liveGuests room node
     try { onDisconnect(ref(_liveDB, `liveGuests/${_roomId}`)).remove(); } catch(_) {}
-  } catch (_) {}
+  } catch (presErr) {
+    console.warn('[OLD-LIVE] HOST_PRESENCE write failed (non-critical):', presErr.message);
+  }
 
+  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 broadcast is live. roomId:', _roomId);
   toast('🔴 You are LIVE!');
 
   // ── Notify add-on modules (co-host, etc.) that live has started ──
@@ -927,6 +995,46 @@ async function startLive() {
   // feed posts; they appear only in the story bar and Live Hub.
   _createLiveStory(creatorData);
   _notifyFollowersLive(creatorData);
+
+  // ── Clear the duplicate-start guard now that we are live ──
+  if (D.goLiveBtn) { D.goLiveBtn.dataset.starting = ''; }
+
+  } catch (_startErr) {
+    // ── STARTUP FAILED — restore UI and clean partial state ──
+    if (_startAborted) return; // timeout already handled it
+    console.error('[OLD-LIVE] START_FAILED — stage: EXCEPTION —', _startErr?.code || '', _startErr?.message || _startErr);
+
+    // Clean up partial room if RTDB was written
+    const _partialRoomId = _roomId;
+    if (_partialRoomId) {
+      try { await update(ref(_liveDB, `liveRooms/${_partialRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() }); } catch(_) {}
+      setTimeout(() => { try { remove(ref(_liveDB, `liveRooms/${_partialRoomId}`)); } catch(_) {} }, 3000);
+      try { remove(ref(_liveDB, `liveConnections/${_partialRoomId}`)).catch(() => {}); } catch(_) {}
+    }
+
+    // Reset state so a retry works cleanly
+    _roomId     = null;
+    _roomHostId = null;
+    _creatorEndedFlag = false;
+
+    // Restore the Go Live button so the user can try again
+    if (D.goLiveBtn) {
+      D.goLiveBtn.disabled = false;
+      D.goLiveBtn.dataset.starting = '';
+      D.goLiveBtn.textContent = 'Start Live';
+    }
+
+    // If we already transitioned to the stage, go back to setup so the user is not stranded
+    if (D.stage && D.stage.classList.contains('active')) {
+      D.stage.classList.remove('active');
+      if (D.setup) D.setup.style.display = 'block';
+    }
+
+    toast('Could not start live — ' + (_startErr?.message || 'unknown error') + '. Please try again.');
+
+  } finally {
+    clearTimeout(_startTimeout);
+  }
 }
 
 function _attachLocalVideoToStage() {

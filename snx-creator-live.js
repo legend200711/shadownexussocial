@@ -326,13 +326,30 @@ export async function startCreatorBroadcast(user, userData, opts = {}) {
     // CRITICAL: This MUST succeed before we declare the host LIVE.
     // A live broadcast is NOT registered on the platform until this write
     // completes — only then will it appear in Live Now / Creator Channel.
+    // Use setDoc with merge so it works whether the doc exists or not.
     console.log('[SNX LIVE] STEP 6 UPDATE creatorChannels — uid:', user.uid);
-    await updateDoc(doc(db, 'creatorChannels', user.uid), {
-      status:           'live',
-      currentLiveId:    _liveId,
-      currentStartedAt: serverTimestamp(),
-      updatedAt:        serverTimestamp(),
-    });
+    const _chRef = doc(db, 'creatorChannels', user.uid);
+    const _chSnap = await getDoc(_chRef);
+    if (_chSnap.exists()) {
+      await updateDoc(_chRef, {
+        status:           'live',
+        currentLiveId:    _liveId,
+        currentStartedAt: serverTimestamp(),
+        updatedAt:        serverTimestamp(),
+      });
+    } else {
+      // First-time creator: bootstrap the channel doc so updateDoc doesn't fail
+      await setDoc(_chRef, {
+        ownerUid:         user.uid,
+        channelName:      userData?.displayName || user.email?.split('@')[0] || 'Creator',
+        ownerUsername:    userData?.username    || '',
+        avatar:           userData?.avatar      || userData?.profilePicture || null,
+        status:           'live',
+        currentLiveId:    _liveId,
+        currentStartedAt: serverTimestamp(),
+        updatedAt:        serverTimestamp(),
+      });
+    }
     _channelWritten = true;
     console.log('[SNX LIVE] STEP 6 creatorChannels — WRITE CONFIRMED ✓  status=live  currentLiveId=' + _liveId);
 
