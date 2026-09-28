@@ -725,9 +725,11 @@ async function startLive() {
   }
 
   // ── [OLD-LIVE] START_CLICK ──
-  console.log('[OLD-LIVE] START_CLICK — uid:', _user.uid);
+  const _t0 = Date.now();
+  console.log('[OLD-LIVE] START_CLICK — uid:', _user.uid, 'ts:', _t0);
 
-  // ── [OLD-LIVE] AUTH_CHECK ──
+  // ── [OLD-LIVE] AUTH_CHECK_START ──
+  console.log('[OLD-LIVE] AUTH_CHECK_START +' + (Date.now() - _t0) + 'ms');
   // Verify auth consistency: _user must match window._snxCurrentUser if set
   const _canonicalUser = window._snxCurrentUser || null;
   if (_canonicalUser && _canonicalUser.uid !== _user.uid) {
@@ -735,40 +737,9 @@ async function startLive() {
     toast('Authentication error — please reload and sign in again.');
     return;
   }
-  console.log('[OLD-LIVE] AUTH_CHECK PASS — uid matches canonical');
+  console.log('[OLD-LIVE] AUTH_CHECK_DONE — uid matches canonical +' + (Date.now() - _t0) + 'ms');
 
-  // ── Kill any previous stuck live session for this user ──
-  try {
-    const userSnap = await getDoc(doc(_db, 'users', _user.uid));
-    const prevRoomId = userSnap.exists() ? userSnap.data().liveRoomId : null;
-    if (prevRoomId) {
-      await update(ref(_liveDB, `liveRooms/${prevRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
-      await remove(ref(_liveDB, `liveConnections/${prevRoomId}`));
-      await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() });
-    }
-    // Always delete the uid-keyed Firestore liveRooms doc (and legacy roomId-keyed one)
-    try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (_) {}
-    if (prevRoomId) {
-      try { await deleteDoc(doc(_db, 'liveRooms', prevRoomId)); } catch (_) {}
-    }
-    // Also clean up any orphaned feed posts with type='live' for this user
-    try {
-      const orphanQ = query(
-        collection(_db, 'posts'),
-        where('uid', '==', _user.uid),
-        where('type', '==', 'live')
-      );
-      const orphanSnap = await getDocs(orphanQ);
-      orphanSnap.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
-    } catch (_) {}
-  } catch (_) {}
-
-  // ── [OLD-LIVE] MEDIA_READY ──
-  console.log('[OLD-LIVE] MEDIA_READY — tracks:', _localStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', '));
-
-  const titleVal = (D.setupTitle?.value || '').trim();
-
-  // Guard: prevent double-start (duplicate taps while async work runs)
+  // ── Guard: prevent double-start — set BEFORE any async work so rapid taps are ignored ──
   if (D.goLiveBtn && D.goLiveBtn.dataset.starting === '1') {
     console.warn('[OLD-LIVE] START_CLICK ignored — already starting');
     return;
@@ -778,6 +749,40 @@ async function startLive() {
     D.goLiveBtn.dataset.starting = '1';
     D.goLiveBtn.textContent = 'Going Live…';
   }
+
+  const titleVal = (D.setupTitle?.value || '').trim();
+
+  // ── [OLD-LIVE] STALE_CLEANUP_START ──
+  // Critical stale cleanup: RTDB room + Firestore liveRooms doc.
+  // These must finish before we create the new room (prevents ghost rooms).
+  // The orphan-post cleanup is non-critical and runs AFTER LIVE_ACTIVE.
+  console.log('[OLD-LIVE] STALE_CLEANUP_START +' + (Date.now() - _t0) + 'ms');
+  let _prevRoomId = null;
+  try {
+    // Wrap the entire stale cleanup in a 5-second timeout so a slow/offline
+    // Firestore never delays the critical Live start path.
+    await Promise.race([
+      (async () => {
+        const userSnap = await getDoc(doc(_db, 'users', _user.uid));
+        _prevRoomId = userSnap.exists() ? userSnap.data().liveRoomId : null;
+        if (_prevRoomId) {
+          await update(ref(_liveDB, `liveRooms/${_prevRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
+          await remove(ref(_liveDB, `liveConnections/${_prevRoomId}`));
+          await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() });
+        }
+        // Always delete the uid-keyed Firestore liveRooms doc (and legacy roomId-keyed one)
+        try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (_) {}
+        if (_prevRoomId) {
+          try { await deleteDoc(doc(_db, 'liveRooms', _prevRoomId)); } catch (_) {}
+        }
+      })(),
+      new Promise(r => setTimeout(r, 5000)),  // 5 s cap — never blocks longer than this
+    ]);
+  } catch (_) {}
+  console.log('[OLD-LIVE] STALE_CLEANUP_DONE +' + (Date.now() - _t0) + 'ms');
+
+  // ── [OLD-LIVE] MEDIA_READY ──
+  console.log('[OLD-LIVE] MEDIA_READY — tracks:', _localStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', '), '+' + (Date.now() - _t0) + 'ms');
 
   // Sanitize uid — strip any chars forbidden in RTDB keys (. # $ / [ ])
   const _safeUid = _user.uid.replace(/[.#$/\[\]]/g, '_');
@@ -827,30 +832,34 @@ async function startLive() {
   try {
 
   /* ── Write room to LIVE Realtime Database ── */
-  console.log('[OLD-LIVE] CREATE_ROOM_START — roomId:', _roomId);
+  console.log('[OLD-LIVE] RTDB_ROOM_START — roomId:', _roomId, '+' + (Date.now() - _t0) + 'ms');
   try {
     await set(ref(_liveDB, `liveRooms/${_roomId}`), creatorData);
-    console.log('[OLD-LIVE] CREATE_ROOM_SUCCESS — roomId:', _roomId);
+    console.log('[OLD-LIVE] RTDB_ROOM_DONE — roomId:', _roomId, '+' + (Date.now() - _t0) + 'ms');
   } catch (e) {
-    console.error('[OLD-LIVE] START_FAILED — stage: CREATE_ROOM — error.code:', e.code, '— error.message:', e.message);
+    console.error('[OLD-LIVE] START_FAILED — stage: RTDB_ROOM — error.code:', e.code, '— error.message:', e.message, '+' + (Date.now() - _t0) + 'ms');
     toast('Could not start live — Firebase write failed (' + (e.code || e.message) + '). Please try again.');
     throw e;  // caught by outer try/catch/finally
   }
 
   /* ── Mirror room to Firestore so Live Hub can query it.
         Keyed by uid so only ONE doc per user ever exists —
-        reconnecting simply overwrites the previous entry.   ── */
-  console.log('[OLD-LIVE] FIRESTORE_WRITE — liveRooms/', _user.uid);
+        reconnecting simply overwrites the previous entry.
+        NON-CRITICAL: capped at 4 s — Live proceeds even if this is slow. ── */
+  console.log('[OLD-LIVE] FIRESTORE_MIRROR_START — liveRooms/', _user.uid, '+' + (Date.now() - _t0) + 'ms');
   try {
-    await setDoc(doc(_db, 'liveRooms', _user.uid), {
-      ...creatorData,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    console.log('[OLD-LIVE] FIRESTORE_WRITE success');
+    await Promise.race([
+      setDoc(doc(_db, 'liveRooms', _user.uid), {
+        ...creatorData,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }),
+      new Promise(r => setTimeout(r, 4000)),  // 4 s cap — non-critical mirror
+    ]);
+    console.log('[OLD-LIVE] FIRESTORE_MIRROR_DONE +' + (Date.now() - _t0) + 'ms');
   } catch (fsErr) {
     // Non-critical — RTDB room is authoritative; Firestore mirror is just for Live Hub cards
-    console.warn('[OLD-LIVE] FIRESTORE_WRITE failed (non-critical):', fsErr.code, fsErr.message);
+    console.warn('[OLD-LIVE] FIRESTORE_MIRROR failed (non-critical):', fsErr?.code, fsErr?.message, '+' + (Date.now() - _t0) + 'ms');
   }
 
   /* ── Guard: prevent accidental cleanup if page unloads during live ── */
@@ -902,21 +911,45 @@ async function startLive() {
   });
 
   if (D.setup) D.setup.style.display = 'none';
+  console.log('[OLD-LIVE] HOST_STAGE_START +' + (Date.now() - _t0) + 'ms');
   _showStage();
   _attachLocalVideoToStage();
   _populateCreatorInfo(creatorData);
-  console.log('[OLD-LIVE] HOST_STAGE_BUILD — setup hidden, stage active');
+  // Verify DOM is intact — report any missing critical elements
+  if (!D.stage)     console.error('[OLD-LIVE] HOST_STAGE DOM MISSING: #liveStage');
+  if (!D.liveVideo) console.error('[OLD-LIVE] HOST_STAGE DOM MISSING: #liveVideo');
+  console.log('[OLD-LIVE] HOST_STAGE_DONE — setup hidden, stage active', '+' + (Date.now() - _t0) + 'ms',
+    'stage.active:', D.stage?.classList.contains('active'),
+    'video.srcObject:', !!D.liveVideo?.srcObject);
 
   /* ── Initialise the audio mixer BEFORE WebRTC so peer connections
-        pick up the mixed audio track rather than the raw mic track.   ── */
-  await _initAudioMixer();
-  console.log('[OLD-LIVE] WEBRTC_INIT — starting creator WebRTC');
+        pick up the mixed audio track rather than the raw mic track.
+        NON-BLOCKING: if mixer init fails or the AudioContext is suspended,
+        WebRTC still starts with the raw microphone track.              ── */
+  console.log('[OLD-LIVE] AUDIO_MIXER_START +' + (Date.now() - _t0) + 'ms');
+  try {
+    await Promise.race([
+      _initAudioMixer(),
+      new Promise(r => setTimeout(r, 3000)),  // 3 s hard cap — mixer is optional
+    ]);
+    console.log('[OLD-LIVE] AUDIO_MIXER_DONE — mixedTrack:', !!_audioMixer?.mixedAudioTrack, '+' + (Date.now() - _t0) + 'ms');
+  } catch (mixErr) {
+    console.warn('[OLD-LIVE] AUDIO_MIXER failed (non-critical) — will use raw mic:', mixErr?.message, '+' + (Date.now() - _t0) + 'ms');
+    _audioMixer = null;  // ensure peers fall back to raw mic track
+  }
 
+  console.log('[OLD-LIVE] WEBRTC_START +' + (Date.now() - _t0) + 'ms');
   await _startCreatorWebRTC();
-  console.log('[OLD-LIVE] HOST_STAGE_VISIBLE — WebRTC listener attached');
+  console.log('[OLD-LIVE] WEBRTC_DONE — viewer listener attached +' + (Date.now() - _t0) + 'ms');
 
+  console.log('[OLD-LIVE] CHAT_START +' + (Date.now() - _t0) + 'ms');
   _subscribeChat();
+  console.log('[OLD-LIVE] CHAT_DONE +' + (Date.now() - _t0) + 'ms');
+
+  console.log('[OLD-LIVE] VIEWER_COUNT_START +' + (Date.now() - _t0) + 'ms');
   _subscribeViewerCount();
+  console.log('[OLD-LIVE] VIEWER_COUNT_DONE +' + (Date.now() - _t0) + 'ms');
+
   _showCreatorShareBar();
 
   // ── Start listening for guest box requests ──
@@ -929,7 +962,7 @@ async function startLive() {
   _attachGuestGridResizeObserver();
 
   // ── Publish host's own presence to liveGuests (viewers see cam/mic status) ──
-  console.log('[OLD-LIVE] HOST_PRESENCE — writing liveGuests/_host_');
+  console.log('[OLD-LIVE] HOST_PRESENCE_START +' + (Date.now() - _t0) + 'ms');
   try {
     const hostGuestRef = ref(_liveDB, `liveGuests/${_roomId}/_host_`);
     await set(hostGuestRef, {
@@ -944,11 +977,12 @@ async function startLive() {
     });
     // If the host's page crashes / network drops, remove the whole liveGuests room node
     try { onDisconnect(ref(_liveDB, `liveGuests/${_roomId}`)).remove(); } catch(_) {}
+    console.log('[OLD-LIVE] HOST_PRESENCE_DONE +' + (Date.now() - _t0) + 'ms');
   } catch (presErr) {
-    console.warn('[OLD-LIVE] HOST_PRESENCE write failed (non-critical):', presErr.message);
+    console.warn('[OLD-LIVE] HOST_PRESENCE write failed (non-critical):', presErr?.message, '+' + (Date.now() - _t0) + 'ms');
   }
 
-  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 broadcast is live. roomId:', _roomId);
+  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 broadcast is live. roomId:', _roomId, 'total time:' + (Date.now() - _t0) + 'ms');
   toast('🔴 You are LIVE!');
 
   // ── Notify add-on modules (co-host, etc.) that live has started ──
@@ -995,6 +1029,21 @@ async function startLive() {
   // feed posts; they appear only in the story bar and Live Hub.
   _createLiveStory(creatorData);
   _notifyFollowersLive(creatorData);
+
+  // ── Deferred orphan-post cleanup — non-critical, runs AFTER LIVE_ACTIVE ──
+  // Moved out of the critical startLive() path (was blocking live start).
+  // Fire-and-forget so any Firestore latency never blocks camera broadcast.
+  ;(async () => {
+    try {
+      const orphanQ = query(
+        collection(_db, 'posts'),
+        where('uid', '==', _user.uid),
+        where('type', '==', 'live')
+      );
+      const orphanSnap = await getDocs(orphanQ);
+      orphanSnap.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
+    } catch (_) {}
+  })();
 
   // ── Clear the duplicate-start guard now that we are live ──
   if (D.goLiveBtn) { D.goLiveBtn.dataset.starting = ''; }
