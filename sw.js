@@ -4,14 +4,17 @@
  * Strategy:
  *   - Navigation (HTML page loads) → Network-first, fallback to cache → offline.html
  *   - Same-origin assets (CSS/JS/icons) → Cache-first, network fallback
+ *   - TV engine JS files              → Network-first, cache as offline fallback only
  *   - Firebase & external CDN requests  → Network-only (always fresh)
  *
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
+ *
+ * Build: SNS-2026-TV-STABILITY-001
  */
 
-const CACHE_VERSION = 'v73';
-const BUILD_ID      = 'SNS-2026-NATV-001';
+const CACHE_VERSION = 'v74';
+const BUILD_ID      = 'SNS-2026-TV-STABILITY-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -65,6 +68,26 @@ const MEDIA_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Paths that must always go to the network (never served from cache) */
 const NETWORK_FIRST_PATHS = ['live.html', 'live.js', 'live.css'];
+
+/**
+ * TV engine JS files — always network-first so a new deployment is served
+ * immediately. The cached copy is only used as an offline fallback.
+ * The browser must NEVER prefer a stale cached TV engine over the deployed version.
+ */
+const TV_NETWORK_FIRST_FILES = [
+  'snx-ch-adapter.js',
+  'snx-tv-network.js',
+  'snx-main-tv-feature.js',
+  'snx-tv-live-view.js',
+  'snx-ch-broadcast.js',
+  'snx-ch-control.js',
+  'snx-creator-channels.js',
+  'snx-creator-live.js',
+  'snx-creator-live-viewer.js',
+  'snx-ch-auth-bridge.js',
+  'snx-ch-firebase.js',
+  'snx-ch-engine.js',
+];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);
 
@@ -176,6 +199,29 @@ self.addEventListener('fetch', (event) => {
   if (url.origin === self.location.origin &&
       NETWORK_FIRST_PATHS.some(p => pathname.endsWith(p))) {
     event.respondWith(fetch(request));
+    return;
+  }
+
+  // TV engine JS files — network-first, cache only as offline fallback.
+  // This ensures the deployed TV code is always preferred over a stale cache.
+  if (url.origin === self.location.origin &&
+      TV_NETWORK_FIRST_FILES.some(f => pathname.endsWith('/' + f) || pathname === BASE + f || pathname.includes(f))) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() =>
+          // Offline fallback — serve cached version if available
+          caches.match(request).then(
+            (cached) => cached || new Response('', { status: 503, statusText: 'Service Unavailable' })
+          )
+        )
+    );
     return;
   }
 

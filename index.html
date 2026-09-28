@@ -53,8 +53,6 @@
 <link rel="stylesheet" href="mobile.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Studio — Music Library / Upload / Playlists / Queue ── -->
 <link rel="stylesheet" href="studio.css?v=SNS-2026-MH-FOUNDER-002">
-<!-- ── Shadow Nexus Music Hub 2.0 ── -->
-<link rel="stylesheet" href="snx-music-hub.css?v=SNS-2026-MH2-001">
 <!-- ── Nexus Global Theme Engine ── -->
 <link rel="stylesheet" href="theme-engine.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Cinematic Welcome Experience ── -->
@@ -6632,11 +6630,6 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">📡</span>
             <span class="sc-item-label">Go Live</span>
         </button>
-        <!-- Music Hub -->
-        <button class="sc-item" id="scNavMusic" onclick="realmNavTo('studioPage')" aria-label="Music Hub">
-            <span class="sc-item-icon">🎵</span>
-            <span class="sc-item-label">Music Hub</span>
-        </button>
         <!-- 24-HOUR TV — native SNS page -->
         <button class="sc-item" id="scNavNexus" onclick="realmNavTo('tvPage')" aria-label="24-Hour TV" style="color:#00AEEF;">
             <span class="sc-item-icon">📺</span>
@@ -6745,10 +6738,6 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="ncm-item ncm-item-live" id="ncmGoLive" onclick="mobileNavTo('_golive')" style="display:none;">
             <div class="ncm-icon-wrap">📡</div>
             <div class="ncm-label">Go Live</div>
-        </div>
-        <div class="ncm-item" id="ncmMusic" onclick="mobileNavTo('studioPage')">
-            <div class="ncm-icon-wrap">🎵</div>
-            <div class="ncm-label">Music Hub</div>
         </div>
         <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
             <div class="ncm-icon-wrap">📺</div>
@@ -6873,9 +6862,6 @@ body.arcade-fs-ios body::after { display:none !important; }
         <button class="nav-item nav-item-go-live" id="navLive" onclick="goLiveOrWatch()" style="display:none;">
             <span class="nav-icon">📡</span> Go Live
             <span id="navLiveDot" class="nav-badge" style="display:none;background:#ff3344;"></span>
-        </button>
-        <button class="nav-item" id="navMusic" onclick="realmNavTo('studioPage')">
-            <span class="nav-icon">🎵</span> Music Hub
         </button>
         <button class="nav-item" id="navNexus" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
             <span class="nav-icon">📺</span> 24-Hour TV
@@ -9206,9 +9192,6 @@ body.arcade-fs-ios body::after { display:none !important; }
                     <input type="checkbox" class="ann-target-cb" value="eclipse_feed" style="width:auto;margin:0;"> Eclipse Feed
                 </label>
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#c8e8ff;text-transform:none;margin:0;">
-                    <input type="checkbox" class="ann-target-cb" value="music_hub" style="width:auto;margin:0;"> Music Hub
-                </label>
-                <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#c8e8ff;text-transform:none;margin:0;">
                     <input type="checkbox" class="ann-target-cb" value="cloud_stream" style="width:auto;margin:0;"> Cloud Stream
                 </label>
                 <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#c8e8ff;text-transform:none;margin:0;">
@@ -9351,7 +9334,6 @@ body.arcade-fs-ios body::after { display:none !important; }
             <option value="eclipseFeedEnabled">🏠 Eclipse Feed</option>
             <option value="profilesEnabled">👤 Profiles</option>
             <option value="messagesEnabled">💬 Messages</option>
-            <option value="musicHubEnabled">🎵 Music Hub</option>
             <option value="radioEnabled">📻 24-Hour Radio</option>
             <option value="liveEnabled">🔴 Live System</option>
             <option value="arcadeEnabled">🕹️ Arcade</option>
@@ -11000,403 +10982,21 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div><!-- end liveHubPage -->
 
 
-<!-- ══════════════════════════════════════════════════════════
-     STUDIO PAGE
-     Music Library, Upload, Playlists, Queue, Now Playing.
-     ══════════════════════════════════════════════════════════ -->
-<div class="page" id="studioPage">
+<!-- studioPage retained as a non-visible redirect stub.
+     Old bookmarks/deep-links that call realmNavTo('studioPage') are
+     safely redirected to tvPage by the routing logic below. -->
+<div class="page" id="studioPage" style="display:none;">
+  <div style="display:none;">
 
- <!-- ── Music Hub page header ── -->
- <header class="snx-mh-header" id="snxMHHeader">
-   <div class="snx-mh-header-inner">
-     <div class="snx-mh-logo">&#9835;</div>
-     <div>
-       <div class="snx-mh-title">SHADOW NEXUS MUSIC</div>
-       <div class="snx-mh-subtitle">&#9834; MUSIC NEVER SLEEPS</div>
-     </div>
-     <div class="snx-mh-eq" aria-hidden="true">
-       <span class="snx-mh-eq-bar"></span>
-       <span class="snx-mh-eq-bar"></span>
-       <span class="snx-mh-eq-bar"></span>
-       <span class="snx-mh-eq-bar"></span>
-       <span class="snx-mh-eq-bar"></span>
-     </div>
-   </div>
- </header>
-
-  <!-- ── Music Hub tab bar ── -->
-  <nav id="snxStudioTabBar">
-    <button class="snx-studio-tab active" id="snxStudioTabBtn_home"       onclick="snxStudioTabSwitch('home',this)">&#127968;<br>Home</button>
-    <button class="snx-studio-tab"        id="snxStudioTabBtn_music"      onclick="snxStudioTabSwitch('music',this)">&#127925;<br>Library</button>
-    <button class="snx-studio-tab"        id="snxStudioTabBtn_upload"     onclick="snxStudioTabSwitch('upload',this)"    style="display:none;">&#11014;<br>Upload</button>
-    <button class="snx-studio-tab"        id="snxStudioTabBtn_playlists"  onclick="snxStudioTabSwitch('playlists',this)">&#128203;<br>Playlists</button>
-    <button class="snx-studio-tab"        id="snxStudioTabBtn_queue"      onclick="snxStudioTabSwitch('queue',this)"     style="display:none;">&#127926;<br>Queue</button>
-    <button class="snx-studio-tab"        id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)">&#9654;&#65039;<br>Playing</button>
-  </nav>
-
-  <!-- ══════════════════════════════════════════════════════
-       MUSIC HUB HOME TAB
-  ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_home" style="padding:0 0 100px;">
-
-    <!-- ── NOW PLAYING hero ── -->
-    <div class="snx-mh-np-hero" id="snxMHNowPlayingHero">
-      <div class="snx-mh-np-glow" aria-hidden="true"></div>
-
-      <div class="snx-mh-np-label">NOW PLAYING</div>
-
-      <!-- Empty state — shown when nothing is playing -->
-      <div class="snx-mh-np-empty" id="snxMHNPEmpty">
-        <div class="snx-mh-np-empty-icon">&#127925;</div>
-        <div class="snx-mh-np-empty-title">Nothing Playing</div>
-        <div class="snx-mh-np-empty-sub">Choose something from your Library or listen to Shadow Nexus Radio.</div>
-        <div class="snx-mh-np-empty-btns">
-          <button class="snx-mh-np-empty-btn" onclick="snxStudioTabSwitch('music',document.getElementById('snxStudioTabBtn_music'))">&#127925; OPEN LIBRARY</button>
-          <button class="snx-mh-np-empty-btn" onclick="snxMHRadioToggle()">&#128251; LISTEN LIVE</button>
-        </div>
-      </div>
-
-      <!-- Active playback state — hidden when nothing is playing -->
-      <div id="snxMHNPActiveState" style="display:none;">
-        <div class="snx-mh-np-body">
-          <!-- Artwork -->
-          <div class="snx-mh-np-artwork" id="snxMHArtwork">
-            <span class="snx-mh-np-artwork-icon">&#127925;</span>
-          </div>
-          <!-- Info -->
-          <div class="snx-mh-np-info">
-            <div class="snx-mh-np-title" id="snxMHNPTitle">Nothing playing</div>
-            <div class="snx-mh-np-artist" id="snxMHNPArtist"></div>
-            <!-- Mini EQ bars when playing -->
-            <div class="snx-mh-np-eq-row" id="snxMHNPEQRow" style="display:none;" aria-hidden="true">
-              <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
-              <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
-              <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Progress bar -->
-        <div class="snx-mh-np-progress-wrap">
-          <span class="snx-mh-np-time" id="snxMHNPCurrentTime">0:00</span>
-          <div class="snx-mh-np-progress-track">
-            <div class="snx-mh-np-progress-fill" id="snxMHNPFill" style="width:0%"></div>
-          </div>
-          <span class="snx-mh-np-time" id="snxMHNPDuration">0:00</span>
-        </div>
-      </div>
-
-      <!-- Controls — always visible when something is queued -->
-      <div class="snx-mh-np-controls" id="snxMHNPControls" style="display:none;">
-        <button class="snx-mh-ctrl-btn" onclick="snxMusicPrev()" title="Previous">&#9198;</button>
-        <button class="snx-mh-ctrl-btn snx-mh-ctrl-play" id="snxMHPlayBtn" onclick="snxMusicPlayPause()" title="Play / Pause">&#9654;</button>
-        <button class="snx-mh-ctrl-btn" onclick="snxMusicNext()" title="Next">&#9197;</button>
-      </div>
-
-      <!-- UP NEXT -->
-      <div class="snx-mh-up-next" id="snxMHUpNext" style="display:none;">
-        UP NEXT: <span id="snxMHUpNextTitle"></span>
-      </div>
-    </div>
-
-    <!-- ── SHADOW NEXUS RADIO ── -->
-    <div class="snx-mh-section" style="padding:0 14px 4px;">
-      <div class="snx-mh-section-title">&#128251; SHADOW NEXUS RADIO</div>
-      <div class="snx-mh-radio-card">
-        <div class="snx-mh-radio-info">
-          <div class="snx-mh-radio-live-dot" id="snxMHRadioDot"></div>
-          <div>
-            <div class="snx-mh-radio-station">24 / 7 MUSIC</div>
-            <div class="snx-mh-radio-tagline">Official Shadow Nexus rotation</div>
-          </div>
-        </div>
-        <button class="snx-mh-listen-btn" id="snxMHListenBtn"
-          onclick="snxMHRadioToggle()">
-          &#9654; LISTEN LIVE
-        </button>
-      </div>
-    </div>
-
-    <!-- ── FEATURED MUSIC ── -->
-    <div class="snx-mh-section" style="padding:0 14px 4px;" id="snxMHFeaturedSection">
-      <div class="snx-mh-section-title">&#11088; FEATURED MUSIC</div>
-      <div id="snxMHFeaturedList" class="snx-mh-featured-list">
-        <div class="snx-mh-empty">No featured tracks yet.</div>
-      </div>
-    </div>
-
-    <!-- ── PLAYLISTS / STATIONS ── -->
-    <div class="snx-mh-section" style="padding:0 14px 4px;">
-      <div class="snx-mh-section-title">&#127908; PLAYLISTS &amp; STATIONS</div>
-      <div id="snxMHPlaylistGrid" class="snx-mh-playlist-grid">
-        <!-- role-aware empty state set by snxMHRefreshHome() -->
-        <div class="snx-mh-empty" id="snxMHPlaylistEmpty">No playlists available yet.</div>
-      </div>
-    </div>
-
-    <!-- ── RECENTLY ADDED ── -->
-    <div class="snx-mh-section" style="padding:0 14px 4px;">
-      <div class="snx-mh-section-title">&#128336; RECENTLY ADDED</div>
-      <div id="snxMHRecentList" class="snx-mh-recent-list">
-        <!-- role-aware empty state set by snxMHRefreshHome() -->
-        <div class="snx-mh-empty" id="snxMHRecentEmpty">No music has been added yet.</div>
-      </div>
-    </div>
-
-    <!-- ── FOUNDER/ADMIN MANAGEMENT (gated) ── -->
-    <div id="snxMHAdminPanel" class="snx-mh-section" style="display:none;padding:0 14px 4px;">
-      <div class="snx-mh-section-title snx-mh-admin-title">&#128081; MUSIC MANAGEMENT</div>
-      <div class="snx-mh-admin-card">
-        <p class="snx-mh-admin-note">Founder controls only. Changes affect the official Shadow Nexus Music catalog and rotation.</p>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;">
-          <button class="snx-mh-admin-btn"
-            onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))">
-            &#11014; Upload Music
-          </button>
-          <button class="snx-mh-admin-btn"
-            onclick="snxStudioTabSwitch('playlists',document.getElementById('snxStudioTabBtn_playlists'))">
-            &#128203; Manage Playlists
-          </button>
-          <button class="snx-mh-admin-btn"
-            onclick="snxStudioTabSwitch('queue',document.getElementById('snxStudioTabBtn_queue'))">
-            &#127926; Manage Queue
-          </button>
-          <button class="snx-mh-admin-btn" onclick="snxMHFeatureTrackPicker()">
-            &#11088; Feature a Track
-          </button>
-          <button class="snx-mh-admin-btn snx-mh-radio-manage" onclick="snxMHManageRadio()">
-            &#128251; Manage Radio
-          </button>
-          <button class="snx-mh-admin-btn" onclick="snxMHManageFeatured()">
-            &#9999; Edit Featured
-          </button>
-          <button class="snx-mh-admin-btn" onclick="snxMHManageLibrary()">
-            &#127925; Manage Library
-          </button>
-        </div>
-      </div>
-    </div>
-
-  </div><!-- end Home tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       MUSIC LIBRARY TAB
-  ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_music" style="padding:12px 14px 100px;">
-
-    <!-- Upload Music CTA -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;" id="snxLibTitle">&#127925; SHADOW NEXUS MUSIC LIBRARY</div>
-      <button id="snxLibUploadBtn" onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))"
-        style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:22px;
-        background:linear-gradient(135deg,rgba(0,174,239,0.20),rgba(0,174,239,0.10));
-        border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:12px;font-weight:700;
-        cursor:pointer;white-space:nowrap;">&#11014; UPLOAD MUSIC</button>
-    </div>
-
-    <!-- Search bar -->
-    <div style="margin-bottom:10px;">
-      <input id="snxLibSearch" type="search" placeholder="&#128269; Search tracks…"
-        oninput="snxLibSearch()"
-        style="width:100%;padding:9px 12px;border-radius:10px;background:rgba(13,36,68,0.90);
-        border:1px solid rgba(0,174,239,0.22);color:#d8eeff;font-size:13px;outline:none;">
-    </div>
-
-    <!-- Multi-select toolbar (hidden until activated) -->
-    <div id="snxLibMultiSelectBar" style="display:none;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.25);border-radius:10px;padding:8px 12px;margin-bottom:8px;display:none;flex-wrap:wrap;gap:8px;align-items:center;">
-      <span id="snxLibSelCount" style="font-size:12px;color:#00AEEF;font-weight:700;">0 selected</span>
-      <button onclick="snxLibSelectAll()" style="padding:4px 10px;border-radius:6px;font-size:11px;border:1px solid rgba(0,174,239,0.30);background:rgba(0,174,239,0.08);color:#00AEEF;cursor:pointer;">Select All</button>
-      <button onclick="snxLibBulkAddToPlaylist()" style="padding:4px 10px;border-radius:6px;font-size:11px;border:1px solid rgba(0,174,239,0.30);background:rgba(0,174,239,0.08);color:#00AEEF;cursor:pointer;">+ Add to Playlist</button>
-      <button onclick="snxLibToggleMultiSelect()" style="padding:4px 10px;border-radius:6px;font-size:11px;border:1px solid rgba(255,51,85,0.30);background:rgba(255,51,85,0.06);color:#ff3355;cursor:pointer;">Cancel</button>
-    </div>
-
-    <!-- Track count + multi-select toggle -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <span id="snxTrackLibraryCount" style="font-size:11px;color:#4a7a9a;">0 tracks</span>
-      <button onclick="snxLibToggleMultiSelect()" style="padding:3px 8px;border-radius:6px;font-size:10px;border:1px solid rgba(0,174,239,0.20);background:none;color:#4a7a9a;cursor:pointer;">&#9745; Select</button>
-    </div>
-
-    <!-- Track list -->
-    <div id="snxTrackLibraryList"></div>
-
-    <!-- Upload dashboard (shown during upload) -->
-    <div id="snxUploadDashboard" style="display:none;margin-top:12px;"></div>
-
-    <!-- Hidden file input -->
-    <input type="file" id="snxMusicFileInput" accept="audio/*,.mp3,.m4a,.aac,.ogg,.wav,.flac,.opus"
-      multiple style="display:none;" onchange="snxMusicFilesSelected(event)">
-
-  </div><!-- end Music tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       UPLOAD TAB
-  ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_upload" style="display:none;padding:16px 14px 100px;">
-
-    <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;margin-bottom:16px;">&#11014; UPLOAD MUSIC</div>
-
-    <!-- Drag-and-drop zone -->
-    <!-- REPAIR: removed inline ondrop — studio.js _initMusicLibrary attaches the
-         authoritative drop listener via addEventListener so there is exactly ONE
-         handler. The inline version caused a double-upload on every drag-and-drop. -->
-    <div id="snxUploadZone"
-      onclick="snxMusicOpenFilePicker()"
-      style="border:2px dashed rgba(0,174,239,0.40);border-radius:16px;padding:36px 20px;
-      text-align:center;cursor:pointer;background:rgba(0,174,239,0.04);
-      transition:background 0.2s,border-color 0.2s;margin-bottom:16px;"
-      ondragover="event.preventDefault();this.style.background='rgba(0,174,239,0.12)';this.style.borderColor='rgba(0,174,239,0.80)';"
-      ondragleave="this.style.background='rgba(0,174,239,0.04)';this.style.borderColor='rgba(0,174,239,0.40)';">
-      <div style="font-size:40px;margin-bottom:12px;">&#11014;&#65039;</div>
-      <div style="font-size:15px;font-weight:800;color:#00AEEF;margin-bottom:6px;">Click or Drag &amp; Drop to Upload</div>
-      <div style="font-size:12px;color:#4a7a9a;">Supported: MP3, M4A, AAC, OGG, WAV, FLAC, OPUS<br>Up to 1,000 files at once</div>
-    </div>
-
-    <!-- Rights confirmation -->
-    <div class="snx-mh-rights-box" id="snxMHRightsBox">
-      <label class="snx-mh-rights-label">
-        <input type="checkbox" id="snxMHRightsCheck" onchange="snxMHRightsChange()">
-        <span>I confirm that I own this content or have permission / license to use and broadcast it on Shadow Nexus Social.</span>
-      </label>
-      <p class="snx-mh-rights-note">This confirmation does not independently verify copyright ownership. Upload only content you are authorized to use.</p>
-    </div>
-
-    <button id="snxMHUploadBtn" onclick="snxMHUploadWithRights()"
-      style="width:100%;padding:14px;border-radius:14px;font-size:15px;font-weight:800;letter-spacing:1px;
-      background:linear-gradient(135deg,rgba(0,174,239,0.25),rgba(0,174,239,0.12));
-      border:1px solid rgba(0,174,239,0.50);color:#00AEEF;cursor:pointer;margin-bottom:16px;
-      opacity:0.45;pointer-events:none;">
-      &#11014; SELECT MUSIC FILES
-    </button>
-
-    <!-- Upload progress (reuses snxUploadDashboard — same element as music tab) -->
-    <div style="font-size:12px;color:#4a7a9a;text-align:center;line-height:1.6;">
-      After upload, songs appear immediately in your <strong style="color:#00AEEF;">Music Library</strong>.<br>
-      Add them to a playlist to build your queue.
-    </div>
-
-  </div><!-- end Upload tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       PLAYLISTS TAB
-  ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_playlists" style="display:none;padding:12px 14px 100px;">
-
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;">&#128203; PLAYLISTS</div>
-      <!-- Shown only for founder by snxMHRefreshHome -->
-      <button id="snxPLCreateBtn" onclick="snxCSMusicCreatePlaylist()"
-        style="display:none;padding:8px 14px;border-radius:22px;background:linear-gradient(135deg,rgba(0,174,239,0.20),rgba(0,174,239,0.10));border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">
-        &#43; NEW PLAYLIST
-      </button>
-    </div>
-
-    <!-- Playlist panel (studio.js renders here) -->
-    <div id="snxCSPlaylistPanel">
-      <div id="snxCSPlPanelInner" style="color:#4a7a9a;font-size:12px;text-align:center;padding:20px 0;">
-        Loading playlists…
-      </div>
-    </div>
-
-    <!-- CS Library list for adding tracks to playlists -->
-    <div style="margin-top:16px;border-top:1px solid rgba(0,174,239,0.12);padding-top:12px;">
-      <div style="font-size:11px;color:#4a7a9a;margin-bottom:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Add Library Tracks</div>
-      <div style="margin-bottom:8px;">
-        <input id="snxCSLibSearch" type="search" placeholder="&#128269; Search library…"
-          oninput="snxCSLibSearch()"
-          style="width:100%;padding:8px 12px;border-radius:10px;background:rgba(13,36,68,0.90);
-          border:1px solid rgba(0,174,239,0.18);color:#d8eeff;font-size:12px;outline:none;">
-      </div>
-      <div id="snxCSTrackLibraryList" style="max-height:300px;overflow-y:auto;"></div>
-    </div>
-
-  </div><!-- end Playlists tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       QUEUE TAB
-  ═══════════════════════════════════════════════════════ -->
-  <div id="snxStudioTab_queue" style="display:none;padding:12px 14px 100px;">
-
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;">&#127926; CLOUD STREAM QUEUE</div>
-      <div style="display:flex;gap:8px;">
-        <button onclick="snxSQPlayPause()" style="padding:7px 12px;border-radius:20px;background:rgba(0,174,239,0.15);border:1px solid rgba(0,174,239,0.35);color:#00AEEF;font-size:12px;cursor:pointer;">&#9654;&#9646; Play</button>
-        <button onclick="snxSQSkip()" style="padding:7px 12px;border-radius:20px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.22);color:#5a80a8;font-size:12px;cursor:pointer;">&#9197; Skip</button>
-        <button onclick="snxSQClear()" style="padding:7px 12px;border-radius:20px;background:rgba(255,51,85,0.07);border:1px solid rgba(255,51,85,0.25);color:#ff3355;font-size:12px;cursor:pointer;">&#10005; Clear</button>
-      </div>
-    </div>
-
-    <!-- Queue list (studio.js _sqRenderQueue renders here) -->
-    <div id="snxSQQueueList"></div>
-
-    <!-- Add from library section -->
-    <div style="margin-top:16px;border-top:1px solid rgba(0,174,239,0.12);padding-top:12px;">
-      <div style="font-size:11px;color:#4a7a9a;margin-bottom:8px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Add to Queue from Library</div>
-      <div style="margin-bottom:8px;">
-        <input id="snxCSLibSearchQ" type="search" placeholder="&#128269; Search library…"
-          oninput="(function(){var q=(document.getElementById('snxCSLibSearchQ')||{}).value||'';document.querySelectorAll('#snxSQLibraryList .snx-track-item').forEach(function(el){var t=(el.dataset.title||'').toLowerCase();var a=(el.dataset.artist||'').toLowerCase();el.style.display=(t.includes(q.toLowerCase())||a.includes(q.toLowerCase()))?'':'none';});})()"
-          style="width:100%;padding:8px 12px;border-radius:10px;background:rgba(13,36,68,0.90);
-          border:1px solid rgba(0,174,239,0.18);color:#d8eeff;font-size:12px;outline:none;">
-      </div>
-      <div id="snxSQLibraryList" style="max-height:320px;overflow-y:auto;"></div>
-    </div>
-
-  </div><!-- end Queue tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       NOW PLAYING TAB — Local playback status
-  ═══════════════════════════════════════════════════════ -->
- <div id="snxStudioTab_nowplaying" style="display:none;padding:12px 14px 100px;">
-
-   <!-- Now Playing Card -->
-   <div id="snxNPCard" style="background:linear-gradient(135deg,rgba(0,174,239,0.06),rgba(0,174,239,0.03));border:1px solid rgba(0,174,239,0.18);border-radius:14px;padding:16px 14px;margin-bottom:12px;">
-     <div style="font-size:9px;letter-spacing:2px;color:#4a7a9a;margin-bottom:8px;font-weight:700;">NOW PLAYING</div>
-
-     <!-- Artwork + Info -->
-     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
-       <div id="snxNPArtwork" style="width:64px;height:64px;border-radius:10px;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.20);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;overflow:hidden;">&#127925;</div>
-       <div style="flex:1;min-width:0;">
-         <div id="snxNPTitle" style="font-size:15px;font-weight:800;color:#d8eeff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
-         <div id="snxNPArtist" style="font-size:12px;color:#5a80a8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
-         <div id="snxNPMeta" style="font-size:10px;color:#3a5a7a;margin-top:4px;"></div>
-       </div>
-     </div>
-
-     <!-- Progress -->
-     <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-       <span id="snxNPCurrentTime" style="font-size:10px;color:#4a7a9a;min-width:30px;">—</span>
-       <div style="flex:1;height:4px;background:rgba(0,174,239,0.12);border-radius:2px;overflow:hidden;">
-         <div id="snxNPProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,#00AEEF,#0090cc);border-radius:2px;transition:width 0.5s linear;"></div>
-       </div>
-       <span id="snxNPDuration" style="font-size:10px;color:#4a7a9a;min-width:30px;text-align:right;">—</span>
-     </div>
-
-     <!-- UP NEXT -->
-     <div id="snxNPNextRow" style="display:none;padding:6px 10px;border-radius:8px;background:rgba(0,0,0,0.2);border:1px solid rgba(0,174,239,0.10);font-size:11px;color:#4a7a9a;">
-       UP NEXT: <span id="snxNPNextTitle" style="color:#7abadc;font-weight:700;"></span>
-     </div>
-   </div>
-
- </div><!-- end Now Playing tab -->
-
-  <!-- ══════════════════════════════════════════════════════
-       MUSIC HUB 2.0 LAYER
-       Rendered on top of / alongside the legacy studio tabs.
-       MH2 initialises when studioPage opens and provides the
-       full R2 + Supabase storage-router player experience.
-  ═══════════════════════════════════════════════════════ -->
-  <div id="snxMH2Wrapper" style="display:none;">
-    <div id="snxMH2Container">
-
-      <!-- ══ HEADER ══ -->
-      <header class="mh2-header">
-        <div class="mh2-header-eyebrow">SHADOW NEXUS SOCIAL</div>
-        <div class="mh2-header-title">
+      <!-- ══ ENTRANCE HEADER ══ -->
+      <header class="mh2-entrance">
+        <div class="mh2-entrance-eyebrow">SHADOW NEXUS SOCIAL</div>
+        <div class="mh2-entrance-title">
           MUSIC HUB
-          <span class="mh2-header-eq" id="snxMH2HeaderEQ" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span>
-          </span>
+          <em>SOUND REALM</em>
         </div>
-        <div class="mh2-header-sub">MUSIC NEVER SLEEPS</div>
+        <div class="mh2-entrance-sub">MUSIC NEVER SLEEPS</div>
+        <div class="mh2-entrance-line" aria-hidden="true"></div>
       </header>
 
       <!-- ══ PRIMARY NAV — 5 destinations only ══ -->
@@ -11476,15 +11076,22 @@ body.arcade-fs-ios body::after { display:none !important; }
         </div><!-- end hero player -->
 
         <!-- SHADOW NEXUS RADIO strip -->
-        <div class="mh2-radio-strip">
-          <div class="mh2-radio-strip-left">
-            <div class="mh2-radio-dot" id="snxMH2HomeDot"></div>
-            <div>
-              <div class="mh2-radio-strip-name">SHADOW NEXUS RADIO</div>
-              <div class="mh2-radio-strip-sub" id="snxMH2HomeAirLabel">OFF AIR</div>
-            </div>
+        <div class="mh2-radio-strip" onclick="snxMH2SwitchTab('radio')">
+          <div class="mh2-radio-dot" id="snxMH2HomeDot"></div>
+          <div class="mh2-radio-strip-info">
+            <div class="mh2-radio-strip-title">SHADOW NEXUS RADIO</div>
+            <div class="mh2-radio-strip-sub" id="snxMH2HomeAirLabel">OFF AIR</div>
           </div>
-          <button class="mh2-radio-strip-btn" id="snxMH2HomeRadioBtn" onclick="snxMH2SwitchTab('radio')" aria-label="Enter radio">ENTER RADIO</button>
+          <button class="mh2-radio-strip-btn" id="snxMH2HomeRadioBtn" onclick="event.stopPropagation();snxMH2RadioToggle()" aria-label="Toggle radio">LISTEN</button>
+        </div>
+
+        <!-- NEXUS PULSE — recently added tracks -->
+        <div class="mh2-home-section">
+          <div class="mh2-section-header">
+            <span class="mh2-section-title">&#9889; NEXUS PULSE</span>
+            <button class="mh2-section-see-all" onclick="snxMH2SwitchTab('library')" aria-label="View library">See all</button>
+          </div>
+          <div class="mh2-pulse-strip" id="snxMH2PulseStrip" aria-label="Nexus Pulse"></div>
         </div>
 
         <!-- FEATURED IN THE NEXUS -->
@@ -11550,7 +11157,7 @@ body.arcade-fs-ios body::after { display:none !important; }
         </div>
 
         <!-- REALM CARDS — signature feature -->
-        <div class="mh2-realms-grid" id="snxMH2RealmsScroll" role="list" aria-label="Music realms">
+        <div class="mh2-realms-grid" id="snxMH2RealmsGrid" role="list" aria-label="Music realms">
           <div class="mh2-realm-card mh2-realm--volt active" data-realm="all" onclick="snxMH2FilterRealm('all','discover')" role="listitem" tabindex="0">
             <div class="mh2-realm-card-bg"></div>
             <div class="mh2-realm-card-icon">&#127758;</div>
@@ -11660,14 +11267,9 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div id="snxMH2UploadForm"></div>
       </div>
 
-    </div><!-- end snxMH2Container -->
+  </div><!-- end hidden stub content -->
 
-    <!-- Persistent Nexus Player Bar — ONE audio engine, fixed above bottom nav -->
-    <div id="snxMH2PlayerBar" role="region" aria-label="Now playing controls"></div>
-
-  </div><!-- end snxMH2Wrapper -->
-
-</div><!-- end studioPage -->
+</div><!-- end studioPage redirect stub -->
 
 <!-- ████████████████████████████████████████████████████████
      𓂀  SHADOW NEXUS — NEXUS
@@ -12580,7 +12182,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 <script type="module" src="snx-ch-adapter.js"></script>
 
 <!-- ── Load SNX TV Network (Creator Channels) for index.html tvPage ── -->
-<link rel="stylesheet" href="snx-tv-network.css?v=NATV-001">
+<link rel="stylesheet" href="snx-tv-network.css?v=SNS-2026-TV-STABILITY-001">
 <!-- [PHASE-2-DISABLED] snx-creator-live.css removed — new creator-live UI not needed in Phase 1 -->
 <script type="module">
 /**
@@ -12588,6 +12190,18 @@ body.arcade-fs-ios body::after { display:none !important; }
  * Initialises LIVE NOW / CHANNELS / MY CHANNEL tabs when the user opens tvPage.
  * Auth is read from window._snxCurrentUser (set by the main SNS auth block).
  * No second login, no second Firebase init.
+ *
+ * Build: SNS-2026-TV-STABILITY-001
+ *
+ * CANONICAL ENTRY POINT: window.snxOpen24HourTV()
+ * All navigation to tvPage must use this function (or realmNavTo('tvPage') which
+ * delegates to it).  It serialises auth-waiting, page-active checks, and engine
+ * initialisation into a single sequential Promise so there is never a race
+ * between snxTvInit() and snxTvNetworkInit().
+ *
+ * INIT LOCK: window._snxTvInitPromise
+ * If TV startup is already in progress when another caller arrives, the same
+ * Promise is returned — no second engine is created.
  */
 let _tvNetworkModule = null;
 let _tvNetworkInited = false;
@@ -12601,11 +12215,16 @@ async function _getTvNetworkModule() {
   return _tvNetworkModule;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   snxTvNetworkInit — initialise / re-sync the TV Network module.
+   Called exclusively from snxOpen24HourTV(); never called directly by navTo.
+───────────────────────────────────────────────────────────────────────── */
 window.snxTvNetworkInit = async function() {
   try {
     const m = await _getTvNetworkModule();
     if (!_tvNetworkInited) {
       _tvNetworkInited = true;
+      console.log('[SNX-TV] Network initializing');
       m.initTvNetwork(window._snxCurrentUser || null);
     } else {
       // Re-entry — just sync auth state in case it changed
@@ -12626,6 +12245,8 @@ window.snxTvNetworkTeardown = function() {
   if (aud && !aud.paused) { try { aud.pause(); } catch(_) {} }
   // Ensure the flag is cleared so _switchTab's resume guard fires correctly.
   window._snxTvPageActive = false;
+  // Release the init lock so the next navigation can start fresh.
+  window._snxTvInitPromise = null;
 };
 
 // Keep TV Network in sync with SNS auth changes
@@ -12640,6 +12261,130 @@ window.addEventListener('snxAuthSignOut', () => {
   }
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   snxOpen24HourTV — CANONICAL 24-HOUR TV STARTUP CONTROLLER
+   ═══════════════════════════════════════════════════════════════════════════
+   This is the ONE function that starts the TV.  All paths that navigate to
+   tvPage (realmNavTo / mobileNavTo / deep-links) end up here.
+
+   Sequence:
+     A. Confirm tvPage will be / is active
+     B. Wait for Shadow Nexus authentication to resolve
+     C. Use the existing logged-in SNS session (never a second login)
+     D. Initialize snxTvInit() — the 24-Hour channel engine
+     E. Wait for tvPage to be actually active in the DOM
+     F. Initialize snxTvNetworkInit() — LIVE NOW / CHANNELS / MY CHANNEL tabs
+     G. Sync auth state so MY CHANNEL resolves correctly
+     H. Playback begins automatically inside snxTvInit/_startWithUser
+
+   INIT LOCK (window._snxTvInitPromise):
+     If TV startup is already running, the same Promise is reused.
+     This prevents duplicate Firestore listeners, duplicate timers,
+     and duplicate audio from being created.
+
+   Guest mode:
+     Guests (null user) are allowed to watch public Shadow Nexus TV.
+     Auth resolution is still awaited to give Firebase time to confirm
+     the user really is a guest and not a slow sign-in.
+═══════════════════════════════════════════════════════════════════════════ */
+window.snxOpen24HourTV = function() {
+  console.log('[SNX-TV] TV navigation requested — build:', window.SHADOW_NEXUS_BUILD_VERSION || 'SNS-2026-TV-STABILITY-001');
+
+  // ── INIT LOCK: if already in progress, reuse the running Promise ──────────
+  if (window._snxTvInitPromise) {
+    console.log('[SNX-TV] Init already in progress — reusing existing Promise');
+    return window._snxTvInitPromise;
+  }
+
+  window._snxTvInitPromise = (async () => {
+    try {
+      // ── A. Stop Music Hub radio — never two audio streams at once ────────────
+      if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
+
+      // ── B. Wait for Shadow Nexus authentication to resolve ────────────────────
+      // Uses the canonical auth-ready queue — never depends on polling.
+      const user = await new Promise((resolve) => {
+        if (window._snxAuthResolved) {
+          console.log('[SNX-TV] Auth ready (already resolved)');
+          resolve(window._snxCurrentUser || null);
+        } else {
+          console.log('[SNX-TV] Waiting for auth…');
+          // _snxOnAuthReady is set up by the SNS Firebase auth block.
+          // If it isn't defined yet (extremely early call), fall back to the queue directly.
+          const enqueue = () => {
+            window._snxAuthReadyQueue = window._snxAuthReadyQueue || [];
+            window._snxAuthReadyQueue.push(() => {
+              console.log('[SNX-TV] Auth ready (resolved via queue)');
+              resolve(window._snxCurrentUser || null);
+            });
+          };
+          if (typeof window._snxOnAuthReady === 'function') {
+            window._snxOnAuthReady(() => {
+              console.log('[SNX-TV] Auth ready');
+              resolve(window._snxCurrentUser || null);
+            });
+          } else {
+            enqueue();
+          }
+          // Safety timeout — if auth never fires within 10s, proceed as guest
+          setTimeout(() => {
+            if (!window._snxAuthResolved) {
+              console.warn('[SNX-TV] Auth timeout — proceeding as guest');
+              resolve(null);
+            }
+          }, 10000);
+        }
+      });
+
+      // ── C. Confirm tvPage is active — the portal transition fires navTo THEN
+      //      sets up the page, so by the time this async code runs tvPage is
+      //      already shown.  We do a quick DOM check as a sanity guard. ─────────
+      const tvPageEl = document.getElementById('tvPage');
+      const isActive = tvPageEl && tvPageEl.classList.contains('active');
+      if (!isActive) {
+        console.log('[SNX-TV] TV page active — waiting for DOM');
+        // Give the portal transition (250ms) plus a small buffer to complete
+        await new Promise(r => setTimeout(r, 300));
+      }
+      console.log('[SNX-TV] TV page active');
+
+      // ── D. Initialize snxTvInit — the core 24-Hour channel engine ─────────────
+      // snxTvInit is defined on window by snx-ch-adapter.js (type="module" script).
+      // It already guards against double media creation via _stopMediaFull/_stopTick.
+      if (typeof window.snxTvInit === 'function') {
+        console.log('[SNX-TV] TV engine initializing');
+        window.snxTvInit();
+      } else {
+        console.warn('[SNX-TV] snxTvInit not yet available — module may still be loading');
+      }
+
+      // ── E. Small yield so snxTvInit's synchronous DOM work settles ────────────
+      await new Promise(r => setTimeout(r, 50));
+
+      // ── F. Initialize snxTvNetworkInit — LIVE NOW / CHANNELS / MY CHANNEL ─────
+      console.log('[SNX-TV] Network initializing');
+      await window.snxTvNetworkInit();
+
+      // ── G. Sync auth state so MY CHANNEL resolves correctly ───────────────────
+      if (_tvNetworkModule && user) {
+        _tvNetworkModule.onTvNetworkAuthChange(user);
+      }
+
+      console.log('[SNX-TV] Playback ready');
+
+    } catch (err) {
+      console.warn('[SNX-TV] Startup error:', err && err.message);
+    } finally {
+      // Release the lock — next navigation can start fresh if teardown happened
+      // (teardown also clears it, but this covers the success path too so that
+      //  re-navigating TV→Feed→TV works correctly)
+      window._snxTvInitPromise = null;
+    }
+  })();
+
+  return window._snxTvInitPromise;
+};
+
 /* ── Deep-link helpers called by notification buttons ────────────────────────
    snxOpenTvLive(creatorUid, liveId)  — navigate to TV, open the live viewer
    snxOpenTvReplay(creatorUid, replayId) — navigate to TV, open the replay
@@ -12647,10 +12392,11 @@ window.addEventListener('snxAuthSignOut', () => {
 ──────────────────────────────────────────────────────────────────────────── */
 window.snxOpenTvLive = async function(creatorUid, liveId) {
   if (!creatorUid || !liveId) return;
-  // Navigate to TV page first
+  // Navigate to TV page — snxOpen24HourTV handles auth wait + engine init
   if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-  // Init the TV network if not already done
-  if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
+  // Wait for the canonical TV controller to finish (includes snxTvNetworkInit)
+  if (typeof window.snxOpen24HourTV === 'function') await window.snxOpen24HourTV();
+  else if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
   // Give UI a frame to settle, then open the live viewer
   setTimeout(async () => {
     try {
@@ -12680,7 +12426,9 @@ window.snxOpenTvLive = async function(creatorUid, liveId) {
 window.snxOpenTvReplay = async function(creatorUid, replayId) {
   if (!creatorUid || !replayId) return;
   if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-  if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
+  // Wait for the canonical TV controller to finish (includes snxTvNetworkInit)
+  if (typeof window.snxOpen24HourTV === 'function') await window.snxOpen24HourTV();
+  else if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
   setTimeout(async () => {
     try {
       const [m, fs, live] = await Promise.all([
@@ -12803,7 +12551,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 <script type="module">
   import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, browserLocalPersistence, setPersistence, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
-  import { getFirestore, doc, setDoc, getDoc, getDocFromCache, getDocFromServer, updateDoc, deleteDoc, collection, addDoc, query, orderBy, limit, onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment, serverTimestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, getDoc, getDocFromCache, getDocFromServer, updateDoc, deleteDoc, collection, collectionGroup, addDoc, query, orderBy, limit, onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment, serverTimestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
   import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging.js";
   import { getDatabase as _getRtdb, ref as _rtdbRef, set as _rtdbSet, remove as _rtdbRemove, get as _rtdbGet, onDisconnect as _rtdbOnDisconnect, serverTimestamp as _rtdbServerTimestamp, onValue as _rtdbOnValue, off as _rtdbOff } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
   import { getStorage, ref as _storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
@@ -12851,7 +12599,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // ── Full Firestore namespace for feature scripts ──
   window._snxFirestore = {
       db, doc, getDoc, getDocFromCache, getDocFromServer, setDoc, updateDoc, deleteDoc,
-      collection, addDoc, query, orderBy, limit,
+      collection, collectionGroup, addDoc, query, orderBy, limit,
       onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment,
       serverTimestamp, enableNetwork, disableNetwork,
   };
@@ -22437,40 +22185,34 @@ function navTo(pageId) {
         if (typeof window.snxLoadBlockedUsers === 'function') window.snxLoadBlockedUsers();
     }
     // ── 24-Hour TV lifecycle hooks ──
+    // TV startup is handled exclusively by the canonical snxOpen24HourTV() controller.
+    // It serialises auth-waiting, page-active checks, and engine initialisation into
+    // a single sequential Promise — preventing the race between snxTvInit() and
+    // snxTvNetworkInit() that caused the "must refresh 2-3 times" bug.
+    //
+    // Portal transition timing: realmNavTo fires firePortalTransition(→ navTo after 250ms).
+    // navTo calls show() synchronously, so tvPage is already in the DOM as active by the
+    // time snxOpen24HourTV runs — no additional wait needed here.
     if (pageId === 'tvPage') {
-        // Stop Music Hub radio before TV audio starts — never two streams at once.
-        // This is safe because Music Hub and TV are intentionally separate players.
-        if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
-        if (typeof window.snxTvInit === 'function') window.snxTvInit();
-        // Also init the TV Network (LIVE NOW / CHANNELS / MY CHANNEL tabs)
-        if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
+        // Delegate entirely to the canonical controller — do NOT call snxTvInit or
+        // snxTvNetworkInit directly from here.  snxOpen24HourTV handles music stop,
+        // auth wait, init lock, and sequencing.
+        if (typeof window.snxOpen24HourTV === 'function') {
+            window.snxOpen24HourTV();
+        } else {
+            // Fallback: module not yet loaded — use legacy path (rare, e.g. cold first paint)
+            if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
+            if (typeof window.snxTvInit === 'function') window.snxTvInit();
+            if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
+        }
     } else {
         if (typeof window.snxTvTeardown === 'function') window.snxTvTeardown();
         if (typeof window.snxTvNetworkTeardown === 'function') window.snxTvNetworkTeardown();
     }
-    // Initialize 24-HOUR NEXUS when nexusPage or studioPage opens (legacy)
-    if (pageId === 'nexusPage' || pageId === 'studioPage') {
+    // Initialize 24-HOUR NEXUS when nexusPage opens (legacy)
+    if (pageId === 'nexusPage') {
         if (typeof window.snxNexusInit === 'function') window.snxNexusInit();
         if (typeof window.snxStudioInit === 'function') window.snxStudioInit();
-    }
-    // Initialize Music Hub 2.0 on studioPage — on-demand, isolated from other pages
-    if (pageId === 'studioPage') {
-        var mh2Wrapper = document.getElementById('snxMH2Wrapper');
-        if (mh2Wrapper) {
-            // Hide old studio tabs, show MH2 (progressive replacement)
-            ['snxStudioTab_home','snxStudioTab_music','snxStudioTab_upload',
-             'snxStudioTab_playlists','snxStudioTab_queue','snxStudioTab_nowplaying',
-             'snxStudioTabBar','snxMHHeader'].forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) el.style.display = 'none';
-            });
-            mh2Wrapper.style.display = '';
-            if (typeof window.snxMH2Init === 'function') window.snxMH2Init();
-        }
-    }
-    // Stop Music Hub 2.0 audio when leaving studio
-    if (pageId !== 'studioPage' && typeof window.snxMH2Stop === 'function') {
-        window.snxMH2Stop();
     }
     // Initialize Global Search when search page opens
     if (pageId === 'searchPage') {
@@ -24186,26 +23928,6 @@ window._showRolePanels = function() {
     if (secAdm)  secAdm.style.display  = isAdm   ? 'block' : 'none';
     if (secMod)  secMod.style.display  = isMod   ? 'block' : 'none';
 
-    // Music Hub management tabs — re-evaluate whenever role/auth is confirmed.
-    // snxMHRefreshHome handles all tab visibility, empty states, and panels.
-    // It is always safe to call (no-op if DOM elements are absent).
-    if (typeof window.snxMHRefreshHome === 'function') {
-        window.snxMHRefreshHome();
-    } else {
-        // snxMHRefreshHome not yet registered (studio.js still loading) —
-        // apply minimal tab gating directly so tabs are correct on first open.
-        const isManager = isFndr;
-        const uploadTabBtn = document.getElementById('snxStudioTabBtn_upload');
-        if (uploadTabBtn) uploadTabBtn.style.display = isManager ? '' : 'none';
-        const queueTabBtn = document.getElementById('snxStudioTabBtn_queue');
-        if (queueTabBtn)  queueTabBtn.style.display  = isManager ? '' : 'none';
-        const libUploadBtn = document.getElementById('snxLibUploadBtn');
-        if (libUploadBtn) libUploadBtn.style.display = isManager ? 'flex' : 'none';
-        const adminPanel = document.getElementById('snxMHAdminPanel');
-        if (adminPanel)   adminPanel.style.display   = isManager ? '' : 'none';
-        const plCreateBtn = document.getElementById('snxPLCreateBtn');
-        if (plCreateBtn)  plCreateBtn.style.display  = isManager ? '' : 'none';
-    }
 };
 /* Backward-compat alias so any existing callers of _showFounderUI still work */
 window._showFounderUI = window._showRolePanels;
@@ -26124,11 +25846,6 @@ function _supportStopCanvas() {
 
 <!-- ── Shadow Nexus 24-Hour Studio — Music Library, Upload, Playlists, Queue ── -->
 <script src="studio.js?v=SNS-2026-MH-FOUNDER-002"></script>
-
-<!-- ── Music Hub 2.0: Storage Router (loads before snx-music-hub.js) ── -->
-<script src="snx-music-storage.js?v=SNS-2026-MH2-001"></script>
-<!-- ── Music Hub 2.0: Main Module ── -->
-<script src="snx-music-hub.js?v=SNS-2026-MH2-001"></script>
 
 <!-- ── Shadow Nexus NEXUS — channel discovery and management ── -->
 <script src="nexus.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
@@ -33146,6 +32863,10 @@ window.firePortalTransition = firePortalTransition;
    7. SHADOW CORE NAV — realm navigation wrappers
    ═══════════════════════════════════════════════════════ */
 window.realmNavTo = function(pageId) {
+    // Music Hub has been retired — redirect any studioPage link to 24-Hour TV
+    if (pageId === 'studioPage') {
+        pageId = 'tvPage';
+    }
     // Block Live Hub navigation when the feature is disabled (all roles)
     if (pageId === 'liveHubPage' && window._snxLiveHubEnabled !== true) {
         if (typeof toastNotification === 'function') toastNotification('⛔ Live Hub is currently unavailable.');
@@ -33195,7 +32916,6 @@ function updateShadowCoreActive(pageId) {
         'moderatorPage':     ['navMod', 'scNavMod', 'ncmMod'],
         'administratorPage': ['navAdminOfficer', 'scNavAdm', 'ncmAdm'],
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
-        'studioPage':        ['navMusic', 'scNavMusic', 'ncmMusic'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
         'tvPage':            ['navNexus', 'scNavNexus', 'ncmNexus']
     };
@@ -33425,8 +33145,8 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-FOUNDER-CLEANUP-001';
-  var SW_VER   = 'v61';
+  var BUILD_ID = 'SNS-2026-TV-STABILITY-001';
+  var SW_VER   = 'v74';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
@@ -33450,12 +33170,26 @@ document.addEventListener('click', function(e) {
       .catch(function() {});
 
     /* ── On controllerchange, reload ONCE to get fresh assets ──
-         Guard with sessionStorage so a loop can never form. */
+         Guard with sessionStorage so a loop can never form.
+         After SW activates: delete all obsolete shadow-nexus caches,
+         then reload once to serve the newest TV JavaScript. */
     navigator.serviceWorker.addEventListener('controllerchange', function() {
       var key = 'snx_sw_reload_' + BUILD_ID;
       if (!sessionStorage.getItem(key)) {
         sessionStorage.setItem(key, '1');
-        window.location.reload();
+        // Best-effort: delete all old shadow-nexus caches before reload
+        // so the new SW's precache is the only copy in the browser.
+        if (window.caches) {
+          caches.keys().then(function(keys) {
+            var del = keys.filter(function(k) {
+              return k.startsWith('shadow-nexus-') && k !== 'shadow-nexus-v74' && k !== 'shadow-nexus-media-v74';
+            });
+            Promise.all(del.map(function(k) { return caches.delete(k); }))
+              .then(function() { window.location.reload(); });
+          }).catch(function() { window.location.reload(); });
+        } else {
+          window.location.reload();
+        }
       }
     });
 
@@ -33571,9 +33305,9 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-ALBUM-PRIVACY-001';
-  var _SNX_SW_VER   = 'v54';
-  var _SNX_DEPLOY   = '2026-10-03T00:00:00Z';
+  var _SNX_BUILD    = 'SNS-2026-TV-STABILITY-001';
+  var _SNX_SW_VER   = 'v74';
+  var _SNX_DEPLOY   = '2026-10-07T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 
   function _dRow(label, val, ok) {
@@ -33848,7 +33582,7 @@ const TCC_EFFECTS = [
 
 const TCC_SECTIONS = [
   'Login Page', 'Eclipse Feed', 'Profiles', 'Messages', 'Search',
-  'Music Hub', 'Cloud Radio', 'Cloud Stream', 'Live', 'Arcade',
+  'Cloud Radio', 'Cloud Stream', 'Live', 'Arcade',
   'Notifications', 'Side Menu', 'Founder Panel',
 ];
 
@@ -35318,8 +35052,7 @@ window.snxFounderPanelCleanup = (function() {
       _item('Live Active',      d.liveActive ? 'YES' : 'No', d.liveActive ? 'warn' : '') +
       _item('Camera Active',    d.cameraActive ? 'YES' : 'No', d.cameraActive ? 'warn' : '') +
       _item('Welcome Music',    d.activeMedia.welcomeMusic ? '▶ Playing' : 'Idle', d.activeMedia.welcomeMusic ? 'warn' : '') +
-      _item('Radio',            d.activeMedia.radio ? '▶ Playing' : 'Idle', d.activeMedia.radio ? 'warn' : '') +
-      _item('Music Hub',        d.activeMedia.musicHub ? '▶ Playing' : 'Idle', d.activeMedia.musicHub ? 'warn' : '');
+      _item('Radio',            d.activeMedia.radio ? '▶ Playing' : 'Idle', d.activeMedia.radio ? 'warn' : '');
   };
 
   /* ── Hook: update settings UI whenever settings page opens ── */
@@ -35420,7 +35153,6 @@ window.snxFounderPanelCleanup = (function() {
           <span>✓ Watch public Live streams</span>
           <span>✓ Browse Creator Channels</span>
           <span>✓ Watch public Replays</span>
-          <span>✓ Explore Music Hub</span>
           <span>✓ Listen to SNX Radio</span>
           <span>✓ Listen to public music</span>
           <span>✓ Browse public playlists</span>

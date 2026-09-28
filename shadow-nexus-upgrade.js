@@ -56,7 +56,6 @@
     { id:'rtdb',            icon:'⚡', name:'Realtime Database'     },
     { id:'r2',              icon:'☁️', name:'Cloudflare R2'         },
     { id:'r2_upload',       icon:'📡', name:'R2 Upload Endpoint'    },
-    { id:'music_hub',       icon:'🎵', name:'Music Hub'             },
     { id:'radio',           icon:'📻', name:'24-Hour Radio'         },
     { id:'live_system',     icon:'🔴', name:'Live System'           },
     { id:'messages',        icon:'💬', name:'Messages'              },
@@ -148,12 +147,11 @@
         _setStatus('r2_upload', 'err', 'Network/CORS error');
       }
 
-      /* ── Music Hub, Radio, Cloud Stream, Live: check siteSettings feature flags ── */
+      /* ── Radio, Cloud Stream, Live: check siteSettings feature flags ── */
       try {
         const { db, doc, getDoc } = _fs();
         const cfgSnap = await getDoc(doc(db, 'siteSettings', 'config'));
         const cfg = cfgSnap.exists() ? cfgSnap.data() : {};
-        _setStatus('music_hub',    cfg.musicHubEnabled    === false ? 'deg' : 'ok',  cfg.musicHubEnabled    === false ? 'Disabled by Founder' : 'Feature enabled');
         _setStatus('radio',        cfg.radioEnabled       === false ? 'deg' : 'ok',  cfg.radioEnabled       === false ? 'Disabled by Founder' : 'Feature enabled');
         _setStatus('live_system',  cfg.liveEnabled        === false ? 'deg' : 'ok',  cfg.liveEnabled        === false ? 'Disabled by Founder' : 'Feature enabled');
         _setStatus('messages',     cfg.messagesTabEnabled === false ? 'deg' : 'ok',  cfg.messagesTabEnabled === false ? 'Disabled by Founder' : 'Feature enabled');
@@ -940,7 +938,6 @@
     { id:'eclipseFeedEnabled',    icon:'🏠', name:'Eclipse Feed',     sub:'Posts & Timeline' },
     { id:'profilesEnabled',       icon:'👤', name:'Profiles',         sub:'User profiles' },
     { id:'messagesEnabled',       icon:'💬', name:'Messages',         sub:'Direct messages' },
-    { id:'musicHubEnabled',       icon:'🎵', name:'Music Hub',        sub:'Music uploads & library' },
     { id:'radioEnabled',          icon:'📻', name:'24-Hour Radio',    sub:'Live radio stream' },
     { id:'liveEnabled',           icon:'🔴', name:'Live System',      sub:'Go Live & Live Hub' },
     { id:'arcadeEnabled',         icon:'🕹️', name:'Arcade',           sub:'Games & challenges' },

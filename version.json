@@ -1,9 +1,9 @@
 {
-  "buildId": "SNS-2026-NATV-001",
-  "swVersion": "v73",
-  "deployedAt": "2026-10-05T14:00:00Z",
+  "buildId": "SNS-2026-TV-STABILITY-001",
+  "swVersion": "v74",
+  "deployedAt": "2026-10-07T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.1",
-  "nexusVersion": "1.0.2",
-  "note": "NATV-001: Nexus AfterDark TV cosmetic identity update — NATV branding, network bug watermark, My Station card redesign, Channel Universe section, guest public live/music-hub access, _refreshStudioTab founder gate, CSS cache-bust v=NATV-001. SW v73 to flush stale snx-tv-network.css."
+  "nexusVersion": "1.1.0",
+  "note": "TV-STABILITY-001: 24-Hour TV startup stability fix — unified build version, network-first TV JS, canonical snxOpen24HourTV() controller, auth-ready guard, double-init protection, portal transition timing fix, SW v74 to flush stale TV engine cache."
 }

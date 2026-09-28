@@ -83,30 +83,48 @@ let _featureMounted    = false;  // true while a featured live is showing in pla
 ════════════════════════════════════════════════════ */
 
 /**
- * Called by SNS when user navigates to tvPage.
- * Reads window._snxCurrentUser — no second login.
+ * Called by snxOpen24HourTV() (the canonical TV startup controller) when the user
+ * navigates to tvPage.  Reads window._snxCurrentUser — no second login.
+ *
+ * Auth is guaranteed to be resolved BEFORE this is called because
+ * snxOpen24HourTV() awaits the SNS auth-ready queue first.  The polling
+ * fallback is kept only as a last-resort safety net for direct calls.
  */
 window.snxTvInit = function () {
   _tvActive = true;
+  console.log('[SNX-TV] TV engine initializing');
 
-  // Grab the current SNS authenticated user
+  // Grab the current SNS authenticated user.
+  // snxOpen24HourTV() ensures auth is resolved before calling here, so this
+  // will almost always be set.  The auth-event fallback below handles the
+  // rare case where snxTvInit is called outside of snxOpen24HourTV.
   const snxUser = window._snxCurrentUser || null;
 
-  if (!snxUser) {
-    // SNS session not resolved yet — show a minimal inline connecting indicator
-    // and wait for SNS auth to resolve (max 8s). Do NOT show a full-screen gate.
+  if (!snxUser && !window._snxAuthResolved) {
+    // Auth not yet resolved — use the canonical auth-ready queue, NOT polling.
+    console.log('[SNX-TV] snxTvInit: waiting for auth via auth-ready queue');
     _renderConnectingInPlayer();
-    let waited = 0;
-    const poll = setInterval(() => {
-      waited += 200;
-      if (window._snxCurrentUser) {
-        clearInterval(poll);
-        _startWithUser(window._snxCurrentUser);
-      } else if (waited >= 8000) {
-        clearInterval(poll);
-        _renderNotLoggedIn();
+
+    const _startOnce = () => {
+      console.log('[SNX-TV] Auth ready');
+      _startWithUser(window._snxCurrentUser || null);
+    };
+
+    if (typeof window._snxOnAuthReady === 'function') {
+      window._snxOnAuthReady(_startOnce);
+    } else {
+      // _snxOnAuthReady not yet defined — push to queue directly
+      window._snxAuthReadyQueue = window._snxAuthReadyQueue || [];
+      window._snxAuthReadyQueue.push(_startOnce);
+    }
+
+    // Safety timeout — if auth never fires within 10s, render as guest/not-logged-in
+    setTimeout(() => {
+      if (!window._snxAuthResolved && _tvActive) {
+        console.warn('[SNX-TV] Auth timeout — rendering guest state');
+        _startWithUser(null);
       }
-    }, 200);
+    }, 10000);
     return;
   }
 
@@ -137,21 +155,23 @@ window.snxTvTeardown = function () {
    INTERNAL INIT
 ════════════════════════════════════════════════════ */
 function _startWithUser(user) {
-  console.log('[24TV] Engine starting — user:', user?.email || 'anonymous');
+  console.log('[SNX-TV] TV engine initializing — user:', user?.email || 'guest/anonymous');
   _user      = user;
   _isFounder = !!(user && user.email?.trim().toLowerCase() === FOUNDER_EMAIL.toLowerCase());
 
-  // FIX: always kill any leftover media before (re-)initialising to prevent
-  // double audio when returning to tvPage.  _stopMediaFull clears src so the
-  // browser truly stops the stream even if a previous async _loadMedia call
-  // never finished cleaning up.
+  // ── DOUBLE-INIT GUARD: always kill any leftover media/timers before starting ──
+  // This prevents duplicate audio/video when snxTvInit is called more than once
+  // before teardown (e.g. rapid navigation or an unexpected second call path).
+  // _stopMediaFull clears src so the browser truly stops the stream even if a
+  // previous async _loadMedia call never finished cleaning up.
   _stopMediaFull();
   _stopTick();
 
   // Mark the TV page as active NOW so the snx-tv-network resume path is permitted.
   window._snxTvPageActive = true;
 
-  // Subscribe to Main TV feature state (all users — they need to react to featured live)
+  // Subscribe to Main TV feature state (all users — they need to react to featured live).
+  // _subscribeMainTvState() is idempotent — it returns early if already subscribed.
   _subscribeMainTvState();
 
   // ── RE-ENTRY: network already initialised, viewer returning to tvPage ────────
@@ -159,6 +179,7 @@ function _startWithUser(user) {
   // Just rebuild the player DOM, reattach Firestore state, and resume playback
   // at the CURRENT broadcast position.
   if (_networkReady) {
+    console.log('[SNX-TV] TV engine re-entry — network already ready, channels:', _channels.length);
     _rebuildTvShell();
     if (_isFounder) _renderFounderBar();
     _buildChannelList();
@@ -179,6 +200,7 @@ function _startWithUser(user) {
       _setActiveChannel(_channels[0].id);
     }
     _startTick();
+    console.log('[SNX-TV] Active channel synchronized');
     return;
   }
 
@@ -269,7 +291,7 @@ function _subscribeChannels() {
       .filter(ch => ch.enabled !== false);
 
     _channels = loaded;
-    console.log('[24TV] Firestore connected — channels loaded:', loaded.length);
+    console.log('[SNX-TV] Channels loaded:', loaded.length);
 
     if (!_networkReady) {
       _networkReady = true;
@@ -282,8 +304,12 @@ function _subscribeChannels() {
       _channels.forEach(ch => _subscribeChannelState(ch.id));
       _buildChannelList();
       _buildEPGChannelTabs();
-      if (_channels[0]) _setActiveChannel(_channels[0].id);
+      if (_channels[0]) {
+        _setActiveChannel(_channels[0].id);
+        console.log('[SNX-TV] Active channel synchronized');
+      }
       _startTick();
+      console.log('[SNX-TV] Playback ready');
     } else {
       _buildChannelList();
       _buildEPGChannelTabs();

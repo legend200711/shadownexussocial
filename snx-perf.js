@@ -530,7 +530,6 @@
   var _mediaState = {
     welcomeMusic:   false,
     radio:          false,
-    musicHub:       false,
     profileMusic:   false,
     liveAudio:      false,
     videoAudio:     false
