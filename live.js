@@ -734,24 +734,31 @@ async function startLive() {
     'video tracks:', _localStream.getVideoTracks().length,
     'audio tracks:', _localStream.getAudioTracks().length);
 
-  // ── Verify auth.currentUser is truly resolved ──
-  console.log('[SNX-LIVE] Auth state checking');
+  // ── Verify auth.currentUser is present and matches the session user ──
   const _currentUser = _auth.currentUser;
   if (!_currentUser) {
-    console.error('[SNX-LIVE] FAILED — auth.currentUser is null (session not fully restored)');
-    toast('Session not ready. Please wait a moment and try again.');
+    console.error('[SNX-LIVE] FAILED — auth.currentUser is null (session not fully restored)',
+      { moduleUser: _user?.uid, authenticated: false });
+    toast('Live authentication expired. Please try again.');
     return;
   }
-  console.log('[SNX-LIVE] Auth resolved: UID', _currentUser.uid,
+  if (_currentUser.uid !== _user.uid) {
+    console.error('[SNX-LIVE] FAILED — UID mismatch: auth.currentUser.uid', _currentUser.uid,
+      '!== module _user.uid', _user.uid);
+    toast('Live authentication expired. Please try again.');
+    return;
+  }
+  console.log('[SNX-LIVE] Auth UID:', _currentUser.uid,
     '| provider:', _currentUser.providerData?.[0]?.providerId || 'unknown');
+  console.log('[SNX-LIVE] Auth verified');
 
   // ── Arm 10-second timeout — button MUST never spin forever ──
   let _goLiveCompleted = false;
   const _goLiveTimeout = setTimeout(() => {
     if (_goLiveCompleted) return;
     console.error('[SNX-LIVE] TIMEOUT — Go Live sequence did not complete within 10 s');
-    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
-    toast('Could not start Live. Please try again.');
+    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Go Live'; }
+    toast('Could not start Live.');
   }, 10000);
 
   // ── Top-level error handler — any unhandled throw restores the button ──
@@ -760,12 +767,18 @@ async function startLive() {
     clearTimeout(_goLiveTimeout);
     const code = err?.code || err?.name || 'unknown';
     const msg  = err?.message || String(err);
-    console.error(
-      `[SNX-LIVE] FAILED\n  Step: ${label}\n  Service: ${service}\n  Operation: ${operation}\n  Path: ${path}\n  Code: ${code}\n  Error: ${msg}`,
-      err
-    );
-    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
-    toast('Could not start Live. Please try again.');
+    console.error('[SNX-LIVE] FAILED', {
+      step:      label,
+      service,
+      operation,
+      path,
+      code,
+      message:   msg,
+      uid:       _user?.uid,
+      authenticated: !!_auth.currentUser,
+    });
+    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Go Live'; }
+    toast('Could not start Live.');
   };
 
   // Ensure creator mode is set — supports second broadcast after endLive() without page reload
@@ -780,14 +793,20 @@ async function startLive() {
     const userSnap = await getDoc(doc(_db, 'users', _user.uid));
     const prevRoomId = userSnap.exists() ? userSnap.data().liveRoomId : null;
     if (prevRoomId) {
-      await update(ref(_liveDB, `liveRooms/${prevRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
-      await remove(ref(_liveDB, `liveConnections/${prevRoomId}`));
-      await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() });
+      try {
+        await update(ref(_liveDB, `liveRooms/${prevRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
+      } catch (e) { console.warn('[SNX-LIVE] cleanup: RTDB liveRooms end failed', e?.code, e?.message); }
+      try {
+        await remove(ref(_liveDB, `liveConnections/${prevRoomId}`));
+      } catch (e) { console.warn('[SNX-LIVE] cleanup: RTDB liveConnections remove failed', e?.code, e?.message); }
+      try {
+        await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() });
+      } catch (e) { console.warn('[SNX-LIVE] cleanup: Firestore users update failed', e?.code, e?.message); }
     }
     // Always delete the uid-keyed Firestore liveRooms doc (and legacy roomId-keyed one)
-    try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (_) {}
+    try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (e) { console.warn('[SNX-LIVE] cleanup: deleteDoc liveRooms uid failed', e?.code); }
     if (prevRoomId) {
-      try { await deleteDoc(doc(_db, 'liveRooms', prevRoomId)); } catch (_) {}
+      try { await deleteDoc(doc(_db, 'liveRooms', prevRoomId)); } catch (e) { console.warn('[SNX-LIVE] cleanup: deleteDoc liveRooms prevRoomId failed', e?.code); }
     }
     // Also clean up any orphaned feed posts with type='live' for this user
     try {
@@ -797,9 +816,9 @@ async function startLive() {
         where('type', '==', 'live')
       );
       const orphanSnap = await getDocs(orphanQ);
-      orphanSnap.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
-    } catch (_) {}
-  } catch (_) {}
+      orphanSnap.forEach(async d => { try { await deleteDoc(d.ref); } catch(e) { console.warn('[SNX-LIVE] cleanup: deleteDoc orphan post failed', e?.code); } });
+    } catch (e) { console.warn('[SNX-LIVE] cleanup: orphan posts query failed', e?.code, e?.message); }
+  } catch (e) { console.warn('[SNX-LIVE] cleanup: outer try failed', e?.code, e?.message); }
 
   const titleVal = (D.setupTitle?.value || '').trim();
   if (D.goLiveBtn) { D.goLiveBtn.disabled = true; D.goLiveBtn.textContent = 'Going Live…'; }
@@ -823,12 +842,39 @@ async function startLive() {
     createdAt:    Date.now(),
   };
 
+  // ── Sanity check: creatorData.hostId must equal the authenticated UID ──
+  if (creatorData.hostId !== _auth.currentUser?.uid) {
+    console.error('[SNX-LIVE] FAILED — creatorData.hostId', creatorData.hostId,
+      'does not match auth.currentUser.uid', _auth.currentUser?.uid,
+      '— Firestore rule request.resource.data.hostId == request.auth.uid would reject this write');
+    _failGoLive('hostId mismatch', 'Auth', 'verify', 'creatorData.hostId', new Error('hostId !== auth.uid'));
+    return;
+  }
+
+  // ── Force-refresh the Firebase ID token so RTDB / Firestore accept the write ──
+  console.log('[SNX-LIVE] RTDB target: liveRooms/' + _roomId);
+  try {
+    await _auth.currentUser.getIdToken(/* forceRefresh= */ true);
+    console.log('[SNX-LIVE] Token refreshed');
+  } catch (tokenErr) {
+    _failGoLive('token refresh', 'Firebase Auth', 'getIdToken',
+      'auth/currentUser', tokenErr);
+    return;
+  }
+
   /* ── Write room to LIVE Realtime Database ── */
-  console.log('[SNX-LIVE] Creating RTDB liveRoom — path: liveRooms/' + _roomId);
+  console.log('[SNX-LIVE] Creating RTDB room');
   try {
     await set(ref(_liveDB, `liveRooms/${_roomId}`), creatorData);
-    console.log('[SNX-LIVE] RTDB liveRoom created ✓ — path: liveRooms/' + _roomId);
+    console.log('[SNX-LIVE] RTDB live room CREATED — path: liveRooms/' + _roomId);
   } catch (e) {
+    console.error('[SNX-LIVE] RTDB room creation FAILED', {
+      path:          'liveRooms/' + _roomId,
+      code:          e?.code,
+      message:       e?.message,
+      uid:           _user?.uid,
+      authenticated: !!_auth.currentUser,
+    });
     _failGoLive('RTDB liveRoom create', 'Realtime Database', 'set',
       'liveRooms/' + _roomId, e);
     return;
@@ -837,28 +883,27 @@ async function startLive() {
   /* ── Mirror room to Firestore so Live Hub can query it.
         Keyed by uid so only ONE doc per user ever exists —
         reconnecting simply overwrites the previous entry.   ── */
-  console.log('[SNX-LIVE] Creating Firestore liveRoom — path: liveRooms/' + _user.uid);
+  console.log('[SNX-LIVE] Creating Firestore mirror — path: liveRooms/' + _user.uid);
   try {
     await setDoc(doc(_db, 'liveRooms', _user.uid), {
       ...creatorData,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    console.log('[SNX-LIVE] Firestore liveRoom created ✓ — path: liveRooms/' + _user.uid);
+    console.log('[SNX-LIVE] Firestore mirror CREATED — path: liveRooms/' + _user.uid);
   } catch (fsErr) {
     // Non-fatal: RTDB is the authoritative room store; Firestore mirror failure
     // should NOT kill the broadcast — log it and continue.
-    const code = fsErr?.code || fsErr?.name || 'unknown';
-    console.error(
-      '[SNX-LIVE] Firestore liveRoom write FAILED (non-fatal, continuing)\n' +
-      '  Service: Firestore\n  Operation: setDoc\n  Path: liveRooms/' + _user.uid + '\n' +
-      '  Code: ' + code + '\n  Error: ' + (fsErr?.message || fsErr)
-    );
+    console.error('[SNX-LIVE] Firestore liveRooms mirror FAILED (non-fatal, continuing)', {
+      path:    'liveRooms/' + _user.uid,
+      code:    fsErr?.code,
+      message: fsErr?.message,
+      uid:     _user?.uid,
+    });
   }
 
   /* ── Phase 3: notify Creator Channel adapter that broadcast has started.
         Fire-and-forget — a Firestore failure here MUST NOT kill the WebRTC stream. ── */
-  console.log('[SNX-LIVE] Publishing host state — creatorChannels/' + _user.uid);
   ;(async () => {
     try {
       const { broadcastStarted } = await import('./snx-live-adapter.js');
@@ -867,13 +912,14 @@ async function startLive() {
         username:    _userData?.username    || '',
         avatar:      _userData?.avatar      || _userData?.profilePicture || null,
       });
-      console.log('[SNX-LIVE] Host state published ✓ — creatorChannels/' + _user.uid);
+      console.log('[SNX-LIVE] creatorChannels published ✓ — path: creatorChannels/' + _user.uid);
     } catch (_adapterErr) {
-      console.warn('[SNX-LIVE] creatorChannels publish failed (non-fatal):\n' +
-        '  Service: Firestore\n  Operation: setDoc/updateDoc\n' +
-        '  Path: creatorChannels/' + _user.uid + '\n' +
-        '  Code: ' + (_adapterErr?.code || _adapterErr?.name || 'unknown') + '\n' +
-        '  Error: ' + (_adapterErr?.message || _adapterErr));
+      console.warn('[SNX-LIVE] creatorChannels publish FAILED (non-fatal)', {
+        path:    'creatorChannels/' + _user.uid,
+        code:    _adapterErr?.code || _adapterErr?.name,
+        message: _adapterErr?.message,
+        uid:     _user?.uid,
+      });
     }
   })();
 
@@ -925,10 +971,7 @@ async function startLive() {
     }
   });
 
-  console.log('[SNX-LIVE] Opening live room — roomId:', _roomId);
-  console.log('[OLD-LIVE] LIVE_STAGE_SHOW — hiding setup, showing stage');
-  console.log('[OLD-LIVE] LOCAL_STREAM_BEFORE_STAGE — stream:', !!_localStream,
-    'tracks:', _localStream?.getTracks().map(t => t.kind + ':' + t.readyState).join(', '));
+  console.log('[SNX-LIVE] Showing Live stage');
   if (D.setup) D.setup.style.display = 'none';
   _showStage();
   _attachLocalVideoToStage();
@@ -942,10 +985,10 @@ async function startLive() {
     console.warn('[SNX-LIVE] AudioMixer init failed (non-fatal):', _mixerErr?.message || _mixerErr);
   }
 
-  console.log('[SNX-LIVE] Creating signaling state — liveConnections/' + _roomId);
+  console.log('[SNX-LIVE] Starting WebRTC');
   try {
     await _startCreatorWebRTC();
-    console.log('[SNX-LIVE] Signaling state ready ✓');
+    console.log('[SNX-LIVE] WebRTC started');
   } catch (_rtcErr) {
     _failGoLive('startCreatorWebRTC', 'Realtime Database', 'onValue/onDisconnect',
       'liveConnections/' + _roomId + '/viewers', _rtcErr);
@@ -978,16 +1021,22 @@ async function startLive() {
       joinedAt: Date.now(),
       hb:       Date.now(),
     });
-    // If the host's page crashes / network drops, remove the whole liveGuests room node
-    try { onDisconnect(ref(_liveDB, `liveGuests/${_roomId}`)).remove(); } catch(_) {}
-  } catch (_) {}
+    try { onDisconnect(ref(_liveDB, `liveGuests/${_roomId}`)).remove(); } catch(e) {
+      console.warn('[SNX-LIVE] onDisconnect liveGuests failed (non-fatal):', e?.code, e?.message);
+    }
+  } catch (e) {
+    console.warn('[SNX-LIVE] liveGuests presence write failed (non-fatal)', {
+      path:    'liveGuests/' + _roomId + '/_host_',
+      code:    e?.code,
+      message: e?.message,
+    });
+  }
 
   // ── Go Live completed successfully — disarm timeout and guards ──
   _goLiveCompleted = true;
   clearTimeout(_goLiveTimeout);
 
-  console.log('[SNX-LIVE] LIVE STARTED ✓ — roomId:', _roomId, '| uid:', _user?.uid);
-  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 roomId:', _roomId, 'uid:', _user?.uid);
+  console.log('[SNX-LIVE] LIVE STARTED');
   toast('🔴 You are LIVE!');
 
   // ── Notify add-on modules (co-host, etc.) that live has started ──
