@@ -6421,6 +6421,11 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="sc-divider"></div>
 
+        <!-- Shadow Nexus Live -->
+        <button class="sc-item" id="scNavLive" onclick="realmNavTo('livePage')" aria-label="Shadow Nexus Live" style="color:#ff3355;">
+            <span class="sc-item-icon">🔴</span>
+            <span class="sc-item-label">Live</span>
+        </button>
         <!-- 24-HOUR TV — native SNS page -->
         <button class="sc-item" id="scNavNexus" onclick="realmNavTo('tvPage')" aria-label="24-Hour TV" style="color:#00AEEF;">
             <span class="sc-item-icon">📺</span>
@@ -6522,6 +6527,10 @@ body.arcade-fs-ios body::after { display:none !important; }
         <!-- ── CREATOR / TV ── -->
         <span class="ncm-section-label">Creator</span>
 
+        <div class="ncm-item" id="ncmLive" onclick="realmNavTo('livePage');mobileNavTo('_close')" style="color:#ff3355;">
+            <div class="ncm-icon-wrap">🔴</div>
+            <div class="ncm-label">Live</div>
+        </div>
         <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
             <div class="ncm-icon-wrap">📺</div>
             <div class="ncm-label">24-Hour TV</div>
@@ -6637,6 +6646,9 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="sidebar-divider"></div>
 
+        <button class="nav-item" id="navLive" onclick="realmNavTo('livePage')" style="color:#ff3355;border-left:3px solid rgba(255,51,85,0.55);">
+            <span class="nav-icon">🔴</span> Live
+        </button>
         <button class="nav-item" id="navNexus" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
             <span class="nav-icon">📺</span> 24-Hour TV
         </button>
@@ -11877,6 +11889,26 @@ body.arcade-fs-ios body::after { display:none !important; }
   <!-- TV Network panels are injected dynamically by snx-tv-network.js -->
 </div><!-- end tvPage -->
 
+<!-- ████ LIVE PAGE — Shadow Nexus Live Hub ████ -->
+<div class="page" id="livePage">
+  <div class="live-page-header">
+    <span class="live-page-title">Shadow Nexus <span>Live</span></span>
+    <button class="live-go-live-btn" onclick="window.snxLiveOpenGoLive()">
+      <span class="live-dot"></span>Go Live
+    </button>
+  </div>
+  <div class="live-hub-section">
+    <div class="live-hub-section-title">Live Now</div>
+    <div class="live-hub-grid" id="snxLiveHubCards">
+      <div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>Loading live streams…</div>
+    </div>
+  </div>
+</div><!-- end livePage -->
+
+<!-- ── Shadow Nexus Live — CSS + Engine ── -->
+<link rel="stylesheet" href="live.css?v=SNS-2026-LIVE-001">
+<script type="module" src="live.js?v=SNS-2026-LIVE-001"></script>
+
 <!-- ── Load 24-Hour TV adapter as ES module (no second Firebase init, no second login) ── -->
 <script type="module" src="snx-ch-adapter.js"></script>
 
@@ -12295,6 +12327,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // ── Expose RTDB helpers for presence (used by _attachFriendRtdbStatus) ──
   window._snxRtdbApi = { getDatabase: _getRtdb, ref: _rtdbRef, set: _rtdbSet, remove: _rtdbRemove, get: _rtdbGet, onValue: _rtdbOnValue, off: _rtdbOff };
 
+  // ── Expose RTDB instance for Live system (live.js) ──
+  window._snxLiveDB = _presenceRtdb;
+
   // ── Full Firestore namespace for feature scripts ──
   window._snxFirestore = {
       db, doc, getDoc, getDocFromCache, getDocFromServer, setDoc, updateDoc, deleteDoc,
@@ -12644,13 +12679,22 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       }
   };
 
-  /* ── Live Hub/Go Live removed ── */
-  window.goLiveOrWatch = function() {
-      toastNotification('⛔ Go Live is no longer available.');
-  };
+  /* ── Live Hub/Go Live — replaced by live.js (SNS-2026-LIVE-001) ── */
+  /* The canonical window.goLiveOrWatch is registered by live.js as an ES module.
+     This stub fires if live.js hasn't loaded yet (very first tick). */
+  if (!window.goLiveOrWatch) {
+    window.goLiveOrWatch = function() {
+      if (typeof window.snxLiveOpenGoLive === 'function') {
+        window.snxLiveOpenGoLive();
+      } else {
+        setTimeout(function() {
+          if (typeof window.snxLiveOpenGoLive === 'function') window.snxLiveOpenGoLive();
+        }, 800);
+      }
+    };
+  }
 
-  /* (Live Hub and Feed Live Banner removed) */
-  (function initLiveHub() { /* removed */ })();
+  (function initLiveHub() { /* managed by live.js */ })();
   (function initFeedLiveBanner() { /* removed */ })();
 
   /* DEAD_CODE_PLACEHOLDER_STALE_MS */
@@ -21526,7 +21570,8 @@ function navTo(pageId) {
         communityPage:'navCommunity', supportRoomsPage:'navSupport',
         communityRulesPage:'navCommunityRules',
         inboxPage:'navInbox',
-        tvPage:'navNexus'
+        tvPage:'navNexus',
+        livePage:'navLive'
     };
     const navEl = document.getElementById(map[pageId]);
     if (navEl) navEl.classList.add('active-nav');
@@ -21554,6 +21599,10 @@ function navTo(pageId) {
         if (typeof window._snxUpgradeSettingsOpen === 'function') window._snxUpgradeSettingsOpen();
         // Load blocked users (Security tab might be active)
         if (typeof window.snxLoadBlockedUsers === 'function') window.snxLoadBlockedUsers();
+    }
+    // ── Shadow Nexus Live — open hub when page activates ──
+    if (pageId === 'livePage') {
+        if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
     }
     // ── 24-Hour TV lifecycle hooks ──
     // TV startup is handled exclusively by the canonical snxOpen24HourTV() controller.
@@ -32113,7 +32162,8 @@ function updateShadowCoreActive(pageId) {
         'administratorPage': ['navAdminOfficer', 'scNavAdm', 'ncmAdm'],
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
-        'tvPage':            ['navNexus', 'scNavNexus', 'ncmNexus']
+        'tvPage':            ['navNexus', 'scNavNexus', 'ncmNexus'],
+        'livePage':          ['scNavLive', 'ncmLive']
     };
 
     var ids = map[pageId] || [];
@@ -34961,6 +35011,28 @@ window.snxFounderPanelCleanup = (function() {
             if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
             return orig.apply(this, arguments);
         };
+    }
+
+    /* ── Guard: Go Live (snxLiveOpenGoLive) ── */
+    function _hookGoLive() {
+        // live.js registers window._hookGoLive — delegate to it if available
+        if (window._hookGoLive && window._hookGoLive !== _hookGoLive) {
+            window._hookGoLive();
+            return;
+        }
+        if (window._snxGuestGoLiveHooked) return;
+        const orig = window.snxLiveOpenGoLive || window.goLiveOrWatch;
+        if (!orig) return;
+        window._snxGuestGoLiveHooked = true;
+        const _wrappedGoLive = function() {
+            if (!_isAuthUser() && window.snxIsGuest && window.snxIsGuest()) {
+                if (typeof window.snxJoinOpen === 'function') window.snxJoinOpen();
+                return;
+            }
+            return orig.apply(this, arguments);
+        };
+        if (window.snxLiveOpenGoLive) window.snxLiveOpenGoLive = _wrappedGoLive;
+        if (window.goLiveOrWatch) window.goLiveOrWatch = _wrappedGoLive;
     }
 
     /* ─────────────────────────────────────────────────────────

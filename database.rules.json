@@ -35,11 +35,29 @@
     "liveRooms": {
       "$roomId": {
         ".read":  "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null && (root.child('liveRooms').child($roomId).child('hostId').val() == auth.uid || !root.child('liveRooms').child($roomId).exists())"
       }
     },
 
     "liveSignaling": {
+      "$roomId": {
+        "$viewerId": {
+          ".read":  "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+
+    "livePresence": {
+      "$roomId": {
+        "$sessionId": {
+          ".read":  "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+
+    "liveChats": {
       "$roomId": {
         ".read":  "auth != null",
         ".write": "auth != null"
@@ -47,13 +65,6 @@
     },
 
     "liveSignal": {
-      "$roomId": {
-        ".read":  "auth != null",
-        ".write": "auth != null"
-      }
-    },
-
-    "livePresence": {
       "$roomId": {
         ".read":  "auth != null",
         ".write": "auth != null"
