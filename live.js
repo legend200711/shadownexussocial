@@ -133,9 +133,9 @@ let _facingMode   = 'user';
 
 /* ── Audio Mixer state (creator only) ── */
 let _audioMixer     = null;   // SNXAudioMixer instance
-let _csQueue        = [];     // Music queue for live mixer [{id,title,artist,url,duration}]
+let _csQueue        = [];     // CloudStream music queue  [{id,title,artist,url,duration}]
 let _csQueueIndex   = 0;      // index into _csQueue
-let _csMusicPlaying = false;  // whether music is currently playing in the mixer
+let _csMusicPlaying = false;  // whether CS music is currently playing in the mixer
 let _csMusicVolume  = 80;     // 0-100 (maps to 0.0-1.0 for GainNode)
 let _csMicVolume    = 100;    // 0-100
 
@@ -314,8 +314,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   D.endedBackBtn && D.endedBackBtn.addEventListener('click', () => {
-    // [OLD-LIVE] END: return host to Shadow Nexus Social (standalone Live reset).
-    // Do NOT route through 24-Hour TV or Creator Channels during Phase 1.
     window.location.href = 'index.html';
   });
 
@@ -413,7 +411,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (msg.type === 'snx_toggle_mic' && _mode === 'creator') { toggleLiveMic();  }
     if (msg.type === 'snx_flip_cam'   && _mode === 'creator') { flipLiveCamera(); }
 
-    // ── Live mixer music commands (from Studio, creator only) ──
+    // ── Cloud Stream audio mixer commands (creator only) ──
     if (_mode === 'creator') {
       if (msg.type === 'snx_music_set_queue' && Array.isArray(msg.queue)) {
         _csQueue      = msg.queue;
@@ -583,13 +581,10 @@ async function _startCreatorSetup(autostart = false) {
   // In autostart (iframe) mode the setup UI is hidden — live engine runs silently.
   if (!autostart && D.setup) D.setup.style.display = 'block';
 
-  // Pre-fill title — check both the new adapter key and the legacy Studio key
+  // Pre-fill title when arriving from 24-Hour Studio Go Live
   try {
-    const _adapterTitle = localStorage.getItem('snx_live_title_prefill');
-    const _studioTitle  = localStorage.getItem('snx_studio_title');
-    const _prefill = _adapterTitle || _studioTitle;
-    if (_prefill && D.setupTitle) { D.setupTitle.value = _prefill; }
-    localStorage.removeItem('snx_live_title_prefill');
+    const _studioTitle = localStorage.getItem('snx_studio_title');
+    if (_studioTitle && D.setupTitle) { D.setupTitle.value = _studioTitle; }
     localStorage.removeItem('snx_studio_title');
   } catch(_) {}
 
@@ -604,7 +599,11 @@ async function _startCreatorSetup(autostart = false) {
       },
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    console.log('[OLD-LIVE] PREVIEW_STREAM — active:', _localStream?.active,
+      'video:', _localStream?.getVideoTracks()?.length,
+      'audio:', _localStream?.getAudioTracks()?.length);
     if (!autostart && D.setupPreview) {
+      console.log('[OLD-LIVE] PREVIEW_VIDEO_SRC — attaching to #setupPreview');
       D.setupPreview.srcObject = _localStream;
       D.setupPreview.play().catch(() => {});
     }
@@ -723,75 +722,46 @@ async function startLive() {
     return;
   }
 
-  // ── [OLD-LIVE] START_CLICK ──
-  const _t0 = Date.now();
-  console.log('[OLD-LIVE] START_CLICK — uid:', _user.uid, 'ts:', _t0);
+  // Ensure creator mode is set — supports second broadcast after endLive() without page reload
+  _mode = 'creator';
+  if (!document.body.classList.contains('is-creator')) {
+    document.body.classList.add('is-creator');
+    document.body.classList.remove('is-viewer');
+  }
 
-  // ── [OLD-LIVE] AUTH_CHECK_START ──
-  console.log('[OLD-LIVE] AUTH_CHECK_START +' + (Date.now() - _t0) + 'ms');
-  // Verify auth consistency: _user must match window._snxCurrentUser if set
-  const _canonicalUser = window._snxCurrentUser || null;
-  if (_canonicalUser && _canonicalUser.uid !== _user.uid) {
-    console.error('[OLD-LIVE] AUTH_CHECK FAIL — UID MISMATCH: live.js uid=' + _user.uid + ' canonical=' + _canonicalUser.uid);
-    toast('Authentication error — please reload and sign in again.');
-    return;
-  }
-  console.log('[OLD-LIVE] AUTH_CHECK_DONE — uid matches canonical +' + (Date.now() - _t0) + 'ms');
-
-  // ── Guard: prevent double-start — set BEFORE any async work so rapid taps are ignored ──
-  if (D.goLiveBtn && D.goLiveBtn.dataset.starting === '1') {
-    console.warn('[OLD-LIVE] START_CLICK ignored — already starting');
-    return;
-  }
-  if (D.goLiveBtn) {
-    D.goLiveBtn.disabled = true;
-    D.goLiveBtn.dataset.starting = '1';
-    D.goLiveBtn.textContent = 'Going Live…';
-  }
+  // ── Kill any previous stuck live session for this user ──
+  try {
+    const userSnap = await getDoc(doc(_db, 'users', _user.uid));
+    const prevRoomId = userSnap.exists() ? userSnap.data().liveRoomId : null;
+    if (prevRoomId) {
+      await update(ref(_liveDB, `liveRooms/${prevRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
+      await remove(ref(_liveDB, `liveConnections/${prevRoomId}`));
+      await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() });
+    }
+    // Always delete the uid-keyed Firestore liveRooms doc (and legacy roomId-keyed one)
+    try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (_) {}
+    if (prevRoomId) {
+      try { await deleteDoc(doc(_db, 'liveRooms', prevRoomId)); } catch (_) {}
+    }
+    // Also clean up any orphaned feed posts with type='live' for this user
+    try {
+      const orphanQ = query(
+        collection(_db, 'posts'),
+        where('uid', '==', _user.uid),
+        where('type', '==', 'live')
+      );
+      const orphanSnap = await getDocs(orphanQ);
+      orphanSnap.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
+    } catch (_) {}
+  } catch (_) {}
 
   const titleVal = (D.setupTitle?.value || '').trim();
-
-  // ── [OLD-LIVE] STALE_CLEANUP_START ──
-  // Critical stale cleanup: RTDB room + Firestore liveRooms doc.
-  // These must finish before we create the new room (prevents ghost rooms).
-  // The orphan-post cleanup is non-critical and runs AFTER LIVE_ACTIVE.
-  console.log('[OLD-LIVE] STALE_CLEANUP_START +' + (Date.now() - _t0) + 'ms');
-  let _prevRoomId = null;
-  try {
-    // Wrap the entire stale cleanup in a 5-second timeout so a slow/offline
-    // Firestore never delays the critical Live start path.
-    await Promise.race([
-      (async () => {
-        const userSnap = await getDoc(doc(_db, 'users', _user.uid));
-        _prevRoomId = userSnap.exists() ? userSnap.data().liveRoomId : null;
-        if (_prevRoomId) {
-          await update(ref(_liveDB, `liveRooms/${_prevRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
-          await remove(ref(_liveDB, `liveConnections/${_prevRoomId}`));
-          await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() });
-        }
-        // Always delete the uid-keyed Firestore liveRooms doc (and legacy roomId-keyed one)
-        try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (_) {}
-        if (_prevRoomId) {
-          try { await deleteDoc(doc(_db, 'liveRooms', _prevRoomId)); } catch (_) {}
-        }
-      })(),
-      new Promise(r => setTimeout(r, 5000)),  // 5 s cap — never blocks longer than this
-    ]);
-  } catch (_) {}
-  console.log('[OLD-LIVE] STALE_CLEANUP_DONE +' + (Date.now() - _t0) + 'ms');
-
-  // ── [OLD-LIVE] MEDIA_READY ──
-  console.log('[OLD-LIVE] MEDIA_READY — tracks:', _localStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', '), '+' + (Date.now() - _t0) + 'ms');
+  if (D.goLiveBtn) { D.goLiveBtn.disabled = true; D.goLiveBtn.textContent = 'Going Live…'; }
 
   // Sanitize uid — strip any chars forbidden in RTDB keys (. # $ / [ ])
   const _safeUid = _user.uid.replace(/[.#$/\[\]]/g, '_');
   _roomId = `${_safeUid}_${Date.now().toString(36)}`;
   _roomHostId = _user.uid;   // creator is always their own host
-
-  // ── Ensure _userData is always a valid object (null-safe) ──
-  if (!_userData) {
-    _userData = { displayName: _user.email?.split('@')[0] || 'Creator', username: '' };
-  }
 
   const creatorData = {
     roomId:       _roomId,
@@ -807,59 +777,25 @@ async function startLive() {
     createdAt:    Date.now(),
   };
 
-  // ── Diagnostics timeout safety: if startLive does not complete within 30s,
-  //    abort cleanly rather than leaving the UI in "Going Live…" forever. ──
-  let _startAborted = false;
-  const _startTimeout = setTimeout(() => {
-    if (_startAborted) return;
-    _startAborted = true;
-    console.error('[OLD-LIVE] START_FAILED — stage: TIMEOUT (30s exceeded)');
-    toast('Could not start live — timed out. Please try again.');
-    if (D.goLiveBtn) {
-      D.goLiveBtn.disabled = false;
-      D.goLiveBtn.dataset.starting = '';
-      D.goLiveBtn.textContent = 'Start Live';
-    }
-    // Clean up partial room if it was written
-    if (_roomId) {
-      try { update(ref(_liveDB, `liveRooms/${_roomId}`), { status: 'ended', isLive: false, endedAt: Date.now() }); } catch(_) {}
-    }
-    _roomId = null;
-    _roomHostId = null;
-  }, 30000);
-
-  try {
-
   /* ── Write room to LIVE Realtime Database ── */
-  console.log('[OLD-LIVE] RTDB_ROOM_START — roomId:', _roomId, '+' + (Date.now() - _t0) + 'ms');
   try {
     await set(ref(_liveDB, `liveRooms/${_roomId}`), creatorData);
-    console.log('[OLD-LIVE] RTDB_ROOM_DONE — roomId:', _roomId, '+' + (Date.now() - _t0) + 'ms');
   } catch (e) {
-    console.error('[OLD-LIVE] START_FAILED — stage: RTDB_ROOM — error.code:', e.code, '— error.message:', e.message, '+' + (Date.now() - _t0) + 'ms');
-    toast('Could not start live — Firebase write failed (' + (e.code || e.message) + '). Please try again.');
-    throw e;  // caught by outer try/catch/finally
+    toast('Could not start live. Please try again.');
+    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
+    return;
   }
 
   /* ── Mirror room to Firestore so Live Hub can query it.
         Keyed by uid so only ONE doc per user ever exists —
-        reconnecting simply overwrites the previous entry.
-        NON-CRITICAL: capped at 4 s — Live proceeds even if this is slow. ── */
-  console.log('[OLD-LIVE] FIRESTORE_MIRROR_START — liveRooms/', _user.uid, '+' + (Date.now() - _t0) + 'ms');
+        reconnecting simply overwrites the previous entry.   ── */
   try {
-    await Promise.race([
-      setDoc(doc(_db, 'liveRooms', _user.uid), {
-        ...creatorData,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      }),
-      new Promise(r => setTimeout(r, 4000)),  // 4 s cap — non-critical mirror
-    ]);
-    console.log('[OLD-LIVE] FIRESTORE_MIRROR_DONE +' + (Date.now() - _t0) + 'ms');
-  } catch (fsErr) {
-    // Non-critical — RTDB room is authoritative; Firestore mirror is just for Live Hub cards
-    console.warn('[OLD-LIVE] FIRESTORE_MIRROR failed (non-critical):', fsErr?.code, fsErr?.message, '+' + (Date.now() - _t0) + 'ms');
-  }
+    await setDoc(doc(_db, 'liveRooms', _user.uid), {
+      ...creatorData,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  } catch (_) {}
 
   /* ── Guard: prevent accidental cleanup if page unloads during live ── */
   _creatorEndedFlag = false;
@@ -909,46 +845,23 @@ async function startLive() {
     }
   });
 
+  console.log('[OLD-LIVE] LIVE_STAGE_SHOW — hiding setup, showing stage');
+  console.log('[OLD-LIVE] LOCAL_STREAM_BEFORE_STAGE — stream:', !!_localStream,
+    'tracks:', _localStream?.getTracks().map(t => t.kind + ':' + t.readyState).join(', '));
   if (D.setup) D.setup.style.display = 'none';
-  console.log('[OLD-LIVE] HOST_STAGE_START +' + (Date.now() - _t0) + 'ms');
   _showStage();
+  console.log('[OLD-LIVE] LIVE_STAGE_VISIBLE — stage has .active:', D.stage?.classList.contains('active'));
   _attachLocalVideoToStage();
   _populateCreatorInfo(creatorData);
-  // Verify DOM is intact — report any missing critical elements
-  if (!D.stage)     console.error('[OLD-LIVE] HOST_STAGE DOM MISSING: #liveStage');
-  if (!D.liveVideo) console.error('[OLD-LIVE] HOST_STAGE DOM MISSING: #liveVideo');
-  console.log('[OLD-LIVE] HOST_STAGE_DONE — setup hidden, stage active', '+' + (Date.now() - _t0) + 'ms',
-    'stage.active:', D.stage?.classList.contains('active'),
-    'video.srcObject:', !!D.liveVideo?.srcObject);
 
   /* ── Initialise the audio mixer BEFORE WebRTC so peer connections
-        pick up the mixed audio track rather than the raw mic track.
-        NON-BLOCKING: if mixer init fails or the AudioContext is suspended,
-        WebRTC still starts with the raw microphone track.              ── */
-  console.log('[OLD-LIVE] AUDIO_MIXER_START +' + (Date.now() - _t0) + 'ms');
-  try {
-    await Promise.race([
-      _initAudioMixer(),
-      new Promise(r => setTimeout(r, 3000)),  // 3 s hard cap — mixer is optional
-    ]);
-    console.log('[OLD-LIVE] AUDIO_MIXER_DONE — mixedTrack:', !!_audioMixer?.mixedAudioTrack, '+' + (Date.now() - _t0) + 'ms');
-  } catch (mixErr) {
-    console.warn('[OLD-LIVE] AUDIO_MIXER failed (non-critical) — will use raw mic:', mixErr?.message, '+' + (Date.now() - _t0) + 'ms');
-    _audioMixer = null;  // ensure peers fall back to raw mic track
-  }
+        pick up the mixed audio track rather than the raw mic track.   ── */
+  await _initAudioMixer();
 
-  console.log('[OLD-LIVE] WEBRTC_START +' + (Date.now() - _t0) + 'ms');
   await _startCreatorWebRTC();
-  console.log('[OLD-LIVE] WEBRTC_DONE — viewer listener attached +' + (Date.now() - _t0) + 'ms');
 
-  console.log('[OLD-LIVE] CHAT_START +' + (Date.now() - _t0) + 'ms');
   _subscribeChat();
-  console.log('[OLD-LIVE] CHAT_DONE +' + (Date.now() - _t0) + 'ms');
-
-  console.log('[OLD-LIVE] VIEWER_COUNT_START +' + (Date.now() - _t0) + 'ms');
   _subscribeViewerCount();
-  console.log('[OLD-LIVE] VIEWER_COUNT_DONE +' + (Date.now() - _t0) + 'ms');
-
   _showCreatorShareBar();
 
   // ── Start listening for guest box requests ──
@@ -961,7 +874,6 @@ async function startLive() {
   _attachGuestGridResizeObserver();
 
   // ── Publish host's own presence to liveGuests (viewers see cam/mic status) ──
-  console.log('[OLD-LIVE] HOST_PRESENCE_START +' + (Date.now() - _t0) + 'ms');
   try {
     const hostGuestRef = ref(_liveDB, `liveGuests/${_roomId}/_host_`);
     await set(hostGuestRef, {
@@ -976,12 +888,9 @@ async function startLive() {
     });
     // If the host's page crashes / network drops, remove the whole liveGuests room node
     try { onDisconnect(ref(_liveDB, `liveGuests/${_roomId}`)).remove(); } catch(_) {}
-    console.log('[OLD-LIVE] HOST_PRESENCE_DONE +' + (Date.now() - _t0) + 'ms');
-  } catch (presErr) {
-    console.warn('[OLD-LIVE] HOST_PRESENCE write failed (non-critical):', presErr?.message, '+' + (Date.now() - _t0) + 'ms');
-  }
+  } catch (_) {}
 
-  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 broadcast is live. roomId:', _roomId, 'total time:' + (Date.now() - _t0) + 'ms');
+  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 roomId:', _roomId, 'uid:', _user?.uid);
   toast('🔴 You are LIVE!');
 
   // ── Notify add-on modules (co-host, etc.) that live has started ──
@@ -1002,15 +911,6 @@ async function startLive() {
     await updateDoc(doc(_db, 'users', _user.uid), { isLive: true, liveRoomId: _roomId });
   } catch (_) {}
 
-  // [PHASE-2-DISABLED] broadcastStarted() — Creator Channels / Live Now integration.
-  // Disconnected for Phase 1 standalone WebRTC reset.
-  // Restore this block in Phase 2 when reconnecting Creator Channels + Live Now.
-  //
-  // ;(async () => {
-  //   const { broadcastStarted } = await import('./snx-live-adapter.js');
-  //   await broadcastStarted(_user.uid, _roomId, { ... });
-  // })();
-
   // ── RTDB users/{uid} presence: mark as live ──
   try {
     await set(ref(_liveDB, 'users/' + _user.uid + '/live'),   true);
@@ -1020,68 +920,36 @@ async function startLive() {
   // feed posts; they appear only in the story bar and Live Hub.
   _createLiveStory(creatorData);
   _notifyFollowersLive(creatorData);
-
-  // ── Deferred orphan-post cleanup — non-critical, runs AFTER LIVE_ACTIVE ──
-  // Moved out of the critical startLive() path (was blocking live start).
-  // Fire-and-forget so any Firestore latency never blocks camera broadcast.
-  ;(async () => {
-    try {
-      const orphanQ = query(
-        collection(_db, 'posts'),
-        where('uid', '==', _user.uid),
-        where('type', '==', 'live')
-      );
-      const orphanSnap = await getDocs(orphanQ);
-      orphanSnap.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
-    } catch (_) {}
-  })();
-
-  // ── Clear the duplicate-start guard now that we are live ──
-  if (D.goLiveBtn) { D.goLiveBtn.dataset.starting = ''; }
-
-  } catch (_startErr) {
-    // ── STARTUP FAILED — restore UI and clean partial state ──
-    if (_startAborted) return; // timeout already handled it
-    console.error('[OLD-LIVE] START_FAILED — stage: EXCEPTION —', _startErr?.code || '', _startErr?.message || _startErr);
-
-    // Clean up partial room if RTDB was written
-    const _partialRoomId = _roomId;
-    if (_partialRoomId) {
-      try { await update(ref(_liveDB, `liveRooms/${_partialRoomId}`), { status: 'ended', isLive: false, endedAt: Date.now() }); } catch(_) {}
-      setTimeout(() => { try { remove(ref(_liveDB, `liveRooms/${_partialRoomId}`)); } catch(_) {} }, 3000);
-      try { remove(ref(_liveDB, `liveConnections/${_partialRoomId}`)).catch(() => {}); } catch(_) {}
-    }
-
-    // Reset state so a retry works cleanly
-    _roomId     = null;
-    _roomHostId = null;
-    _creatorEndedFlag = false;
-
-    // Restore the Go Live button so the user can try again
-    if (D.goLiveBtn) {
-      D.goLiveBtn.disabled = false;
-      D.goLiveBtn.dataset.starting = '';
-      D.goLiveBtn.textContent = 'Start Live';
-    }
-
-    // If we already transitioned to the stage, go back to setup so the user is not stranded
-    if (D.stage && D.stage.classList.contains('active')) {
-      D.stage.classList.remove('active');
-      if (D.setup) D.setup.style.display = 'block';
-    }
-
-    toast('Could not start live — ' + (_startErr?.message || 'unknown error') + '. Please try again.');
-
-  } finally {
-    clearTimeout(_startTimeout);
-  }
 }
 
 function _attachLocalVideoToStage() {
   if (!D.liveVideo || !_localStream) return;
-  D.liveVideo.srcObject = _localStream;
-  D.liveVideo.play().catch(() => {});
+  console.log('[OLD-LIVE] LOCAL_VIDEO_ATTACH — tracks:',
+    _localStream.getTracks().map(t => t.kind + ':' + t.readyState + ':enabled=' + t.enabled).join(', '),
+    'stream.active:', _localStream.active);
+  D.liveVideo.muted      = true;   // must be true before play() — browser autoplay policy
+  D.liveVideo.playsInline = true;
+  D.liveVideo.srcObject  = _localStream;
+  D.liveVideo.play()
+    .then(() => {
+      console.log('[OLD-LIVE] LOCAL_VIDEO_PLAY — playing, readyState:', D.liveVideo.readyState);
+    })
+    .catch(e => {
+      console.error('[OLD-LIVE] LOCAL_VIDEO_PLAY FAILED —', e.name, e.message);
+      // One retry after user gesture / tab visibility
+      const _retry = () => {
+        document.removeEventListener('click',           _retry);
+        document.removeEventListener('visibilitychange', _retry);
+        if (D.liveVideo && D.liveVideo.srcObject) {
+          D.liveVideo.play().catch(e2 => console.warn('[OLD-LIVE] LOCAL_VIDEO_PLAY retry failed', e2.name));
+        }
+      };
+      document.addEventListener('click',            _retry, { once: true });
+      document.addEventListener('visibilitychange', _retry, { once: true });
+    });
   D.camOffOverlay && D.camOffOverlay.classList.toggle('visible', !_camOn);
+  console.log('[OLD-LIVE] LOCAL_VIDEO_ATTACH_DONE — srcObject set:', !!D.liveVideo.srcObject,
+    'muted:', D.liveVideo.muted, 'paused:', D.liveVideo.paused);
 }
 
 /* ── Share bar: big visible URL strip shown on the live stage ──
@@ -1293,138 +1161,153 @@ async function endLive() {
   if (_creatorEndedFlag) return;   // prevent double-call
   _creatorEndedFlag = true;
 
-  console.log('[END-LIVE] START — roomId:', _roomId, 'uid:', _user?.uid);
+  console.log('[OLD-LIVE-END] CLICK — roomId:', _roomId, 'uid:', _user?.uid);
+  console.log('[OLD-LIVE-END] BEGIN');
 
-  // Cancel the onDisconnect trigger — we are ending cleanly ourselves
-  if (_roomId) {
-    try { await onDisconnect(ref(_liveDB, `liveRooms/${_roomId}`)).cancel(); } catch (_) {}
+  // Safety timeout: if cleanup hangs, force UI reset after 8s so host is never trapped
+  const _endTimeout = setTimeout(() => {
+    console.error('[OLD-LIVE-END] TIMEOUT — forcing UI reset');
+    _forceEndLiveUIReset();
+  }, 8000);
+
+  try {
+    await _doEndLive();
+  } finally {
+    clearTimeout(_endTimeout);
   }
+}
 
+/* Force UI reset — called by timeout or in emergencies */
+function _forceEndLiveUIReset() {
+  if (D.liveVideo) { try { D.liveVideo.pause(); } catch(_) {} D.liveVideo.srcObject = null; }
+  if (D.stage)     D.stage.classList.remove('active');
+  if (D.ended)     D.ended.classList.remove('visible');
+  document.body.classList.remove('is-creator');
+  document.getElementById('_snxCreatorShareBar')?.remove();
+  if (D.setup) D.setup.style.display = 'block';
+  if (D.goLiveBtn) {
+    D.goLiveBtn.disabled         = false;
+    D.goLiveBtn.dataset.starting = '';
+    D.goLiveBtn.textContent      = 'Start Live';
+  }
+  _creatorEndedFlag = false;
+  console.log('[OLD-LIVE-END] UI_RESET — stage hidden, setup shown');
+}
+
+/* Inner cleanup — all resilient, UI always resets in finally */
+async function _doEndLive() {
+  const _endedRoomId = _roomId;
+
+  // 1: cancel onDisconnect
+  if (_endedRoomId) {
+    try { await onDisconnect(ref(_liveDB, `liveRooms/${_endedRoomId}`)).cancel(); } catch (_) {}
+  }
   window.removeEventListener('beforeunload', _creatorBeforeUnload);
   window.removeEventListener('pagehide',     _creatorBeforeUnload);
 
-  // Stop adaptive quality monitor
-  _stopAdaptiveQuality();
+  // 2: stop adaptive quality
+  try { _stopAdaptiveQuality(); } catch(_) {}
 
-  // Close all guest peer connections and host relay peers
-  _teardownAllGuestPeers();
-  if (_guestReqUnsub) { try { _guestReqUnsub(); } catch(_){} _guestReqUnsub = null; }
+  // 3: close all WebRTC peers
+  console.log('[OLD-LIVE-END] PEERS_CLOSE');
+  try { _teardownAllGuestPeers(); } catch(_) {}
+  if (_guestReqUnsub)        { try { _guestReqUnsub(); }        catch(_){} _guestReqUnsub        = null; }
+  try { _hostTeardownAllViewerPeers(); } catch(_) {}
+  if (_rtcPc)                { try { _rtcPc.close(); }           catch(_){} _rtcPc                = null; }
+  try { _hostTeardownAllRelayPeers(); }  catch(_) {}
+  if (_hostViewerListenUnsub){ try { _hostViewerListenUnsub(); } catch(_){} _hostViewerListenUnsub = null; }
 
-  // Tear down all per-viewer WebRTC connections (multi-viewer broadcast)
-  _hostTeardownAllViewerPeers();
-  // _hostTeardownAllViewerPeers handles _rtcSignalUnsub; also clear _rtcPc if left
-  if (_rtcPc)  { try { _rtcPc.close(); } catch (_) {} _rtcPc = null; }
-  console.log('[END-LIVE] WEBRTC_CLOSE — all peer connections closed');
+  // 4: remove listeners
+  console.log('[OLD-LIVE-END] LISTENERS_REMOVE');
+  if (_chatUnsub)        { try { _chatUnsub(); }           catch(_){} _chatUnsub        = null; }
+  if (_viewerCountUnsub) { try { _viewerCountUnsub(); }    catch(_){} _viewerCountRef   = null; _viewerCountUnsub   = null; }
+  if (_hostLikeCountRef) { try { off(_hostLikeCountRef); } catch(_){} _hostLikeCountRef = null; _hostLikeCountUnsub = null; }
 
-  // Tear down all relay PCs (host→viewer per-guest relay)
-  _hostTeardownAllRelayPeers();
-  if (_chatUnsub)        { _chatUnsub();         _chatUnsub        = null; }
-  if (_viewerCountUnsub) { try { _viewerCountUnsub(); } catch(_) {} _viewerCountRef = null; _viewerCountUnsub = null; }
-  if (_hostLikeCountRef) { try { off(_hostLikeCountRef); } catch(_) {} _hostLikeCountRef = null; _hostLikeCountUnsub = null; }
-  console.log('[END-LIVE] PRESENCE_STOP — listeners unsubscribed');
-
-  /* ── Remove WebRTC signaling from LIVE RTDB ── */
-  if (_roomId) {
-    try { await remove(ref(_liveDB, `liveConnections/${_roomId}`)); } catch (_) {}
-    try { await remove(ref(_liveDB, `guestViewerSignaling/${_roomId}`)); } catch (_) {}
+  // 5: remove RTDB signaling
+  if (_endedRoomId) {
+    try { await remove(ref(_liveDB, `liveConnections/${_endedRoomId}`)); }     catch (_) {}
+    try { await remove(ref(_liveDB, `guestViewerSignaling/${_endedRoomId}`)); } catch (_) {}
   }
 
-  // ── Tear down audio mixer ──
+  // 6: audio mixer
   if (_audioMixer) { try { _audioMixer.stop(); } catch(_) {} _audioMixer = null; }
   _csMusicPlaying = false;
 
-  console.log('[END-LIVE] MEDIA_STOP_START — stopping camera/mic tracks');
+  // 7: stop tracks + detach video
+  console.log('[OLD-LIVE-END] TRACKS_STOP');
   if (_localStream) {
     _localStream.getTracks().forEach(t => {
-      t.stop();
-      console.log('[END-LIVE] track stopped:', t.kind, 'readyState:', t.readyState);
+      try { t.stop(); } catch(_) {}
+      console.log('[OLD-LIVE-END] track stopped:', t.kind, 'readyState:', t.readyState);
     });
     _localStream = null;
   }
-  console.log('[END-LIVE] MEDIA_STOP_DONE');
+  if (D.liveVideo) { try { D.liveVideo.pause(); } catch(_) {} D.liveVideo.srcObject = null; }
 
-  /* ── Mark room as ended in LIVE RTDB ── */
-  const _endedRoomId = _roomId;
-  console.log('[END-LIVE] ROOM_END_START — marking RTDB liveRooms/', _endedRoomId, 'as ended');
+  // 8: mark room ended in RTDB (authoritative)
+  console.log('[OLD-LIVE-END] ROOM_END_START — liveRooms/', _endedRoomId);
   try {
     await update(ref(_liveDB, `liveRooms/${_endedRoomId}`), {
-      status:  'ended',
-      isLive:  false,
-      endedAt: Date.now(),
+      status: 'ended', isLive: false, endedAt: Date.now(),
     });
-    console.log('[END-LIVE] ROOM_END_DONE — RTDB room status=ended');
-  } catch (_) {}
+    console.log('[OLD-LIVE-END] ROOM_END_SUCCESS');
+  } catch (e) { console.error('[OLD-LIVE-END] ROOM_END_FAILED (non-fatal):', e.message); }
 
-  /* ── Clear live status from main Firestore user doc ── */
-  try {
-    await updateDoc(doc(_db, 'users', _user.uid), {
-      isLive:     deleteField(),
-      liveRoomId: deleteField(),
-    });
-  } catch (_) {}
-
-  // ── RTDB users/{uid} presence: mark live ended ──
-  try { await set(ref(_liveDB, 'users/' + _user.uid + '/live'), false); } catch (_) {}
-
-  /* ── Delete live feed post from main Firestore (safety net for old data) ── */
-  if (_feedPostId) {
-    try { await deleteDoc(doc(_db, 'posts', _feedPostId)); } catch (_) {}
-    _feedPostId = null;
+  // 9: Firestore cleanup (non-critical)
+  if (_user) {
+    try { await updateDoc(doc(_db, 'users', _user.uid), { isLive: deleteField(), liveRoomId: deleteField() }); } catch (_) {}
+    try { await set(ref(_liveDB, 'users/' + _user.uid + '/live'), false); } catch (_) {}
+    if (_feedPostId) { try { await deleteDoc(doc(_db, 'posts', _feedPostId)); } catch (_) {} _feedPostId = null; }
+    try {
+      const shareQ = query(collection(_db, 'posts'), where('liveRoomId', '==', _endedRoomId), where('type', '==', 'live_share'));
+      const shareSnap = await getDocs(shareQ);
+      shareSnap.forEach(async sd => { try { await updateDoc(sd.ref, { isLive: false }); } catch (_) {} });
+    } catch (_) {}
+    try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); }    catch (_) {}
+    try { await deleteDoc(doc(_db, 'liveRooms', _endedRoomId)); } catch (_) {}
   }
+  setTimeout(async () => { try { await remove(ref(_liveDB, `liveRooms/${_endedRoomId}`)); } catch (_) {} }, 5 * 60 * 1000);
 
-  /* ── Mark share posts as ended in main Firestore ── */
-  try {
-    const shareQ = query(
-      collection(_db, 'posts'),
-      where('liveRoomId', '==', _endedRoomId),
-      where('type', '==', 'live_share')
-    );
-    const shareSnap = await getDocs(shareQ);
-    shareSnap.forEach(async shareDoc => {
-      try { await updateDoc(shareDoc.ref, { isLive: false }); } catch (_) {}
-    });
-  } catch (_) {}
-
-  /* ── Delete Firestore liveRooms doc (keyed by uid) so it disappears from Live Hub ── */
-  try { await deleteDoc(doc(_db, 'liveRooms', _user.uid)); } catch (_) {}
-  /* ── Also delete by roomId in case old data used roomId as key ── */
-  try { await deleteDoc(doc(_db, 'liveRooms', _endedRoomId)); } catch (_) {}
-
-  /* ── Schedule RTDB room deletion after 5 min (cleans up ended marker) ── */
-  setTimeout(async () => {
-    try { await remove(ref(_liveDB, `liveRooms/${_endedRoomId}`)); } catch (_) {}
-  }, 5 * 60 * 1000);
-
-  _deleteLiveStory();
-
-  // ── Stop optional systems ──
-  _liveTimerOnLiveEnd();
-  _shadowBotOnLiveEnd();
-  _aiSafetyOnLiveEnd();
-  _iqOnLiveEnd();
-
-  // ── Co-host cleanup (no-op if cohost.js is not loaded) ──
+  // 10: stop optional systems
+  console.log('[OLD-LIVE-END] TIMERS_CLEAR');
+  try { _deleteLiveStory(); }    catch(_) {}
+  try { _liveTimerOnLiveEnd(); } catch(_) {}
+  try { _shadowBotOnLiveEnd(); } catch(_) {}
+  try { _aiSafetyOnLiveEnd(); }  catch(_) {}
+  try { _iqOnLiveEnd(); }        catch(_) {}
   if (typeof window._cohostCleanup === 'function') { try { window._cohostCleanup(); } catch(_){} }
 
-  // ── Adapter bridge: notify the social layer that the broadcast has ended.
-  //    broadcastEnded() clears creatorChannels status → offline so creator leaves Live Now.
-  //    [PHASE-2-DISABLED] broadcastEnded() — Creator Channels / Live Now integration.
-  //    Disconnected for Phase 1 standalone WebRTC reset.
-  //    Restore this block in Phase 2 when reconnecting Creator Channels + Live Now.
-  //
-  // if (_user) {
-  //   const { broadcastEnded } = await import('./snx-live-adapter.js');
-  //   await broadcastEnded(_user.uid, _endedRoomId);
-  // }
-  console.log('[END-LIVE] PHASE1 — skipping creatorChannels bridge (disconnected for Phase 1)');
+  // 11: [PHASE-2-DISABLED] broadcastEnded() — restore in Phase 2
 
-  // ── Reset local live state so host UI stops showing LIVE ──
+  // 12: reset state
+  console.log('[OLD-LIVE-END] STATE_RESET');
   _roomId     = null;
   _roomHostId = null;
-  console.log('[END-LIVE] UI_RESET — _roomId cleared, showing ended overlay');
+  _mode       = null;
 
-  _showEndedOverlay(true);
-  console.log('[END-LIVE] COMPLETE — host is no longer live');
+  // 13: UI reset — hide stage, return to setup
+  console.log('[OLD-LIVE-END] UI_RESET');
+  if (D.stage) D.stage.classList.remove('active');
+  if (D.ended) D.ended.classList.remove('visible');
+  document.body.classList.remove('is-creator');
+  document.getElementById('_snxCreatorShareBar')?.remove();
+
+  // Reset Go Live button
+  if (D.goLiveBtn) {
+    D.goLiveBtn.disabled         = false;
+    D.goLiveBtn.dataset.starting = '';
+    D.goLiveBtn.textContent      = 'Start Live';
+  }
+
+  // 14: allow second broadcast — reset flag BEFORE re-acquiring camera
+  _creatorEndedFlag = false;
+
+  // 15: re-show setup + re-acquire camera for next broadcast
+  if (D.setupPreview) D.setupPreview.srcObject = null;
+  if (D.setup) D.setup.style.display = 'block';
+  _startCreatorSetup(false).catch(e => console.warn('[OLD-LIVE-END] camera re-acquire failed:', e.message));
+
+  console.log('[OLD-LIVE-END] COMPLETE — host is no longer live, setup re-shown');
 }
 
 /* ═══════════════════════════════════════════════════

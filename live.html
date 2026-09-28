@@ -18,13 +18,7 @@
 <script>
 (function() {
   try {
-    var raw = localStorage.getItem('founderFeatureControls');
-    // Only gate when the key is explicitly set (i.e. the user has visited index.html
-    // and the Founder has toggled the feature).  If the key is absent (direct navigation,
-    // new device, incognito) we let the page load — live.js will redirect to index.html
-    // if not authenticated, so unauthenticated direct access is still safe.
-    if (raw === null) return; // no key — allow through
-    var ctrl = JSON.parse(raw);
+    var ctrl = JSON.parse(localStorage.getItem('founderFeatureControls') || '{}');
     // liveEnabled must be explicitly true — defaults OFF until Founder enables
     var enabled = ctrl.liveEnabled === true;
     if (!enabled) {
@@ -431,7 +425,7 @@
   <div class="ended-icon">🌑</div>
   <h2 id="endedTitle" class="ended-title">Stream Ended</h2>
   <p  id="endedSub"   class="ended-sub">This live stream has ended.</p>
-  <button id="endedBackBtn" class="ended-back-btn" id="endedBackBtn">← Back to Shadow Nexus</button>
+  <button id="endedBackBtn" class="ended-back-btn">← Back to Feed</button>
 </div>
 
 
