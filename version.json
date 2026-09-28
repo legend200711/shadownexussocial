@@ -1,9 +1,9 @@
 {
-  "buildId": "SNX-LIVE-AVENORA-ENGINE-2026-09-29",
-  "swVersion": "v77",
-  "deployedAt": "2026-09-29T00:00:00Z",
+  "buildId": "SNX-LIVE-AVENORA-RESTORED-SNS-2026-09-29",
+  "swVersion": "v78",
+  "deployedAt": "2026-09-29T06:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.1",
   "nexusVersion": "1.1.0",
-  "note": "SNX-LIVE-AVENORA-ENGINE-2026-09-29: Restored Live startLive() from proven Avenora engine. Removed blocking getIdToken(forceRefresh) and auth.currentUser double-check. Removed _withTimeout wrappers and 60s outer timeout. Restored clean sequential Avenora startup flow. SNS Firebase horr-a08f4 preserved. All SNS features intact."
+  "note": "SNX-LIVE-AVENORA-RESTORED-SNS-2026-09-29: Full engine replacement. Production live.js/html/css replaced with working Avenora engine. Firebase config replaced with SNS horr-a08f4. Engine identifier: AVENORA-RESTORED-SNS. SW v78 cache bust."
 }

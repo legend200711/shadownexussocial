@@ -9,12 +9,12 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="icon" type="image/x-icon" href="favicon.ico">
 <link rel="stylesheet" href="live.css">
-<!-- Co-Host feature -->
+<!-- Co-Host feature — remove these two lines to disable entirely -->
 <link rel="stylesheet" href="cohost.css">
 </head>
 <body>
 
-<!-- ── Feature gate ── -->
+<!-- ── Feature gate: checked before any Firebase code runs ── -->
 <script>
 (function() {
   try {
@@ -269,7 +269,7 @@
       <div style="text-align:center;margin-bottom:10px;">
         <span id="_guestCountIndicator" style="
           font-size:11px;font-weight:700;color:#00AEEF;
-          background:rgba(184,149,75,0.1);border:1px solid rgba(184,149,75,0.3);
+          background:rgba(0,174,239,0.1);border:1px solid rgba(0,174,239,0.3);
           border-radius:20px;padding:3px 12px;letter-spacing:0.4px;
         ">0 / 9 guests</span>
       </div>
@@ -389,12 +389,6 @@
         Share
       </button>
 
-      <!-- Gift button hidden — gift module not loaded -->
-      <div class="live-gift-btn" id="btnSendGift" aria-label="Send a gift" style="display:none;">
-        <span class="live-gift-btn-icon">🎁</span>
-        <span class="live-gift-btn-label">Send Gift</span>
-      </div>
-
       <!-- Profile 👤 (sits below share) -->
       <button id="btnCreatorProfile" class="live-profile-btn" aria-label="View creator profile">
         <span class="live-profile-icon">👤</span>
@@ -442,43 +436,17 @@
 
 
 <!-- ══════════════════════════════════════════════
-     LIVE ENGINE (ES module)
+     GLOBAL INTERNET MANAGER (plain script — loads before live.js)
      ══════════════════════════════════════════════ -->
-<!-- Internet quality helper — loads before live.js -->
 <script src="snx-net.js"></script>
 
-<!-- Live engine (ES module) -->
+<!-- ══════════════════════════════════════════════
+     LIVE ENGINE (ES module)
+     ══════════════════════════════════════════════ -->
 <script type="module" src="live.js"></script>
 
-<!-- Co-Host module (ES module) -->
+<!-- Co-Host add-on (ES module) — remove to disable entirely -->
 <script type="module" src="cohost.js"></script>
-
-<!-- Room/host info capture + gift stubs -->
-<script>
-  // Capture room/host uid from live.js events so the page stays consistent
-  window.addEventListener('snxLiveReady', function(e) {
-    if (!e.detail) return;
-    window._liveRoomId  = e.detail.roomId  || null;
-    if (e.detail.isHost && e.detail.user) {
-      window._liveHostUid = e.detail.user.uid || null;
-    }
-  });
-  window.addEventListener('snxLiveHostReady', function(e) {
-    if (e.detail && e.detail.hostId) window._liveHostUid = e.detail.hostId;
-  });
-  // Gift module stubs — gift feature not available.
-  window.snxgLiveOpenGiftTray    = function() { /* gift module not available */ };
-  window._snxgStartLiveGiftWatch = function()  { /* gift module not available */ };
-
-  // Engine verification — checked after live.js module executes
-  window.addEventListener('load', function() {
-    var engine = window.SNX_LIVE_ENGINE || '(not set)';
-    console.log('[SNX-LIVE] Engine identifier:', engine);
-    if (engine !== 'AVENORA-RESTORED-SNS') {
-      console.error('[SNX-LIVE] WARNING: wrong engine loaded. Expected AVENORA-RESTORED-SNS, got:', engine);
-    }
-  });
-</script>
 
 </body>
 </html>
