@@ -1,0 +1,416 @@
+// ═══════════════════════════════════════════════════════════════════
+// AURENIX — Firestore Security Rules
+// firestore.rules — UPDATED with Cloud Stream collections
+//
+// Deploy via Firebase CLI:
+//   firebase deploy --only firestore:rules
+// ═══════════════════════════════════════════════════════════════════
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ────────────────────────────────────────────────────────────
+    // HELPERS
+    // ────────────────────────────────────────────────────────────
+
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.token.email == 'christijerina46@gmail.com';
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // USERS — /users/{uid}
+    // ────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isOwner(uid);
+      allow update: if isAdmin()
+                    || (isOwner(uid)
+                        && !('role' in request.resource.data)
+                        || (isOwner(uid)
+                            && request.resource.data.role == resource.data.role));
+      allow delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // RADIO SUBMISSIONS — /radio_submissions/{submissionId}
+    // ────────────────────────────────────────────────────────────
+    match /radio_submissions/{submissionId} {
+      allow get: if isAdmin()
+                 || resource.data.status == 'approved'
+                 || resource.data.status == 'playing'
+                 || (isSignedIn() && resource.data.submitted_by == request.auth.uid);
+      allow list: if isAdmin()
+                  || (isSignedIn() && resource.data.submitted_by == request.auth.uid)
+                  || resource.data.status == 'approved'
+                  || resource.data.status == 'playing';
+      allow create: if isSignedIn()
+                    && request.resource.data.submitted_by == request.auth.uid
+                    && request.resource.data.status == 'pending';
+      allow update: if isAdmin()
+                    || (isSignedIn()
+                        && resource.data.submitted_by == request.auth.uid
+                        && resource.data.status == 'pending'
+                        && request.resource.data.status == 'pending'
+                        && request.resource.data.submitted_by == resource.data.submitted_by
+                        && request.resource.data.rights_confirmed == resource.data.rights_confirmed);
+      allow delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // RADIO STATION — /radio_station/live
+    // ────────────────────────────────────────────────────────────
+    match /radio_station/{docId} {
+      allow read: if true;
+      allow write: if isAdmin() || isSignedIn();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // COPYRIGHT REPORTS — /radio_reports/{reportId}
+    // ────────────────────────────────────────────────────────────
+    match /radio_reports/{reportId} {
+      allow read:   if isAdmin();
+      allow create: if true;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // RADIO PLAYS — /radio_plays/{playId}
+    // ────────────────────────────────────────────────────────────
+    match /radio_plays/{playId} {
+      allow read:           if isAdmin();
+      allow create:         if true;
+      allow update, delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // MODERATION LOGS — /moderation_logs/{logId}
+    // ────────────────────────────────────────────────────────────
+    match /moderation_logs/{logId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // LIVE ROOMS — /live_rooms/{roomId}
+    // ────────────────────────────────────────────────────────────
+    match /live_rooms/{roomId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && request.resource.data.host_uid == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.host_uid == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.host_uid == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // LIVE MESSAGES — /live_messages/{msgId}
+    // ────────────────────────────────────────────────────────────
+    match /live_messages/{msgId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn()
+                    && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow update: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // POSTS — /posts/{postId}
+    // ────────────────────────────────────────────────────────────
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // STORIES — /stories/{storyId}
+    // ────────────────────────────────────────────────────────────
+    match /stories/{storyId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // NOTIFICATIONS — /notifications/{notifId}
+    // ────────────────────────────────────────────────────────────
+    match /notifications/{notifId} {
+      allow read:   if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // COMMUNITY POSTS — /community/{postId}
+    // ────────────────────────────────────────────────────────────
+    match /community/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.user_id == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.user_id == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // POST COMMENTS — /post_comments/{commentId}
+    // ────────────────────────────────────────────────────────────
+    match /post_comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.user_id == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.user_id == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // MEDIA FILES — /media_files/{fileId}
+    // ────────────────────────────────────────────────────────────
+    match /media_files/{fileId} {
+      allow read: if resource.data.status == 'approved'
+                  || resource.data.status == 'published'
+                  || isAdmin()
+                  || (isSignedIn() && resource.data.uploaded_by == request.auth.uid);
+      allow create: if isSignedIn()
+                    && request.resource.data.uploaded_by == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.uploaded_by == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.uploaded_by == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // MEDIA COMMENTS — /media_comments/{commentId}
+    // ────────────────────────────────────────────────────────────
+    match /media_comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn()
+                    && request.resource.data.user_id == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn() && resource.data.user_id == request.auth.uid);
+      allow delete: if isAdmin()
+                    || (isSignedIn() && resource.data.user_id == request.auth.uid);
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // BOX REQUESTS — /box_requests/{requestId}
+    // ────────────────────────────────────────────────────────────
+    match /box_requests/{requestId} {
+      allow read: if isSignedIn()
+                  && (resource.data.guest_uid == request.auth.uid
+                      || resource.data.host_uid == request.auth.uid)
+                  || isAdmin();
+      allow create: if isSignedIn()
+                    && request.resource.data.guest_uid == request.auth.uid;
+      allow update: if isAdmin()
+                    || (isSignedIn()
+                        && (resource.data.guest_uid == request.auth.uid
+                            || resource.data.host_uid == request.auth.uid));
+      allow delete: if isAdmin()
+                    || (isSignedIn()
+                        && (resource.data.guest_uid == request.auth.uid
+                            || resource.data.host_uid == request.auth.uid));
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // SITE SETTINGS — /site_settings/{docId}
+    // ────────────────────────────────────────────────────────────
+    match /site_settings/{docId} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // CLOUD STREAM COLLECTIONS (NEW)
+    // ════════════════════════════════════════════════════════════
+
+    // ────────────────────────────────────────────────────────────
+    // CLOUD STREAM DESTINATIONS — /cloud_stream_destinations/{id}
+    // Managed entirely by the cloud-stream-server (firebase-admin).
+    // The server uses service-account credentials which bypass RLS.
+    // Browser clients may NOT read destinations directly (stream keys).
+    // ────────────────────────────────────────────────────────────
+    match /cloud_stream_destinations/{destId} {
+      // Only admin can read (stream keys are stored encrypted here)
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // CLOUD STREAM PLAYLIST — /cloud_stream_playlist/{itemId}
+    // ────────────────────────────────────────────────────────────
+    match /cloud_stream_playlist/{itemId} {
+      // Owners can read their own playlist
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.owner_uid == request.auth.uid);
+      // Write through the cloud-stream-server API only (admin-enforced)
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // CLOUD STREAM SESSIONS — /cloud_stream_sessions/{sessionId}
+    // ────────────────────────────────────────────────────────────
+    match /cloud_stream_sessions/{sessionId} {
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.owner_uid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // CLOUD STREAM SCHEDULES — /cloud_stream_schedules/{schedId}
+    // ────────────────────────────────────────────────────────────
+    match /cloud_stream_schedules/{schedId} {
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.owner_uid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // CLOUD STREAM LOGS — /cloud_stream_logs/{logId}
+    // ────────────────────────────────────────────────────────────
+    match /cloud_stream_logs/{logId} {
+      allow read: if isAdmin()
+                  || (isSignedIn() && resource.data.owner_uid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // YOUTUBE TOKENS — /cloud_stream_youtube_tokens/{uid}
+    // Tokens stored server-side; browser never reads them directly.
+    // ────────────────────────────────────────────────────────────
+    match /cloud_stream_youtube_tokens/{uid} {
+      // Only admin can read (tokens contain OAuth credentials)
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // NETWORK MEDIA LIBRARY — /network_media/{id}
+    // Admin uploads; public can read ready items for player
+    // ────────────────────────────────────────────────────────────
+    match /network_media/{itemId} {
+      allow read:   if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // MEDIA SUBMISSIONS — /media_submissions/{id}
+    // Users submit; Founder reviews (approve / reject)
+    // ────────────────────────────────────────────────────────────
+    match /media_submissions/{subId} {
+      // User can read their own submission; Founder reads all
+      allow get:    if isAdmin()
+                    || (isSignedIn() && resource.data.submitted_by == request.auth.uid);
+      allow list:   if isAdmin()
+                    || (isSignedIn() && resource.data.submitted_by == request.auth.uid);
+      // Users can create their own pending submission
+      allow create: if isSignedIn()
+                    && request.resource.data.submitted_by == request.auth.uid
+                    && request.resource.data.status == 'pending';
+      // Only Founder can update (approve/reject) or delete
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // NETWORK STATE — /network_state/{channelId}
+    // Live playback state per channel; read by all viewers.
+    // WRITE restricted to Founder (admin) only.
+    // Previously allowed any signed-in user — tightened for Founder model.
+    // ────────────────────────────────────────────────────────────
+    match /network_state/{channelId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // NETWORK CHANNELS — /network_channels/{channelId}
+    // Channel definitions; read by all
+    // ────────────────────────────────────────────────────────────
+    match /network_channels/{channelId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // CHANNEL ONE ENGINE CONFIG — /channel_one_config/{channelId}
+    // Legacy engine settings (commercial frequency, history).
+    // Viewers may read (to check is_live). Only Founder can write.
+    // ────────────────────────────────────────────────────────────
+    match /channel_one_config/{channelId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // AURENIX LIVE TV ENGINE CONFIG — /channel_live_tv_config/{id}
+    // Settings for the LIVE TV channel engine.
+    // ────────────────────────────────────────────────────────────
+    match /channel_live_tv_config/{channelId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // CHANNEL ENGINE CONFIG — /network_ch_config/{channelId}
+    // Per-channel engine settings (commercial freq, history, mode).
+    // The Cloudflare Worker uses its service-account token to update
+    // program history and commercial counters after each advance.
+    // Viewers read this doc to check running/paused state.
+    // ────────────────────────────────────────────────────────────
+    match /network_ch_config/{channelId} {
+      allow read:  if true;
+      allow write: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // NETWORK COMMERCIALS — /network_commercials/{commercialId}
+    // Founder-created commercials (with image, text, audio).
+    // Only approved commercials enter the LIVE TV system.
+    // ────────────────────────────────────────────────────────────
+    match /network_commercials/{commercialId} {
+      allow read:   if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // DENY ALL UNMATCHED PATHS
+    // ────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+  }
+}

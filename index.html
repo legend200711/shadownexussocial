@@ -11399,15 +11399,15 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="mh2-header-sub">MUSIC NEVER SLEEPS</div>
       </header>
 
-      <!-- ══ PRIMARY NAV ══ -->
+      <!-- ══ PRIMARY NAV — 5 destinations only ══ -->
+      <!-- QUEUE, PLAYING, UPLOAD are hidden panels reached through the player -->
       <nav class="mh2-tab-bar" role="tablist" aria-label="Music Hub navigation">
         <button class="mh2-tab-btn active" id="snxMH2TabBtn_home"      onclick="snxMH2SwitchTab('home')"      role="tab" aria-selected="true">HOME</button>
+        <button class="mh2-tab-btn"        id="snxMH2TabBtn_discover"  onclick="snxMH2SwitchTab('discover')"  role="tab" aria-selected="false">DISCOVER</button>
         <button class="mh2-tab-btn"        id="snxMH2TabBtn_library"   onclick="snxMH2SwitchTab('library')"   role="tab" aria-selected="false">LIBRARY</button>
         <button class="mh2-tab-btn"        id="snxMH2TabBtn_playlists" onclick="snxMH2SwitchTab('playlists')" role="tab" aria-selected="false">PLAYLISTS</button>
         <button class="mh2-tab-btn"        id="snxMH2TabBtn_radio"     onclick="snxMH2SwitchTab('radio')"     role="tab" aria-selected="false">RADIO</button>
-        <button class="mh2-tab-btn"        id="snxMH2TabBtn_queue"     onclick="snxMH2SwitchTab('queue')"     role="tab" aria-selected="false">QUEUE</button>
-        <button class="mh2-tab-btn"        id="snxMH2TabBtn_playing"   onclick="snxMH2SwitchTab('playing')"   role="tab" aria-selected="false">NOW PLAYING</button>
-        <button class="mh2-tab-btn"        id="snxMH2TabBtn_upload"    onclick="snxMH2SwitchTab('upload')"    role="tab" aria-selected="false" style="display:none;">UPLOAD</button>
+        <!-- Hidden panels — not nav buttons: queue, playing, upload -->
       </nav>
 
       <!-- ══════════════════════════════════════════
@@ -11415,127 +11415,109 @@ body.arcade-fs-ios body::after { display:none !important; }
       ══════════════════════════════════════════ -->
       <div id="snxMH2Tab_home">
 
-        <!-- NEXUS PLAYER CORE — Now Playing card -->
-        <div class="mh2-home-section" style="padding-top:2px;">
-          <div class="mh2-nexus-player-card" id="snxMH2NPCard" onclick="snxMH2SwitchTab('playing')" role="button" tabindex="0" aria-label="Open full player">
-            <!-- Blurred art glow (set by JS when track plays) -->
-            <div class="mh2-npc-art-glow" id="snxMH2NPArtGlow"></div>
-            <!-- Empty state -->
-            <div id="snxMH2NPEmpty" class="mh2-npc-empty">
-              <div class="mh2-npc-empty-icon">&#127925;</div>
-              <div class="mh2-npc-empty-label">Nothing playing yet</div>
-              <button class="mh2-npc-browse-btn" onclick="event.stopPropagation();snxMH2SwitchTab('library')" aria-label="Browse library">BROWSE LIBRARY</button>
-            </div>
-            <!-- Active now-playing state -->
-            <div id="snxMH2NPActive" class="mh2-npc-active" style="display:none;">
-              <div class="mh2-npc-cover" id="snxMH2NPCover">
-                <div class="mh2-art-fallback"><span class="mh2-art-fallback-icon">&#9835;</span></div>
-              </div>
-              <div class="mh2-npc-meta">
-                <div class="mh2-npc-label">NOW PLAYING</div>
-                <div class="mh2-npc-title" id="snxMH2NPTitle">Track Title</div>
-                <div class="mh2-npc-artist" id="snxMH2NPArtist"></div>
-                <div class="mh2-npc-eq" id="snxMH2NPEq" aria-hidden="true">
-                  <span></span><span></span><span></span><span></span><span></span>
-                </div>
-              </div>
-              <button class="mh2-npc-open" onclick="event.stopPropagation();snxMH2SwitchTab('playing')" aria-label="Open full player">&#8599;</button>
-            </div>
-          </div>
-        </div>
+        <!-- NEXUS PLAYER HERO — the visual center of Home -->
+        <!-- Tapping anywhere opens the full Nexus Player -->
+        <div class="mh2-hero-player" id="snxMH2HeroPlayer" onclick="snxMH2SwitchTab('playing')" role="button" tabindex="0" aria-label="Open Nexus Player">
 
-        <!-- SHADOW NEXUS RADIO REALM -->
-        <div class="mh2-home-section">
-          <div class="mh2-section-header">
-            <span class="mh2-section-title">&#128251; SHADOW NEXUS RADIO</span>
-          </div>
-          <div class="mh2-radio-realm">
-            <div class="mh2-radio-realm-inner">
-              <div class="mh2-radio-icon-wrap" aria-hidden="true">&#128251;</div>
-              <div class="mh2-radio-realm-info">
-                <div class="mh2-radio-realm-title">SHADOW NEXUS RADIO</div>
-                <div class="mh2-radio-realm-sub">24-HOUR SOUND REALM</div>
-                <div class="mh2-radio-air">
-                  <div class="mh2-radio-dot" id="snxMH2HomeDot"></div>
-                  <span id="snxMH2HomeAirLabel">OFF AIR</span>
-                </div>
-              </div>
-              <button class="mh2-radio-btn-sm" id="snxMH2HomeRadioBtn" onclick="snxMH2SwitchTab('radio')" aria-label="Enter radio">ENTER RADIO</button>
-            </div>
-          </div>
-        </div>
+          <!-- blurred artwork glow layer -->
+          <div class="mh2-hero-glow" id="snxMH2HeroGlow"></div>
 
-        <!-- MUSIC REALMS -->
-        <div class="mh2-home-section">
-          <div class="mh2-section-header">
-            <span class="mh2-section-title">&#9889; MUSIC REALMS</span>
+          <!-- empty state -->
+          <div id="snxMH2NPEmpty" class="mh2-hero-empty">
+            <div class="mh2-hero-art-wrap">
+              <div class="mh2-hero-art-placeholder">
+                <span class="mh2-hero-art-icon">&#9835;</span>
+              </div>
+            </div>
+            <div class="mh2-hero-idle-label">Nothing playing yet</div>
+            <button class="mh2-hero-browse-btn" onclick="event.stopPropagation();snxMH2SwitchTab('library')" aria-label="Browse library">BROWSE LIBRARY</button>
           </div>
-          <div class="mh2-realms-scroll" id="snxMH2RealmsScroll" role="list" aria-label="Music realms">
-            <div class="mh2-realm-pill active" data-realm="all" onclick="snxMH2FilterRealm('all')" role="listitem" tabindex="0">
-              <span class="mh2-realm-icon">&#127758;</span>
-              <div class="mh2-realm-name">ALL</div>
-              <div class="mh2-realm-genre">Everything</div>
+
+          <!-- active playing state -->
+          <div id="snxMH2NPActive" class="mh2-hero-active" style="display:none;">
+            <div class="mh2-hero-art-wrap">
+              <div class="mh2-hero-art" id="snxMH2NPCover">
+                <div class="mh2-art-fallback mh2-art-fallback--lg"><span class="mh2-art-fallback-icon">&#9835;</span></div>
+              </div>
             </div>
-            <div class="mh2-realm-pill" data-realm="rock" onclick="snxMH2FilterRealm('rock')" role="listitem" tabindex="0">
-              <span class="mh2-realm-icon">&#9889;</span>
-              <div class="mh2-realm-name">VOLT REALM</div>
-              <div class="mh2-realm-genre">Rock / Metal</div>
+            <div class="mh2-hero-meta">
+              <div class="mh2-hero-track" id="snxMH2NPTitle"></div>
+              <div class="mh2-hero-artist" id="snxMH2NPArtist"></div>
             </div>
-            <div class="mh2-realm-pill" data-realm="dark" onclick="snxMH2FilterRealm('dark')" role="listitem" tabindex="0">
-              <span class="mh2-realm-icon">&#127761;</span>
-              <div class="mh2-realm-name">MIDNIGHT</div>
-              <div class="mh2-realm-genre">Dark / Emotional</div>
+            <!-- progress — thin energy line -->
+            <div class="mh2-hero-progress">
+              <div class="mh2-hero-seek" id="snxMH2HeroSeek" onclick="event.stopPropagation();snxMH2Seek(event,this)" role="progressbar" aria-label="Progress">
+                <div class="mh2-hero-seek-fill" id="snxMH2HeroFill"></div>
+              </div>
+              <div class="mh2-hero-times">
+                <span id="snxMH2HeroCurrentTime">0:00</span>
+                <span id="snxMH2HeroDuration">0:00</span>
+              </div>
             </div>
-            <div class="mh2-realm-pill" data-realm="hiphop" onclick="snxMH2FilterRealm('hiphop')" role="listitem" tabindex="0">
-              <span class="mh2-realm-icon">&#128293;</span>
-              <div class="mh2-realm-name">INFERNO</div>
-              <div class="mh2-realm-genre">Rap / Hip-Hop</div>
+            <!-- primary controls -->
+            <div class="mh2-hero-controls" onclick="event.stopPropagation()">
+              <button class="mh2-hero-btn mh2-hero-btn--sm" onclick="snxMH2Prev()" aria-label="Previous">&#9198;</button>
+              <button class="mh2-hero-btn mh2-hero-btn--play" id="snxMH2HeroPlayBtn" onclick="snxMH2PlayPause()" aria-label="Play/Pause">&#9654;</button>
+              <button class="mh2-hero-btn mh2-hero-btn--sm" onclick="snxMH2Next()" aria-label="Next">&#9197;</button>
             </div>
-            <div class="mh2-realm-pill" data-realm="chill" onclick="snxMH2FilterRealm('chill')" role="listitem" tabindex="0">
-              <span class="mh2-realm-icon">&#127756;</span>
-              <div class="mh2-realm-name">ECHO REALM</div>
-              <div class="mh2-realm-genre">Chill / Atmospheric</div>
+            <!-- secondary controls row -->
+            <div class="mh2-hero-secondary" onclick="event.stopPropagation()">
+              <button class="mh2-hero-sec-btn" id="snxMH2HeroShuffleBtn" onclick="snxMH2ToggleShuffle()" aria-label="Shuffle">&#128256;</button>
+              <button class="mh2-hero-sec-btn" id="snxMH2HeroRepeatBtn"  onclick="snxMH2ToggleRepeat()"  aria-label="Repeat">&#9854;</button>
+              <button class="mh2-hero-sec-btn" onclick="snxMH2SwitchTab('queue')"  aria-label="Queue">&#9776;</button>
+              <button class="mh2-hero-sec-btn" id="snxMH2HeroMuteBtn"   onclick="snxMH2ToggleMute()"   aria-label="Volume">&#128266;</button>
             </div>
-            <div class="mh2-realm-pill" data-realm="beats" onclick="snxMH2FilterRealm('beats')" role="listitem" tabindex="0">
-              <span class="mh2-realm-icon">&#127897;</span>
-              <div class="mh2-realm-name">BEAT FORGE</div>
-              <div class="mh2-realm-genre">Beats / Instrumentals</div>
+            <!-- eq visualizer while playing -->
+            <div class="mh2-hero-eq" id="snxMH2HeroEQ" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
             </div>
           </div>
+
+        </div><!-- end hero player -->
+
+        <!-- SHADOW NEXUS RADIO strip -->
+        <div class="mh2-radio-strip">
+          <div class="mh2-radio-strip-left">
+            <div class="mh2-radio-dot" id="snxMH2HomeDot"></div>
+            <div>
+              <div class="mh2-radio-strip-name">SHADOW NEXUS RADIO</div>
+              <div class="mh2-radio-strip-sub" id="snxMH2HomeAirLabel">OFF AIR</div>
+            </div>
+          </div>
+          <button class="mh2-radio-strip-btn" id="snxMH2HomeRadioBtn" onclick="snxMH2SwitchTab('radio')" aria-label="Enter radio">ENTER RADIO</button>
         </div>
 
         <!-- FEATURED IN THE NEXUS -->
         <div class="mh2-home-section">
           <div class="mh2-section-header">
-            <span class="mh2-section-title">&#11088; FEATURED IN THE NEXUS</span>
+            <span class="mh2-section-title">&#11088; FEATURED</span>
+            <button class="mh2-section-see-all" onclick="snxMH2SwitchTab('discover')" aria-label="Discover more">Discover more</button>
           </div>
           <div id="snxMH2FeaturedList">
-            <div class="mh2-empty"><span class="mh2-empty-icon">&#11088;</span>No featured tracks yet.</div>
+            <div class="mh2-empty">No featured tracks yet.</div>
           </div>
         </div>
 
         <!-- PLAYLIST UNIVERSE -->
         <div class="mh2-home-section">
           <div class="mh2-section-header">
-            <span class="mh2-section-title">&#127756; PLAYLIST UNIVERSE</span>
+            <span class="mh2-section-title">PLAYLISTS</span>
             <button class="mh2-section-see-all" onclick="snxMH2SwitchTab('playlists')" aria-label="View all playlists">View all</button>
           </div>
-          <div class="mh2-pl-scroll" id="snxMH2HomePlaylistScroll" aria-label="Playlists">
-            <!-- populated by JS -->
-          </div>
+          <div class="mh2-pl-scroll" id="snxMH2HomePlaylistScroll" aria-label="Playlists"></div>
         </div>
 
         <!-- RECENTLY ADDED -->
         <div class="mh2-home-section">
           <div class="mh2-section-header">
-            <span class="mh2-section-title">&#128336; RECENTLY ADDED</span>
+            <span class="mh2-section-title">RECENTLY ADDED</span>
             <button class="mh2-section-see-all" onclick="snxMH2SwitchTab('library')" aria-label="View full library">See all</button>
           </div>
           <div id="snxMH2RecentList"></div>
         </div>
 
-        <!-- FOUNDER MUSIC MANAGEMENT (founder only, hidden for listeners) -->
-        <div id="snxMH2MgmtSection" style="display:none; margin-bottom:20px;">
+        <!-- FOUNDER MUSIC MANAGEMENT -->
+        <div id="snxMH2MgmtSection" style="display:none; margin-bottom:24px;">
           <div class="mh2-mgmt-toggle" id="snxMH2MgmtToggle" onclick="snxMH2ToggleMgmt()" role="button" tabindex="0" aria-expanded="false" aria-controls="snxMH2MgmtPanel">
             <span aria-hidden="true">&#128081;</span>
             <span class="mh2-mgmt-toggle-label">MUSIC MANAGEMENT</span>
@@ -11543,11 +11525,11 @@ body.arcade-fs-ios body::after { display:none !important; }
           </div>
           <div class="mh2-mgmt-panel" id="snxMH2MgmtPanel" role="region" aria-label="Music management">
             <div class="mh2-mgmt-grid">
-              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('upload')" aria-label="Upload music">&#11014; Upload Music</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('upload')"  aria-label="Upload music">&#11014; Upload Music</button>
               <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('library')" aria-label="Manage library">&#127925; Manage Library</button>
-              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('playlists')" aria-label="Manage playlists">&#128203; Manage Playlists</button>
-              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('radio')" aria-label="Radio control">&#128251; Radio Control</button>
-              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('queue')" aria-label="View queue">&#127926; Queue</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('playlists')" aria-label="Manage playlists">&#128203; Playlists</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('radio')"   aria-label="Radio control">&#128251; Radio</button>
+              <button class="mh2-mgmt-btn" onclick="snxMH2SwitchTab('queue')"   aria-label="View queue">&#127926; Queue</button>
               <button class="mh2-mgmt-btn" onclick="snxMH2RefreshStorageHealth()" aria-label="Storage health">&#128276; Storage Health</button>
             </div>
             <div id="snxMH2StorageHealth" style="margin-top:12px;"></div>
@@ -11555,6 +11537,68 @@ body.arcade-fs-ios body::after { display:none !important; }
         </div>
 
       </div><!-- end home tab -->
+
+      <!-- ══════════════════════════════════════════
+           DISCOVER TAB — Realms + Featured + Browse
+      ══════════════════════════════════════════ -->
+      <div id="snxMH2Tab_discover" style="display:none;" role="tabpanel" aria-label="Discover">
+
+        <!-- ENTER THE REALMS header -->
+        <div class="mh2-discover-header">
+          <div class="mh2-discover-title">ENTER THE REALMS</div>
+          <div class="mh2-discover-sub">Explore music by world</div>
+        </div>
+
+        <!-- REALM CARDS — signature feature -->
+        <div class="mh2-realms-grid" id="snxMH2RealmsScroll" role="list" aria-label="Music realms">
+          <div class="mh2-realm-card mh2-realm--volt active" data-realm="all" onclick="snxMH2FilterRealm('all','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#127758;</div>
+            <div class="mh2-realm-card-name">ALL REALMS</div>
+            <div class="mh2-realm-card-genre">Everything</div>
+          </div>
+          <div class="mh2-realm-card mh2-realm--volt" data-realm="rock" onclick="snxMH2FilterRealm('rock','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#9889;</div>
+            <div class="mh2-realm-card-name">VOLT REALM</div>
+            <div class="mh2-realm-card-genre">Rock / Metal</div>
+          </div>
+          <div class="mh2-realm-card mh2-realm--midnight" data-realm="dark" onclick="snxMH2FilterRealm('dark','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#127761;</div>
+            <div class="mh2-realm-card-name">MIDNIGHT</div>
+            <div class="mh2-realm-card-genre">Dark / Emotional</div>
+          </div>
+          <div class="mh2-realm-card mh2-realm--inferno" data-realm="hiphop" onclick="snxMH2FilterRealm('hiphop','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#128293;</div>
+            <div class="mh2-realm-card-name">INFERNO</div>
+            <div class="mh2-realm-card-genre">Rap / Hip-Hop</div>
+          </div>
+          <div class="mh2-realm-card mh2-realm--echo" data-realm="chill" onclick="snxMH2FilterRealm('chill','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#12316;</div>
+            <div class="mh2-realm-card-name">ECHO REALM</div>
+            <div class="mh2-realm-card-genre">Chill / Atmospheric</div>
+          </div>
+          <div class="mh2-realm-card mh2-realm--beats" data-realm="beats" onclick="snxMH2FilterRealm('beats','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#127897;</div>
+            <div class="mh2-realm-card-name">BEAT FORGE</div>
+            <div class="mh2-realm-card-genre">Beats / Instrumentals</div>
+          </div>
+          <div class="mh2-realm-card mh2-realm--legend" data-realm="featured" onclick="snxMH2FilterRealm('featured','discover')" role="listitem" tabindex="0">
+            <div class="mh2-realm-card-bg"></div>
+            <div class="mh2-realm-card-icon">&#128058;</div>
+            <div class="mh2-realm-card-name">LEGEND REALM</div>
+            <div class="mh2-realm-card-genre">Featured Selections</div>
+          </div>
+        </div>
+
+        <!-- Realm results — populated by JS when a realm is tapped -->
+        <div id="snxMH2DiscoverResults"></div>
+
+      </div><!-- end discover tab -->
 
       <!-- ══════════════════════════════════════════
            LIBRARY TAB
@@ -11590,25 +11634,29 @@ body.arcade-fs-ios body::after { display:none !important; }
       <div id="snxMH2Tab_radio" style="display:none;" role="tabpanel" aria-label="Radio"></div>
 
       <!-- ══════════════════════════════════════════
-           QUEUE TAB
+           QUEUE — hidden panel, reached via player
       ══════════════════════════════════════════ -->
       <div id="snxMH2Tab_queue" style="display:none;" role="tabpanel" aria-label="Queue">
         <div class="mh2-queue-toolbar">
-          <span class="mh2-queue-label">ACTIVE QUEUE</span>
-          <button class="mh2-queue-clear-btn" onclick="snxMH2QueueClear()" aria-label="Clear queue">&#10005; Clear All</button>
+          <button class="mh2-queue-back-btn" onclick="snxMH2SwitchTab('home')" aria-label="Back to home">&#8592; Back</button>
+          <span class="mh2-queue-label">QUEUE</span>
+          <button class="mh2-queue-clear-btn" onclick="snxMH2QueueClear()" aria-label="Clear queue">Clear</button>
         </div>
         <div id="snxMH2QueueList"></div>
       </div>
 
       <!-- ══════════════════════════════════════════
-           PLAYING TAB (Nexus Player Full Screen)
+           PLAYING — hidden panel, reached via player bar
       ══════════════════════════════════════════ -->
-      <div id="snxMH2Tab_playing" style="display:none;" role="tabpanel" aria-label="Now Playing"></div>
+      <div id="snxMH2Tab_playing" style="display:none;" role="tabpanel" aria-label="Now Playing">
+        <button class="mh2-back-btn" onclick="snxMH2SwitchTab('home')" aria-label="Back">&#8592; Back</button>
+      </div>
 
       <!-- ══════════════════════════════════════════
-           UPLOAD TAB (founder only)
+           UPLOAD — hidden panel, founder only
       ══════════════════════════════════════════ -->
       <div id="snxMH2Tab_upload" style="display:none;" role="tabpanel" aria-label="Upload Music">
+        <button class="mh2-back-btn" onclick="snxMH2SwitchTab('home')" aria-label="Back">&#8592; Back</button>
         <div id="snxMH2UploadForm"></div>
       </div>
 

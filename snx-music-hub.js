@@ -66,7 +66,7 @@ var _s = {
   uploading:     false,
 
   /* nav */
-  activeTab:     'home',   // 'home'|'library'|'playlists'|'queue'|'playing'|'upload'|'radio'
+  activeTab:     'home',   // 'home'|'discover'|'library'|'playlists'|'radio'|'queue'|'playing'|'upload'
 
   /* unsubs */
   _unsubTracks:  null,
@@ -369,8 +369,12 @@ function _onTimeUpdate() {
 
 function _onMeta() {
   var a = _getAudio();
+  var dur = _fmt(a.duration || 0);
   var durEl = document.getElementById('snxMH2Duration');
-  if (durEl) durEl.textContent = _fmt(a.duration || 0);
+  if (durEl) durEl.textContent = dur;
+  // Also update hero player duration
+  var heroDur = document.getElementById('snxMH2HeroDuration');
+  if (heroDur) heroDur.textContent = dur;
 }
 
 function _onAudioError() {
@@ -393,13 +397,21 @@ function _updateProgress() {
   var dur = (isFinite(a.duration) && a.duration > 0) ? a.duration : 0;
   var pct = dur > 0 ? (cur / dur) * 100 : 0;
 
+  // Mini player bar (bottom)
   var fillEl = document.getElementById('snxMH2ProgressFill');
   var curEl  = document.getElementById('snxMH2CurrentTime');
   var durEl  = document.getElementById('snxMH2Duration');
-
   if (fillEl) fillEl.style.width = pct.toFixed(2) + '%';
   if (curEl)  curEl.textContent  = _fmt(cur);
   if (durEl && dur > 0) durEl.textContent = _fmt(dur);
+
+  // Hero player on Home tab
+  var heroFill = document.getElementById('snxMH2HeroFill');
+  var heroCur  = document.getElementById('snxMH2HeroCurrentTime');
+  var heroDur  = document.getElementById('snxMH2HeroDuration');
+  if (heroFill) heroFill.style.width = pct.toFixed(2) + '%';
+  if (heroCur)  heroCur.textContent  = _fmt(cur);
+  if (heroDur && dur > 0) heroDur.textContent = _fmt(dur);
 }
 
 /* ══════════════════════════════════════════════════════
@@ -475,16 +487,17 @@ function _renderPlayer() {
     '</div>';
 
   _updateHomeNPCard();
+  _updateHeroControls();
 }
 
 /* ══════════════════════════════════════════════════════
-   HOME: Update Now Playing card
+   HOME: Update Hero Now Playing card
    No new audio — UI only
 ══════════════════════════════════════════════════════ */
 function _updateHomeNPCard() {
   var npEmptyEl  = document.getElementById('snxMH2NPEmpty');
   var npActiveEl = document.getElementById('snxMH2NPActive');
-  var artGlow    = document.getElementById('snxMH2NPArtGlow');
+  var heroGlow   = document.getElementById('snxMH2HeroGlow');
   if (!npEmptyEl || !npActiveEl) return;
 
   var track = _s.queue[_s.queueIndex] || null;
@@ -502,7 +515,7 @@ function _updateHomeNPCard() {
       if (npTitle)  npTitle.textContent  = 'SHADOW NEXUS RADIO';
       if (npArtist) npArtist.textContent = '\uD83D\uDD34 ON AIR';
       if (npCover)  npCover.innerHTML    = '<div class="mh2-art-fallback"><span class="mh2-art-fallback-icon">&#128251;</span></div>';
-      if (artGlow)  artGlow.style.backgroundImage = 'none';
+      if (heroGlow) heroGlow.style.backgroundImage = 'none';
     } else if (track) {
       if (npTitle)  npTitle.textContent  = track.title  || 'Now Playing';
       if (npArtist) npArtist.textContent = track.artist || '';
@@ -513,16 +526,41 @@ function _updateHomeNPCard() {
         } else {
           npCover.innerHTML = '<div class="mh2-art-fallback"><span class="mh2-art-fallback-icon">&#9835;</span></div>';
         }
-        if (artGlow) artGlow.style.backgroundImage = art ? 'url(' + art + ')' : 'none';
+        if (heroGlow) heroGlow.style.backgroundImage = art ? 'url(' + _esc(art) + ')' : 'none';
       }
     }
+    // Sync hero button states
+    _updateHeroControls();
     // Update home radio dot
     _updateHomeDot();
   } else {
     npEmptyEl.style.display  = '';
     npActiveEl.style.display = 'none';
-    if (artGlow) artGlow.style.backgroundImage = 'none';
+    if (heroGlow) heroGlow.style.backgroundImage = 'none';
+    _updateHeroControls();
   }
+}
+
+/* Sync Hero Player button visual states (play/shuffle/repeat/mute)
+   — no new audio, UI only */
+function _updateHeroControls() {
+  var playBtn    = document.getElementById('snxMH2HeroPlayBtn');
+  var shuffleBtn = document.getElementById('snxMH2HeroShuffleBtn');
+  var repeatBtn  = document.getElementById('snxMH2HeroRepeatBtn');
+  var muteBtn    = document.getElementById('snxMH2HeroMuteBtn');
+  var eqEl       = document.getElementById('snxMH2HeroEQ');
+
+  if (playBtn) {
+    playBtn.innerHTML   = _s.playing ? '&#9646;&#9646;' : '&#9654;';
+    playBtn.setAttribute('aria-label', _s.playing ? 'Pause' : 'Play');
+  }
+  if (shuffleBtn) shuffleBtn.classList.toggle('active', _s.shuffle);
+  if (repeatBtn)  repeatBtn.classList.toggle('active',  _s.repeatOne);
+  if (muteBtn) {
+    muteBtn.innerHTML = _s.muted ? '&#128263;' : '&#128266;';
+    muteBtn.setAttribute('aria-label', _s.muted ? 'Unmute' : 'Mute');
+  }
+  if (eqEl) eqEl.style.display = _s.playing ? '' : 'none';
 }
 
 function _updateHomeDot() {
@@ -558,45 +596,52 @@ function _renderPlayingScreen() {
   var isFounder = _isFounder();
 
   var artHTML = art
-    ? '<img src="' + _esc(art) + '" alt="cover" class="mh2-ps-cover" onerror="this.parentElement.querySelector(\'.mh2-ps-art-glow\').style.display=\'none\';this.style.display=\'none\';">'
+    ? '<img src="' + _esc(art) + '" alt="cover" class="mh2-ps-cover" onerror="this.style.display=\'none\';">'
     : '';
   var glowStyle = art ? 'background-image:url(' + _esc(art) + ');' : 'display:none;';
 
-  el.innerHTML =
-    '<div class="mh2-playing-screen">' +
-      '<div class="mh2-ps-art">' +
-        '<div class="mh2-ps-art-glow" style="' + glowStyle + '"></div>' +
-        (artHTML || '<div class="mh2-art-fallback" style="width:100%;height:100%;position:relative;z-index:1;"><span class="mh2-art-fallback-icon" style="font-size:64px;">&#9835;</span></div>') +
+  // Preserve the Back button that's hard-coded in HTML, append content after it
+  var backBtn = el.querySelector('.mh2-back-btn');
+  var screenDiv = el.querySelector('.mh2-playing-screen');
+  if (!screenDiv) {
+    screenDiv = document.createElement('div');
+    screenDiv.className = 'mh2-playing-screen';
+    el.appendChild(screenDiv);
+  }
+
+  screenDiv.innerHTML =
+    '<div class="mh2-ps-art">' +
+      '<div class="mh2-ps-art-glow" style="' + glowStyle + '"></div>' +
+      (artHTML || '<div class="mh2-art-fallback" style="width:100%;height:100%;position:relative;z-index:1;"><span class="mh2-art-fallback-icon" style="font-size:64px;">&#9835;</span></div>') +
+    '</div>' +
+    '<div class="mh2-ps-meta">' +
+      '<div class="mh2-ps-title">' + _esc(title) + '</div>' +
+      '<div class="mh2-ps-artist">' + _esc(artist) + (album ? ' &mdash; ' + _esc(album) : '') + '</div>' +
+      (track && isFounder ? '<div class="mh2-ps-badge">' + _providerBadge(track) + '</div>' : '') +
+    '</div>' +
+    '<div class="mh2-ps-progress">' +
+      '<span id="snxMH2PSCurrentTime">0:00</span>' +
+      '<div class="mh2-ps-seek" onclick="snxMH2Seek(event,this)" role="progressbar" aria-label="Seek">' +
+        '<div class="mh2-ps-seek-fill" id="snxMH2PSFill"></div>' +
       '</div>' +
-      '<div class="mh2-ps-meta">' +
-        '<div class="mh2-ps-title">' + _esc(title) + '</div>' +
-        '<div class="mh2-ps-artist">' + _esc(artist) + (album ? ' &mdash; ' + _esc(album) : '') + '</div>' +
-        (track && isFounder ? '<div class="mh2-ps-badge">' + _providerBadge(track) + '</div>' : '') +
-      '</div>' +
-      '<div class="mh2-ps-progress">' +
-        '<span id="snxMH2PSCurrentTime">0:00</span>' +
-        '<div class="mh2-ps-seek" onclick="snxMH2Seek(event,this)" role="progressbar" aria-label="Seek">' +
-          '<div class="mh2-ps-seek-fill" id="snxMH2PSFill"></div>' +
-        '</div>' +
-        '<span id="snxMH2PSDuration">0:00</span>' +
-      '</div>' +
-      '<div class="mh2-ps-controls">' +
-        '<button class="mh2-ps-btn' + (_s.shuffle ? ' active' : '') + '" onclick="snxMH2ToggleShuffle()" aria-label="Shuffle">&#128256;</button>' +
-        '<button class="mh2-ps-btn" onclick="snxMH2Prev()" aria-label="Previous">&#9198;</button>' +
-        '<button class="mh2-ps-btn mh2-ps-play" onclick="snxMH2PlayPause()" aria-label="' + (_s.playing ? 'Pause' : 'Play') + '">' +
-          (_s.playing ? '&#9646;&#9646;' : '&#9654;') +
-        '</button>' +
-        '<button class="mh2-ps-btn" onclick="snxMH2Next()" aria-label="Next">&#9197;</button>' +
-        '<button class="mh2-ps-btn' + (_s.repeatOne ? ' active' : '') + '" onclick="snxMH2ToggleRepeat()" aria-label="Repeat">&#9854;</button>' +
-      '</div>' +
-      '<div class="mh2-ps-vol-row">' +
-        '<span aria-hidden="true">&#128263;</span>' +
-        '<input type="range" min="0" max="1" step="0.02" value="' + _s.volume + '" class="mh2-vol-slider" oninput="snxMH2SetVolume(this.value)" aria-label="Volume">' +
-        '<span aria-hidden="true">&#128266;</span>' +
-      '</div>' +
-      '<div class="mh2-ps-queue-label">UP NEXT</div>' +
-      '<div id="snxMH2PSQueue">' + _buildQueueHTML(true) + '</div>' +
-    '</div>';
+      '<span id="snxMH2PSDuration">0:00</span>' +
+    '</div>' +
+    '<div class="mh2-ps-controls">' +
+      '<button class="mh2-ps-btn' + (_s.shuffle ? ' active' : '') + '" onclick="snxMH2ToggleShuffle()" aria-label="Shuffle">&#128256;</button>' +
+      '<button class="mh2-ps-btn" onclick="snxMH2Prev()" aria-label="Previous">&#9198;</button>' +
+      '<button class="mh2-ps-btn mh2-ps-play" onclick="snxMH2PlayPause()" aria-label="' + (_s.playing ? 'Pause' : 'Play') + '">' +
+        (_s.playing ? '&#9646;&#9646;' : '&#9654;') +
+      '</button>' +
+      '<button class="mh2-ps-btn" onclick="snxMH2Next()" aria-label="Next">&#9197;</button>' +
+      '<button class="mh2-ps-btn' + (_s.repeatOne ? ' active' : '') + '" onclick="snxMH2ToggleRepeat()" aria-label="Repeat">&#9854;</button>' +
+    '</div>' +
+    '<div class="mh2-ps-vol-row">' +
+      '<span aria-hidden="true">&#128263;</span>' +
+      '<input type="range" min="0" max="1" step="0.02" value="' + _s.volume + '" class="mh2-vol-slider" oninput="snxMH2SetVolume(this.value)" aria-label="Volume">' +
+      '<span aria-hidden="true">&#128266;</span>' +
+    '</div>' +
+    '<div class="mh2-ps-queue-label">UP NEXT</div>' +
+    '<div id="snxMH2PSQueue">' + _buildQueueHTML(true) + '</div>';
 
   _updatePlayingScreenProgress();
 }
@@ -866,26 +911,101 @@ function _renderHomePlaylists() {
 function _renderHome() {
   var isFounder = _isFounder();
 
-  // Upload tab visibility
-  var uploadTabBtn = document.getElementById('snxMH2TabBtn_upload');
-  if (uploadTabBtn) uploadTabBtn.style.display = isFounder ? '' : 'none';
-
-  // Create playlist button
+  // Create playlist button (playlists tab)
   var plCreateBtn = document.getElementById('snxMH2CreatePlBtn');
   if (plCreateBtn) plCreateBtn.style.display = isFounder ? '' : 'none';
 
-  // Founder management section
+  // Founder management section (home only)
   var mgmtSection = document.getElementById('snxMH2MgmtSection');
   if (mgmtSection) mgmtSection.style.display = isFounder ? '' : 'none';
 
-  // Update NP card
+  // Update Hero NP card and radio dot
   _updateHomeNPCard();
   _updateHomeDot();
+  _updateHeroControls();
 
-  // Render content sections
+  // Render home content sections
   _loadFeatured();
   _renderHomePlaylists();
   _renderRecent();
+}
+
+/* ══════════════════════════════════════════════════════
+   RENDER: DISCOVER TAB
+   Shows Music Realms grid + filtered track results.
+   No new audio — filtering existing catalog.
+══════════════════════════════════════════════════════ */
+function _renderDiscover() {
+  // Activate the 'all' realm card by default on first open
+  var cards = document.querySelectorAll('#snxMH2RealmsScroll .mh2-realm-card');
+  var anyActive = false;
+  cards.forEach(function(c){ if (c.classList.contains('active')) anyActive = true; });
+  if (!anyActive && cards.length) cards[0].classList.add('active');
+
+  // Populate results area with all tracks (same as 'all' realm)
+  _renderDiscoverResults('all');
+}
+
+function _renderDiscoverResults(realm) {
+  var el = document.getElementById('snxMH2DiscoverResults');
+  if (!el) return;
+
+  var genreMap = {
+    'rock':     ['rock','metal','punk','hardcore','grunge','alternative'],
+    'dark':     ['dark','emotional','gothic','ambient','atmospheric','emo','sad'],
+    'hiphop':   ['hip','hop','rap','trap','r&b','rnb','urban'],
+    'chill':    ['chill','lofi','lo-fi','ambient','acoustic','calm','relax'],
+    'beats':    ['beats','instrumental','electronic','edm','dance','house','techno'],
+    'featured': null   // handled separately
+  };
+
+  var tracks;
+  if (realm === 'all') {
+    tracks = _s.tracks.slice(0, 30);
+  } else if (realm === 'featured') {
+    var featIds = _s.featured.map(function(f){ return f.id; });
+    tracks = _s.tracks.filter(function(t){ return featIds.indexOf(t.id) !== -1; }).slice(0, 20);
+    if (!tracks.length) tracks = _s.featured.slice(0, 10).map(function(f){
+      return _s.tracks.find(function(t){ return t.id === f.id || t.trackId === f.id; }) || null;
+    }).filter(Boolean);
+  } else {
+    var keywords = genreMap[realm] || [realm];
+    tracks = _s.tracks.filter(function(t) {
+      var g = (t.genre || '').toLowerCase();
+      return keywords.some(function(k){ return g.indexOf(k) !== -1; });
+    }).slice(0, 20);
+  }
+
+  if (!tracks.length) {
+    el.innerHTML = '<div class="mh2-empty" style="padding:24px 0;">' +
+      '<span class="mh2-empty-icon">&#127925;</span>' +
+      (realm === 'all' ? 'No music in the library yet.' : 'No tracks in this realm yet.') +
+      '</div>';
+    return;
+  }
+
+  var curId = _s.queue[_s.queueIndex] && _s.queue[_s.queueIndex].id;
+  el.innerHTML = '<div class="mh2-discover-track-label">TRACKS IN THIS REALM</div>' +
+    tracks.map(function(t) {
+      var art = _artworkUrl(t);
+      var isCurrent = t.id === curId && _s.playing;
+      var artInner = art
+        ? '<img src="' + _esc(art) + '" alt="" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML=\'<div class=&quot;mh2-art-fallback&quot; style=&quot;width:100%;height:100%;&quot;><span class=&quot;mh2-art-fallback-icon&quot; style=&quot;font-size:13px;&quot;>&#9835;</span></div>\'">'
+        : '<div class="mh2-art-fallback" style="width:100%;height:100%;"><span class="mh2-art-fallback-icon" style="font-size:13px;">&#9835;</span></div>';
+      return '<div class="mh2-track-item' + (isCurrent ? ' mh2-track-playing' : '') + '" onclick="snxMH2PlayFromLibrary(\'' + _esc(t.id) + '\')">' +
+        '<div class="mh2-track-art mh2-track-art-sm">' +
+          artInner +
+          '<div class="mh2-track-play-overlay">' + (isCurrent ? '&#9646;&#9646;' : '&#9654;') + '</div>' +
+        '</div>' +
+        '<div class="mh2-track-info">' +
+          '<div class="mh2-track-title">' + _esc(t.title || 'Untitled') +
+            (isCurrent ? '<span class="mh2-eq-inline" aria-hidden="true"><span></span><span></span><span></span></span>' : '') +
+          '</div>' +
+          '<div class="mh2-track-meta-line">' + _esc(t.artist || '') + (t.duration ? ' &bull; ' + _fmt(t.duration) : '') + '</div>' +
+        '</div>' +
+        '<button class="mh2-act-btn" onclick="event.stopPropagation();snxMH2ShowTrackMenu(\'' + _esc(t.id) + '\')" aria-label="More options">&#8942;</button>' +
+      '</div>';
+    }).join('');
 }
 
 /* ══════════════════════════════════════════════════════
@@ -1004,25 +1124,34 @@ function _renderStorageHealth() {
    TAB NAVIGATION
 ══════════════════════════════════════════════════════ */
 function _switchTab(tab) {
-  var tabs = ['home','library','playlists','queue','playing','upload','radio'];
-  tabs.forEach(function(t) {
+  // All possible content panels (nav tabs + hidden panels)
+  var allPanels = ['home','discover','library','playlists','radio','queue','playing','upload'];
+  // Nav bar buttons (only the 5 visible nav tabs)
+  var navTabs   = ['home','discover','library','playlists','radio'];
+
+  allPanels.forEach(function(t) {
     var contentEl = document.getElementById('snxMH2Tab_' + t);
-    var btnEl     = document.getElementById('snxMH2TabBtn_' + t);
     if (contentEl) contentEl.style.display = (t === tab) ? '' : 'none';
+  });
+
+  navTabs.forEach(function(t) {
+    var btnEl = document.getElementById('snxMH2TabBtn_' + t);
     if (btnEl) {
       btnEl.classList.toggle('active', t === tab);
       btnEl.setAttribute('aria-selected', t === tab ? 'true' : 'false');
     }
   });
+
   _s.activeTab = tab;
 
   if (tab === 'home')      _renderHome();
+  if (tab === 'discover')  _renderDiscover();
   if (tab === 'library')   _renderLibrary();
   if (tab === 'playlists') _renderPlaylists();
+  if (tab === 'radio')     _renderRadio();
   if (tab === 'queue')     _renderQueue();
   if (tab === 'playing')   _renderPlayingScreen();
   if (tab === 'upload')    { if (_isFounder()) _renderUploadForm(); }
-  if (tab === 'radio')     _renderRadio();
 }
 
 /* ══════════════════════════════════════════════════════
@@ -1506,14 +1635,26 @@ window.snxMH2AddTrackToPlaylist = function(plId, trackId) {
 /* Music Realms filter: highlights selected realm pill,
    filters Recently Added/Library by genre mapping.
    Does NOT duplicate audio or create new tracks. */
-window.snxMH2FilterRealm = function(realm) {
-  // Update pill UI
-  var pills = document.querySelectorAll('.mh2-realm-pill');
-  pills.forEach(function(p) {
-    p.classList.toggle('active', p.getAttribute('data-realm') === realm);
+window.snxMH2FilterRealm = function(realm, context) {
+  // Update realm card active state (Discover tab uses mh2-realm-card, Home used mh2-realm-pill)
+  var cardSel = context === 'discover' ? '#snxMH2RealmsScroll .mh2-realm-card' : '.mh2-realm-pill';
+  var cards = document.querySelectorAll(cardSel);
+  cards.forEach(function(c) {
+    c.classList.toggle('active', c.getAttribute('data-realm') === realm);
   });
 
-  // Map realm → genre keywords for library filter
+  if (context === 'discover') {
+    // Populate the Discover results panel
+    _renderDiscoverResults(realm);
+    return;
+  }
+
+  // Home context: filter the Recently Added list
+  if (realm === 'all') {
+    _renderRecent();
+    return;
+  }
+
   var genreMap = {
     'rock':   ['rock','metal','punk','hardcore','grunge','alternative'],
     'dark':   ['dark','emotional','gothic','ambient','atmospheric','emo','sad'],
@@ -1521,12 +1662,6 @@ window.snxMH2FilterRealm = function(realm) {
     'chill':  ['chill','lofi','lo-fi','ambient','acoustic','calm','relax'],
     'beats':  ['beats','instrumental','electronic','edm','dance','house','techno']
   };
-
-  if (realm === 'all') {
-    // Show all recently added
-    _renderRecent();
-    return;
-  }
 
   var keywords = genreMap[realm] || [realm];
   var el = document.getElementById('snxMH2RecentList');
@@ -1616,11 +1751,15 @@ window.snxMH2ToggleMute = function() {
   _renderPlayer();
 };
 window.snxMH2ToggleShuffle = function() {
-  _s.shuffle = !_s.shuffle; _renderPlayer();
+  _s.shuffle = !_s.shuffle;
+  _renderPlayer();
+  _updateHeroControls();
   if (_s.activeTab === 'playing') _renderPlayingScreen();
 };
 window.snxMH2ToggleRepeat  = function() {
-  _s.repeatOne = !_s.repeatOne; _renderPlayer();
+  _s.repeatOne = !_s.repeatOne;
+  _renderPlayer();
+  _updateHeroControls();
   if (_s.activeTab === 'playing') _renderPlayingScreen();
 };
 window.snxMH2SwitchTab = function(tab) { _switchTab(tab); };
@@ -1654,7 +1793,7 @@ window.snxMH2Init = function() {
       });
     }
 
-    // Connect timeupdate to playing screen when visible
+    // Connect timeupdate to playing screen + discover results when visible
     _getAudio().addEventListener('timeupdate', function() {
       if (_s.activeTab === 'playing') _updatePlayingScreenProgress();
     });
