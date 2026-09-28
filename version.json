@@ -1,9 +1,9 @@
 {
-  "buildId": "SNS-2026-TV-STABILITY-001",
-  "swVersion": "v74",
-  "deployedAt": "2026-10-07T00:00:00Z",
+  "buildId": "SNX-LIVE-RECOVERY-2026-09-28",
+  "swVersion": "v76",
+  "deployedAt": "2026-09-28T12:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.1",
   "nexusVersion": "1.1.0",
-  "note": "TV-STABILITY-001: 24-Hour TV startup stability fix — unified build version, network-first TV JS, canonical snxOpen24HourTV() controller, auth-ready guard, double-init protection, portal transition timing fix, SW v74 to flush stale TV engine cache."
+  "note": "SNX-LIVE-RECOVERY-2026-09-28: Founder live.html gate bypass (async email check + sessionStorage reload), SW v76 cache bust. Firebase horr-a08f4 confirmed. All Live startup checkpoints, RTDB/Firestore rules, WebRTC/signaling, chat, likes, viewer count, guest boxes intact."
 }

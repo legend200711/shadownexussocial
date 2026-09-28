@@ -15,15 +15,42 @@
 <body>
 
 <!-- ── Feature gate: checked before any Firebase code runs ── -->
+<!--
+  GATE LOGIC (in priority order):
+  1. Founder email (christijerina46@gmail.com) always bypasses — checked after
+     Firebase Auth resolves so we never block the Founder on a fresh load.
+  2. localStorage.founderFeatureControls.liveEnabled === true → allow (set by
+     index.html after it reads siteSettings/config from Firestore).
+  3. Otherwise → show "temporarily disabled" page to regular users.
+
+  The async Founder bypass is implemented below: the synchronous gate only
+  blocks non-Founder sessions.  After Firebase Auth resolves, if the user is
+  the Founder the page reloads itself without the gate (sets a sessionStorage
+  bypass flag first so it can't loop).
+-->
 <script>
 (function() {
+  // ── Founder bypass: if sessionStorage flag is set, skip the gate entirely ──
+  // This is set by the async Firebase check below on first load when the Founder
+  // navigates directly to live.html without going through index.html first.
+  try {
+    if (sessionStorage.getItem('_snxLiveFounderBypass') === '1') {
+      sessionStorage.removeItem('_snxLiveFounderBypass');
+      return; // gate cleared — allow normal page load
+    }
+  } catch(_) {}
+
   try {
     var ctrl = JSON.parse(localStorage.getItem('founderFeatureControls') || '{}');
     // liveEnabled must be explicitly true — defaults OFF until Founder enables
     var enabled = ctrl.liveEnabled === true;
     if (!enabled) {
-      document.documentElement.style.background = '#0B1F3A';
-      document.write(
+      // ── Async Founder bypass: load Firebase Auth and check email ──
+      // If the signed-in user is christijerina46@gmail.com, set the bypass flag
+      // and reload so the Founder is never locked out regardless of feature flag state.
+      var _gateContainer = document.createElement('div');
+      _gateContainer.id = '_snxLiveGate';
+      _gateContainer.innerHTML =
         '<style>*{margin:0;padding:0;box-sizing:border-box;}</style>' +
         '<div style="min-height:100vh;background:#0B1F3A;display:flex;flex-direction:column;' +
         'align-items:center;justify-content:center;padding:32px 24px;text-align:center;font-family:system-ui,sans-serif;">' +
@@ -34,9 +61,54 @@
         '<a href="index.html" style="display:inline-block;padding:10px 28px;background:rgba(0,174,239,0.15);' +
         'border:1px solid rgba(0,174,239,0.5);color:#00aeef;border-radius:24px;text-decoration:none;' +
         'font-size:14px;font-weight:600;">← Back to Shadow Nexus</a>' +
-        '</div>'
-      );
-      document.addEventListener('DOMContentLoaded', function() { document.body.innerHTML = document.body.innerHTML; });
+        '</div>';
+
+      // Render the disabled page immediately so non-Founder users see it right away.
+      document.documentElement.style.background = '#0B1F3A';
+      document.addEventListener('DOMContentLoaded', function() {
+        document.body.innerHTML = '';
+        document.body.appendChild(_gateContainer);
+
+        // Asynchronously check if the signed-in user is the Founder.
+        // Uses dynamic import so no Firebase SDK is loaded until this point.
+        import('https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js').then(function(appMod) {
+          var _cfg = {
+            apiKey:            'AIzaSyByZRmp6R9HY17T2_WdJUFWeeaLNOP6y2Y',
+            authDomain:        'horr-a08f4.firebaseapp.com',
+            databaseURL:       'https://horr-a08f4-default-rtdb.firebaseio.com',
+            projectId:         'horr-a08f4',
+            storageBucket:     'horr-a08f4.firebasestorage.app',
+            messagingSenderId: '933810617818',
+            appId:             '1:933810617818:web:efb24f123337dd987c14e3',
+          };
+          var _app = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(_cfg);
+          return import('https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js').then(function(authMod) {
+            var _auth = authMod.getAuth(_app);
+            return authMod.setPersistence(_auth, authMod.browserLocalPersistence).then(function() {
+              return new Promise(function(resolve) {
+                var _unsubscribe = authMod.onAuthStateChanged(_auth, function(user) {
+                  _unsubscribe();
+                  resolve(user);
+                });
+                // 6-second safety timeout in case Auth never responds
+                setTimeout(function() { resolve(null); }, 6000);
+              });
+            }).then(function(user) {
+              if (user && user.email === 'christijerina46@gmail.com') {
+                // Founder confirmed — set bypass flag and reload
+                console.log('[SNX-LIVE-GATE] Founder detected — bypassing feature gate');
+                try { sessionStorage.setItem('_snxLiveFounderBypass', '1'); } catch(_) {}
+                window.location.reload();
+              } else {
+                console.log('[SNX-LIVE-GATE] Live disabled — user:', user ? user.email : '(not signed in)');
+              }
+            });
+          });
+        }).catch(function(err) {
+          console.warn('[SNX-LIVE-GATE] Async Founder check failed:', err.message);
+        });
+      });
+
       throw new Error('live_disabled');
     }
   } catch(e) {

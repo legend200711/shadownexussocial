@@ -10,11 +10,11 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNS-2026-TV-STABILITY-001
+ * Build: SNX-LIVE-RECOVERY-2026-09-28
  */
 
-const CACHE_VERSION = 'v74';
-const BUILD_ID      = 'SNS-2026-TV-STABILITY-001';
+const CACHE_VERSION = 'v76';
+const BUILD_ID      = 'SNX-LIVE-RECOVERY-2026-09-28';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
