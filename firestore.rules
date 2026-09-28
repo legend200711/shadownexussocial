@@ -289,10 +289,16 @@ service cloud.firestore {
     }
 
     // ── Site settings ─────────────────────────────────────────────────────────
+    //
+    // Read:  public (maintenance mode banner, radio config, feature flags are
+    //        read by all users including guests on every page load).
+    // Write: Founder only, enforced via isFounderEmail() (Firebase Auth token
+    //        email claim — cannot be spoofed and does not race against the
+    //        async Firestore users/{uid} role-field write that isFounder() needs).
 
     match /siteSettings/{docId} {
       allow read: if true;
-      allow write: if isFounder();
+      allow write: if isFounderEmail();
     }
 
     // ── NEXUS GLOBAL THEME ENGINE ─────────────────────────────────────────────
@@ -777,11 +783,38 @@ service cloud.firestore {
     //
     //   /music/{musicId}
     //     Public reads (no auth required).
-    //     Any signed-in user may create, update, or delete entries.
+    //     Only the Founder may write (the official Music Hub catalogue is
+    //     managed exclusively by the Founder — no regular user writes allowed).
 
     match /music/{musicId} {
       allow read: if true;
-      allow create, update, delete: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Music Hub — config & featured tracks ───────────────────────────────────
+    //
+    //   /musicHub/{docId}                    — top-level config documents
+    //   /musicHub/config/featured/{trackId}  — founder-curated featured tracks
+    //   /musicHub/config/radioRotation/{id}  — radio rotation management
+    //   /musicHub/config/recentlyAdded/{id}  — recently added metadata (optional)
+    //
+    // Read:   any signed-in user (or public for featured tracks).
+    // Write:  Founder only — enforced via isFounderEmail() (token-based, cannot
+    //         be spoofed by a Firestore role field).
+
+    match /musicHub/{docId} {
+      allow read: if true;
+      allow write: if isFounderEmail();
+
+      match /{subcollection}/{subDocId} {
+        allow read: if true;
+        allow write: if isFounderEmail();
+
+        match /{deepCollection}/{deepDocId} {
+          allow read: if true;
+          allow write: if isFounderEmail();
+        }
+      }
     }
 
     // ── Profile Playlists ─────────────────────────────────────────────────────

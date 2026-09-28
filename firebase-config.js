@@ -1,14 +1,23 @@
 /**
  * firebase-config.js
- * Shadow Nexus — shared Firebase configuration.
+ * Shadow Nexus Social — canonical Firebase configuration reference.
  *
- * Import this module from any page that needs Firebase instead of
- * re-defining the config inline.  live.js keeps its own inline config
- * for backward compatibility; this file is the canonical reference for
- * new pages (e.g. live-hub.html).
+ * Firebase project: horr-a08f4  (SNS — Firestore, Auth, RTDB, Storage, Messaging)
+ *
+ * This module provides a single canonical Firebase app instance.
+ * All pages must reuse the existing [DEFAULT] app to share the same Auth
+ * session (browserLocalPersistence). Creating a second [DEFAULT] app for
+ * the same project resets the Auth session and causes cold-start logout.
+ *
+ * STORAGE:  this file exposes the app instance only.
+ *           Storage rules and buckets are NOT touched here.
  *
  * Usage (ES module):
  *   import { app, auth, db, liveDB } from './firebase-config.js';
+ *
+ * Pages that already initialise their own Firebase (index.html, live.js,
+ * live-hub.html, live-room.html, channel.html) use the same getApps() guard
+ * and will automatically share this same app instance — no conflict.
  */
 
 import { initializeApp, getApps, getApp }

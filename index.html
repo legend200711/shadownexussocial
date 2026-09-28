@@ -52,7 +52,7 @@
 <!-- ── Mobile responsive design layer ── -->
 <link rel="stylesheet" href="mobile.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Studio — Music Library / Upload / Playlists / Queue ── -->
-<link rel="stylesheet" href="studio.css?v=SNS-2026-ALBUM-PRIVACY-001">
+<link rel="stylesheet" href="studio.css?v=SNS-2026-MH-FOUNDER-002">
 <!-- ── Nexus Global Theme Engine ── -->
 <link rel="stylesheet" href="theme-engine.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Cinematic Welcome Experience ── -->
@@ -6939,6 +6939,12 @@ body.arcade-fs-ios body::after { display:none !important; }
                 <button id="btnForgotPassword" style="background:none; border:none; color:#3a6a9a; font-size:12px; font-weight:600; cursor:pointer; padding:4px 8px; border-radius:4px; transition:color 0.15s;">🔑 Forgot Password?</button>
             </div>
 
+            <!-- ── CONTINUE AS GUEST ── -->
+            <div style="margin-top:18px; padding-top:18px; border-top:1px solid rgba(0,140,255,0.12);">
+                <button id="btnContinueAsGuest" onclick="snxGuestBegin()" style="width:100%; border-radius:10px; padding:11px; background:linear-gradient(135deg,rgba(0,80,40,0.35),rgba(0,40,20,0.45)); border:1px solid rgba(57,255,20,0.45); color:#39FF14; font-size:14px; font-weight:700; box-shadow:0 0 14px rgba(57,255,20,0.18); letter-spacing:0.3px; transition:all 0.18s;">👁 CONTINUE AS GUEST</button>
+                <p style="color:#3a6a4a; font-size:11px; margin:8px 0 0; text-align:center;">Explore Shadow Nexus before creating an account.</p>
+            </div>
+
             <p style="color:#3a2a5a; font-size:11px; margin-top:14px;">By joining you agree to be legendary and judgment-free 🌑🔥</p>
         </div>
     </div>
@@ -10999,7 +11005,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 <div class="page" id="studioPage">
 
  <!-- ── Music Hub page header ── -->
- <header class="snx-mh-header" style="position:sticky;top:0;z-index:100;">
+ <header class="snx-mh-header" id="snxMHHeader">
    <div class="snx-mh-header-inner">
      <div class="snx-mh-logo">&#9835;</div>
      <div>
@@ -11017,18 +11023,13 @@ body.arcade-fs-ios body::after { display:none !important; }
  </header>
 
   <!-- ── Music Hub tab bar ── -->
-  <nav id="snxStudioTabBar" style="
-    display:flex;align-items:center;justify-content:space-around;
-    background:linear-gradient(180deg,#071428 0%,#050f1e 100%);
-    border-bottom:1px solid rgba(0,174,239,0.22);
-    padding:0;position:sticky;top:57px;z-index:99;overflow-x:auto;
-    scrollbar-width:none;-webkit-overflow-scrolling:touch;">
-    <button class="snx-studio-tab active" id="snxStudioTabBtn_home"      onclick="snxStudioTabSwitch('home',this)"      style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid #00AEEF;color:#00AEEF;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127968;<br>Home</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_music"     onclick="snxStudioTabSwitch('music',this)"     style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127925;<br>Library</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_upload"   onclick="snxStudioTabSwitch('upload',this)"   style="display:none;flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#11014;<br>Upload</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_playlists" onclick="snxStudioTabSwitch('playlists',this)" style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#128203;<br>Playlists</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_queue"    onclick="snxStudioTabSwitch('queue',this)"    style="display:none;flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#127926;<br>Queue</button>
-    <button class="snx-studio-tab"         id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)" style="flex:1;min-width:52px;padding:10px 4px 8px;background:none;border:none;border-bottom:2px solid transparent;color:#5a80a8;font-size:10px;font-weight:700;text-align:center;cursor:pointer;white-space:nowrap;">&#9654;&#65039;<br>Playing</button>
+  <nav id="snxStudioTabBar">
+    <button class="snx-studio-tab active" id="snxStudioTabBtn_home"       onclick="snxStudioTabSwitch('home',this)">&#127968;<br>Home</button>
+    <button class="snx-studio-tab"        id="snxStudioTabBtn_music"      onclick="snxStudioTabSwitch('music',this)">&#127925;<br>Library</button>
+    <button class="snx-studio-tab"        id="snxStudioTabBtn_upload"     onclick="snxStudioTabSwitch('upload',this)"    style="display:none;">&#11014;<br>Upload</button>
+    <button class="snx-studio-tab"        id="snxStudioTabBtn_playlists"  onclick="snxStudioTabSwitch('playlists',this)">&#128203;<br>Playlists</button>
+    <button class="snx-studio-tab"        id="snxStudioTabBtn_queue"      onclick="snxStudioTabSwitch('queue',this)"     style="display:none;">&#127926;<br>Queue</button>
+    <button class="snx-studio-tab"        id="snxStudioTabBtn_nowplaying" onclick="snxStudioTabSwitch('nowplaying',this)">&#9654;&#65039;<br>Playing</button>
   </nav>
 
   <!-- ══════════════════════════════════════════════════════
@@ -11042,35 +11043,49 @@ body.arcade-fs-ios body::after { display:none !important; }
 
       <div class="snx-mh-np-label">NOW PLAYING</div>
 
-      <div class="snx-mh-np-body">
-        <!-- Artwork -->
-        <div class="snx-mh-np-artwork" id="snxMHArtwork">
-          <span class="snx-mh-np-artwork-icon">&#127925;</span>
+      <!-- Empty state — shown when nothing is playing -->
+      <div class="snx-mh-np-empty" id="snxMHNPEmpty">
+        <div class="snx-mh-np-empty-icon">&#127925;</div>
+        <div class="snx-mh-np-empty-title">Nothing Playing</div>
+        <div class="snx-mh-np-empty-sub">Choose something from your Library or listen to Shadow Nexus Radio.</div>
+        <div class="snx-mh-np-empty-btns">
+          <button class="snx-mh-np-empty-btn" onclick="snxStudioTabSwitch('music',document.getElementById('snxStudioTabBtn_music'))">&#127925; OPEN LIBRARY</button>
+          <button class="snx-mh-np-empty-btn" onclick="snxMHRadioToggle()">&#128251; LISTEN LIVE</button>
         </div>
-        <!-- Info -->
-        <div class="snx-mh-np-info">
-          <div class="snx-mh-np-title" id="snxMHNPTitle">Nothing playing</div>
-          <div class="snx-mh-np-artist" id="snxMHNPArtist">Open Library to start listening</div>
-          <!-- Mini EQ bars when playing -->
-          <div class="snx-mh-np-eq-row" id="snxMHNPEQRow" style="display:none;" aria-hidden="true">
-            <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
-            <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
-            <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+      </div>
+
+      <!-- Active playback state — hidden when nothing is playing -->
+      <div id="snxMHNPActiveState" style="display:none;">
+        <div class="snx-mh-np-body">
+          <!-- Artwork -->
+          <div class="snx-mh-np-artwork" id="snxMHArtwork">
+            <span class="snx-mh-np-artwork-icon">&#127925;</span>
+          </div>
+          <!-- Info -->
+          <div class="snx-mh-np-info">
+            <div class="snx-mh-np-title" id="snxMHNPTitle">Nothing playing</div>
+            <div class="snx-mh-np-artist" id="snxMHNPArtist"></div>
+            <!-- Mini EQ bars when playing -->
+            <div class="snx-mh-np-eq-row" id="snxMHNPEQRow" style="display:none;" aria-hidden="true">
+              <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+              <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+              <span class="snx-mh-eq-bar snx-mh-eq-sm"></span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Progress bar -->
-      <div class="snx-mh-np-progress-wrap">
-        <span class="snx-mh-np-time" id="snxMHNPCurrentTime">—</span>
-        <div class="snx-mh-np-progress-track">
-          <div class="snx-mh-np-progress-fill" id="snxMHNPFill" style="width:0%"></div>
+        <!-- Progress bar -->
+        <div class="snx-mh-np-progress-wrap">
+          <span class="snx-mh-np-time" id="snxMHNPCurrentTime">0:00</span>
+          <div class="snx-mh-np-progress-track">
+            <div class="snx-mh-np-progress-fill" id="snxMHNPFill" style="width:0%"></div>
+          </div>
+          <span class="snx-mh-np-time" id="snxMHNPDuration">0:00</span>
         </div>
-        <span class="snx-mh-np-time" id="snxMHNPDuration">—</span>
       </div>
 
-      <!-- Controls -->
-      <div class="snx-mh-np-controls">
+      <!-- Controls — always visible when something is queued -->
+      <div class="snx-mh-np-controls" id="snxMHNPControls" style="display:none;">
         <button class="snx-mh-ctrl-btn" onclick="snxMusicPrev()" title="Previous">&#9198;</button>
         <button class="snx-mh-ctrl-btn snx-mh-ctrl-play" id="snxMHPlayBtn" onclick="snxMusicPlayPause()" title="Play / Pause">&#9654;</button>
         <button class="snx-mh-ctrl-btn" onclick="snxMusicNext()" title="Next">&#9197;</button>
@@ -11112,7 +11127,8 @@ body.arcade-fs-ios body::after { display:none !important; }
     <div class="snx-mh-section" style="padding:0 14px 4px;">
       <div class="snx-mh-section-title">&#127908; PLAYLISTS &amp; STATIONS</div>
       <div id="snxMHPlaylistGrid" class="snx-mh-playlist-grid">
-        <div class="snx-mh-empty">No playlists yet. Create one in the Playlists tab.</div>
+        <!-- role-aware empty state set by snxMHRefreshHome() -->
+        <div class="snx-mh-empty" id="snxMHPlaylistEmpty">No playlists available yet.</div>
       </div>
     </div>
 
@@ -11120,7 +11136,8 @@ body.arcade-fs-ios body::after { display:none !important; }
     <div class="snx-mh-section" style="padding:0 14px 4px;">
       <div class="snx-mh-section-title">&#128336; RECENTLY ADDED</div>
       <div id="snxMHRecentList" class="snx-mh-recent-list">
-        <div class="snx-mh-empty">Upload music to see it here.</div>
+        <!-- role-aware empty state set by snxMHRefreshHome() -->
+        <div class="snx-mh-empty" id="snxMHRecentEmpty">No music has been added yet.</div>
       </div>
     </div>
 
@@ -11128,7 +11145,7 @@ body.arcade-fs-ios body::after { display:none !important; }
     <div id="snxMHAdminPanel" class="snx-mh-section" style="display:none;padding:0 14px 4px;">
       <div class="snx-mh-section-title snx-mh-admin-title">&#128081; MUSIC MANAGEMENT</div>
       <div class="snx-mh-admin-card">
-        <p class="snx-mh-admin-note">These controls are only visible to authorized management. Changes affect the official Shadow Nexus Music rotation.</p>
+        <p class="snx-mh-admin-note">Founder controls only. Changes affect the official Shadow Nexus Music catalog and rotation.</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px;">
           <button class="snx-mh-admin-btn"
             onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))">
@@ -11142,8 +11159,17 @@ body.arcade-fs-ios body::after { display:none !important; }
             onclick="snxStudioTabSwitch('queue',document.getElementById('snxStudioTabBtn_queue'))">
             &#127926; Manage Queue
           </button>
-          <button class="snx-mh-admin-btn" onclick="snxMHToggleFeatured()">
+          <button class="snx-mh-admin-btn" onclick="snxMHFeatureTrackPicker()">
             &#11088; Feature a Track
+          </button>
+          <button class="snx-mh-admin-btn snx-mh-radio-manage" onclick="snxMHManageRadio()">
+            &#128251; Manage Radio
+          </button>
+          <button class="snx-mh-admin-btn" onclick="snxMHManageFeatured()">
+            &#9999; Edit Featured
+          </button>
+          <button class="snx-mh-admin-btn" onclick="snxMHManageLibrary()">
+            &#127925; Manage Library
           </button>
         </div>
       </div>
@@ -11158,7 +11184,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 
     <!-- Upload Music CTA -->
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;">&#127925; MY MUSIC LIBRARY</div>
+      <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;" id="snxLibTitle">&#127925; SHADOW NEXUS MUSIC LIBRARY</div>
       <button id="snxLibUploadBtn" onclick="snxStudioTabSwitch('upload',document.getElementById('snxStudioTabBtn_upload'))"
         style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:22px;
         background:linear-gradient(135deg,rgba(0,174,239,0.20),rgba(0,174,239,0.10));
@@ -11253,8 +11279,9 @@ body.arcade-fs-ios body::after { display:none !important; }
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;">&#128203; PLAYLISTS</div>
-      <button onclick="snxCSMusicCreatePlaylist()"
-        style="padding:8px 14px;border-radius:22px;background:linear-gradient(135deg,rgba(0,174,239,0.20),rgba(0,174,239,0.10));border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">
+      <!-- Shown only for founder by snxMHRefreshHome -->
+      <button id="snxPLCreateBtn" onclick="snxCSMusicCreatePlaylist()"
+        style="display:none;padding:8px 14px;border-radius:22px;background:linear-gradient(135deg,rgba(0,174,239,0.20),rgba(0,174,239,0.10));border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">
         &#43; NEW PLAYLIST
       </button>
     </div>
@@ -12297,8 +12324,15 @@ window.snxTvNetworkInit = async function() {
 };
 
 window.snxTvNetworkTeardown = function() {
-  // Nothing to explicitly teardown — subscriptions are kept alive so re-entry is instant.
-  // The live stage overlay (if open) will stay open independently of page navigation.
+  // FIX: Stop any audio/video the TV Network might have resumed via _switchTab.
+  // The subscriptions stay alive for instant re-entry, but media must not play
+  // while the user is on a different SNS page.
+  const vid = document.getElementById('ax-video');
+  const aud = document.getElementById('ax-audio');
+  if (vid && !vid.paused) { try { vid.pause(); } catch(_) {} }
+  if (aud && !aud.paused) { try { aud.pause(); } catch(_) {} }
+  // Ensure the flag is cleared so _switchTab's resume guard fires correctly.
+  window._snxTvPageActive = false;
 };
 
 // Keep TV Network in sync with SNS auth changes
@@ -13427,31 +13461,28 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (user) {
           currentUser = user;
 
-          // ── Enforce Founder role — runs on every sign-in ──
-          // If this is the founder email, make sure the Firestore doc always has
-          // role:"founder" and the Founder badge, regardless of how the account
-          // was created. No other account can ever receive this role.
           // ── Founder role — set immediately from email, never overridden ──
+          // window._snxRole is set synchronously so all downstream code sees the
+          // correct role before any async work begins.
           const _isFounder = user.email && user.email.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
           if (_isFounder) {
               window._snxRole = 'founder';
-              // Best-effort: keep Firestore doc in sync
-              try {
-                  const founderSnap = await getDoc(doc(db, 'users', user.uid));
-                  const currentBadges = founderSnap.exists() ? (founderSnap.data().badges || []) : [];
-                  await updateDoc(doc(db, 'users', user.uid), {
-                      role: 'founder',
-                      badges: Array.from(new Set(['Founder', ...currentBadges]))
-                  });
-              } catch(_) {}
           }
 
-          try { await updateDoc(doc(db, "users", user.uid), { status: "online", lastSeen: Date.now() }); } catch(_) {}
+          // ── Expose current user IMMEDIATELY — no awaits before this line ──
+          // All subsequent Firestore/RTDB writes are fire-and-forget so they
+          // never block navTo('feed') or the intro exit.
+          window._snxCurrentUser = user;
+          if (userData) window._snxUserData = userData;
+
+          // Best-effort presence + status writes — fire-and-forget (no await).
+          // A slow or offline network should NEVER delay the feed from appearing.
+          updateDoc(doc(db, "users", user.uid), { status: "online", lastSeen: Date.now() }).catch(() => {});
 
           // ── RTDB presence: users/{uid} — online/live status for friends list ──
           try {
               const _uStatusRef = _rtdbRef(_presenceRtdb, 'users/' + user.uid);
-              await _rtdbSet(_uStatusRef, { online: true, live: false, lastSeen: _rtdbServerTimestamp() });
+              _rtdbSet(_uStatusRef, { online: true, live: false, lastSeen: _rtdbServerTimestamp() }).catch(() => {});
               _rtdbOnDisconnect(_uStatusRef).set({ online: false, live: false, lastSeen: _rtdbServerTimestamp() });
           } catch(_) {}
 
@@ -13465,17 +13496,19 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               }, 30000);
           }
 
-          // Save email to Firestore so username login works for existing accounts
-          try {
-              if (user.email) await updateDoc(doc(db, "users", user.uid), { email: user.email.toLowerCase() });
-          } catch(_) {}
+          // Save email to Firestore — fire-and-forget
+          if (user.email) updateDoc(doc(db, "users", user.uid), { email: user.email.toLowerCase() }).catch(() => {});
 
-          // Expose current user for non-module scripts (notification settings)
-          window._snxCurrentUser = user;
-          // Do NOT overwrite _snxUserData with null here — userData is only
-          // populated once the onSnapshot listener below fires. We only assign
-          // it if the snapshot has already returned real data from a prior run.
-          if (userData) window._snxUserData = userData;
+          // Best-effort: keep Founder doc in sync — fire-and-forget (never blocks startup)
+          if (_isFounder) {
+              getDoc(doc(db, 'users', user.uid)).then(founderSnap => {
+                  const currentBadges = founderSnap.exists() ? (founderSnap.data().badges || []) : [];
+                  return updateDoc(doc(db, 'users', user.uid), {
+                      role: 'founder',
+                      badges: Array.from(new Set(['Founder', ...currentBadges]))
+                  });
+              }).catch(() => {});
+          }
           // Flush any auth-ready callbacks registered before auth resolved
           if (Array.isArray(window._snxAuthReadyQueue)) {
             window._snxAuthReadyQueue.forEach(fn => { try { fn(); } catch(e){} });
@@ -13499,12 +13532,12 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           const _seenPushIds = new Set();
           // Seed with IDs already in the queue so a page-reload never re-fires
           // notifications that were already shown in a previous session.
-          try {
-              const _initSnap = await getDoc(doc(db, 'users', user.uid));
+          // Fire-and-forget: seeding is best-effort, never blocks navTo('feed').
+          getDoc(doc(db, 'users', user.uid)).then(_initSnap => {
               if (_initSnap.exists()) {
                   (_initSnap.data().pushQueue || []).forEach(n => { if (n.id) _seenPushIds.add(n.id); });
               }
-          } catch(_) {}
+          }).catch(() => {});
 
           userDataUnsubscribe = onSnapshot(doc(db, "users", user.uid), async (docSnap) => {
               if (!docSnap.exists()) return;
@@ -13651,43 +13684,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           });
 
           document.getElementById("menuButton").style.display = "flex";
-          // Sync nav admin button after login
-          try {
-              if (!_isFounder) {
-                  const snap2 = await getDoc(doc(db, 'users', user.uid));
-                  const r2 = snap2.exists() ? (snap2.data().role || 'member') : 'member';
-                  window._snxRole = r2;
-              }
-              if (typeof window._showRolePanels === 'function') window._showRolePanels();
-          } catch(_) {}
-          // Re-apply nav visibility now that window._snxRole is confirmed.
-          // Firestore onSnapshot listeners may have fired before auth resolved
-          // (role was unknown), so this replays the cached settings correctly.
-          if (typeof window._snxReapplyNavVisibility === 'function') {
-              window._snxReapplyNavVisibility();
-          }
           // Dismiss auth gate + login loading overlay, then navigate to feed
           const _gate = document.getElementById('snx-auth-gate');
           if (_gate) _gate.classList.add('resolved');
           _hideLoginLoading();
-
-          // ── Maintenance mode check ──
-          // Founders always bypass. Everyone else gets redirected if site is in maintenance.
-          try {
-              const _cfgSnap = await getDoc(doc(db, 'siteSettings', 'config'));
-              if (_cfgSnap.exists() && _cfgSnap.data().maintenanceMode === true) {
-                  const _isFndr = user.email && user.email.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
-                  if (!_isFndr) {
-                      // Read role directly — userData snapshot may not have fired yet
-                      const _uSnap = await getDoc(doc(db, 'users', user.uid));
-                      const _role  = _uSnap.exists() ? (_uSnap.data().role || 'member') : 'member';
-                      if (_role !== 'founder') {
-                          window.location.replace('maintenance.html');
-                          return;
-                      }
-                  }
-              }
-          } catch(_) {}
 
           // ── Signal that the app is ready — intro can exit cleanly now ──
           window.__shadowNexusAppReady = true;
@@ -13696,6 +13696,39 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               window.__shadowNexusAppReadyCb = null;
           }
           navTo('feed');
+
+          // ── Post-nav: role + maintenance checks (deferred so navTo('feed') runs first) ──
+          // These are fire-and-forget from navTo's perspective — they resolve quickly
+          // and redirect if needed, but never delay the feed from appearing.
+          (async () => {
+              try {
+                  // Sync nav admin button after login (non-founders only)
+                  if (!_isFounder) {
+                      const snap2 = await getDoc(doc(db, 'users', user.uid));
+                      const r2 = snap2.exists() ? (snap2.data().role || 'member') : 'member';
+                      window._snxRole = r2;
+                  }
+                  if (typeof window._showRolePanels === 'function') window._showRolePanels();
+                  // Re-apply nav visibility now that window._snxRole is confirmed.
+                  if (typeof window._snxReapplyNavVisibility === 'function') window._snxReapplyNavVisibility();
+              } catch(_) {}
+
+              // ── Maintenance mode check ──
+              // Founders always bypass. Everyone else gets redirected if site is in maintenance.
+              try {
+                  const _cfgSnap = await getDoc(doc(db, 'siteSettings', 'config'));
+                  if (_cfgSnap.exists() && _cfgSnap.data().maintenanceMode === true) {
+                      const _isFndr = user.email && user.email.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
+                      if (!_isFndr) {
+                          const _uSnap = await getDoc(doc(db, 'users', user.uid));
+                          const _role  = _uSnap.exists() ? (_uSnap.data().role || 'member') : 'member';
+                          if (_role !== 'founder') {
+                              window.location.replace('maintenance.html');
+                          }
+                      }
+                  }
+              } catch(_) {}
+          })();
           initTimelineStream();
           presenceUnsubscribe = initPresenceStrip();
           scheduleExpiredPostCleanup();
@@ -13771,6 +13804,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               if (el) el.style.display = 'none';
           });
           window._snxRole = 'member';
+          // ── Notify TV adapter and TV Network that the user has signed out ──
+          window.dispatchEvent(new CustomEvent('snxAuthSignOut'));
           show('login');
       }
   });
@@ -17679,6 +17714,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     let _ibTypTimer   = null;  // debounce for typing indicator write
     let _ibInpHandler = null;  // textarea input handler ref
 
+    // ── Generation counter — prevents stale async getDocs from
+    //    overwriting a newer snapshot result when _ibSubscribeList
+    //    is called more than once in quick succession.
+    let _ibListGen    = 0;
+
     let _ibAllConvs   = [];    // sorted conversation data
     let _ibQuery      = '';    // current filter text
     let _ibFilterMode = 'all'; // 'all' | 'unread' | 'pinned' | 'archived'
@@ -17687,6 +17727,16 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     let _ibActiveData = null;  // cached partner user doc data
     let _ibReady      = false; // true once channel is initialised
     let _ibFirstSnap  = true;  // for scroll-to-bottom on first load
+
+    // ── Diagnostics ───────────────────────────────────────────
+    let _ibInitCount  = 0;     // how many times _ibSubscribeList has been called this session
+    let _ibDiag = (function() {
+        var _t0 = Date.now();
+        return function(label, extra) {
+            var ms = Date.now() - _t0;
+            console.log('[INBOX_DIAG] [T+' + ms + 'ms] ' + label + (extra ? ' | ' + extra : ''));
+        };
+    })();
 
     // uploaded media for current message
     let _ibMediaUrl   = '';
@@ -17823,15 +17873,42 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     }
 
     // ── Subscribe to all chats (conversation list) ────────────
-    async function _ibSubscribeList() {
+    // onlyIfAbsent — when true, skip if a listener is already running.
+    //   Used by _startInboxListener (background badge) so it never
+    //   clobbers an already-working Inbox the user is looking at.
+    async function _ibSubscribeList(onlyIfAbsent) {
         if (!currentUser) return;
+        if (onlyIfAbsent && _ibListUnsub) {
+            _ibDiag('INBOX_LISTENER_ATTACH', 'skipped — listener already active (onlyIfAbsent)');
+            return;
+        }
+
+        _ibInitCount++;
+        _ibDiag('INBOX_INIT', 'call #' + _ibInitCount + (onlyIfAbsent ? ' [badge-only]' : ' [full]'));
+
         if (_ibListUnsub) { _ibListUnsub(); _ibListUnsub = null; }
+
+        _ibDiag('INBOX_LISTENER_ATTACH', 'uid=' + (currentUser && currentUser.uid));
 
         const q = query(collection(db, 'chats'), where('participants', 'array-contains', currentUser.uid));
 
+        // Capture generation so stale async continuations can detect they've
+        // been superseded and bail out before overwriting newer state.
+        _ibListGen++;
+        const _myGen = _ibListGen;
+
         _ibListUnsub = onSnapshot(q, async (snap) => {
+            // Stale listener — a newer subscribe call has since run.
+            if (_myGen !== _ibListGen) {
+                _ibDiag('INBOX_SNAPSHOT', 'IGNORED — stale gen ' + _myGen + ' (current ' + _ibListGen + ')');
+                return;
+            }
+
+            _ibDiag('INBOX_SNAPSHOT', 'docs=' + snap.docs.length);
+
             const docs = snap.docs;
             if (!docs.length) {
+                _ibDiag('INBOX_EMPTY', 'no conversations');
                 _ibAllConvs = []; _ibPaint(); _ibUpdateBadge(0); return;
             }
 
@@ -17841,12 +17918,19 @@ window.addEventListener('snx:openCreatorChannel', async e => {
             }).filter(Boolean))];
 
             const userMap = {};
+            const _genAtFetch = _myGen; // capture again for after the await
             for (let i = 0; i < otherUids.length; i += 30) {
                 const chunk = otherUids.slice(i, i + 30);
                 try {
                     const us = await getDocs(query(collection(db, 'users'), where('uid', 'in', chunk)));
                     us.forEach(u => { userMap[u.id] = u.data(); });
                 } catch(_) {}
+            }
+
+            // If a newer subscribe happened while we were awaiting getDocs, discard.
+            if (_genAtFetch !== _ibListGen) {
+                _ibDiag('INBOX_SNAPSHOT', 'IGNORED after getDocs — stale gen ' + _genAtFetch + ' (current ' + _ibListGen + ')');
+                return;
             }
 
             let totalUnread = 0;
@@ -17876,11 +17960,15 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
             _ibAllConvs = convRows;
             _ibUpdateBadge(totalUnread);
+            _ibDiag('INBOX_RENDER', 'convs=' + convRows.length);
             _ibPaint();
 
             // If partner data changed (avatar, name), update header
             if (_ibActiveUid) _ibRefreshHeader();
-        }, err => { console.warn('[Inbox List]', err.code||err.message); });
+        }, err => {
+            _ibDiag('INBOX_ERROR', (err.code || err.message));
+            console.warn('[Inbox List]', err.code||err.message);
+        });
     }
 
     // ── Refresh header from current conversation data ─────────
@@ -18638,7 +18726,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
     // ── Public API ────────────────────────────────────────────
     window.renderInboxPage = function() {
-        _ibSubscribeList();
+        _ibDiag('INBOX_PAGE_ENTER');
+        _ibSubscribeList(false);  // full refresh — always re-subscribe on page enter
     };
 
     window.inboxFilter = function(val) {
@@ -18646,12 +18735,20 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         _ibPaint();
     };
 
+    // _startInboxListener: called from auth-ready (T+900ms) to ensure the
+    // unread badge is populated even when the user hasn't visited the inbox yet.
+    // Uses onlyIfAbsent=true so it NEVER disrupts an already-open Inbox.
     window._startInboxListener = function() {
-        _ibSubscribeList();
+        _ibDiag('INBOX_AUTH_READY');
+        _ibSubscribeList(true);   // only attach if no listener running yet
     };
 
     window._teardownInboxListener = function() {
-        if (_ibListUnsub) { _ibListUnsub(); _ibListUnsub = null; }
+        _ibDiag('INBOX_PAGE_EXIT');
+        if (_ibListUnsub) {
+            _ibDiag('INBOX_UNSUBSCRIBE', 'list');
+            _ibListUnsub(); _ibListUnsub = null;
+        }
         _ibTeardownChat();
         _ibAllConvs = [];
         _ibUpdateBadge(0);
@@ -21851,6 +21948,9 @@ function navTo(pageId) {
     }
     // ── 24-Hour TV lifecycle hooks ──
     if (pageId === 'tvPage') {
+        // Stop Music Hub radio before TV audio starts — never two streams at once.
+        // This is safe because Music Hub and TV are intentionally separate players.
+        if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
         if (typeof window.snxTvInit === 'function') window.snxTvInit();
         // Also init the TV Network (LIVE NOW / CHANNELS / MY CHANNEL tabs)
         if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
@@ -23557,7 +23657,11 @@ window._showRolePanels = function() {
     const role = window._snxRole || 'member';
     const isMod   = role === 'moderator';
     const isAdm   = role === 'administrator';
-    const isFndr  = role === 'founder';
+    // Founder: role OR email — email is set synchronously at login and can never
+    // lag behind (window._snxRole may still be 'member' during the async Firestore
+    // role fetch, but the email is always available instantly).
+    const _curEmail = ((window._snxCurrentUser && window._snxCurrentUser.email) || '').trim().toLowerCase();
+    const isFndr  = role === 'founder' || _curEmail === FOUNDER_EMAIL.toLowerCase();
 
     // Sidebar nav buttons
     const navMod        = document.getElementById('navMod');
@@ -23573,25 +23677,25 @@ window._showRolePanels = function() {
     if (secAdm)  secAdm.style.display  = isAdm   ? 'block' : 'none';
     if (secMod)  secMod.style.display  = isMod   ? 'block' : 'none';
 
-    // Music Hub management tabs — re-evaluate whenever role is confirmed
+    // Music Hub management tabs — re-evaluate whenever role/auth is confirmed.
+    // snxMHRefreshHome handles all tab visibility, empty states, and panels.
+    // It is always safe to call (no-op if DOM elements are absent).
     if (typeof window.snxMHRefreshHome === 'function') {
-        // Only refresh if Music Hub is currently open (avoid unnecessary DOM work)
-        const studioPage = document.getElementById('studioPage');
-        if (studioPage && studioPage.style.display !== 'none') {
-            window.snxMHRefreshHome();
-        } else {
-            // Not open yet — gate the tab buttons directly so they are correct
-            // the moment the user first opens Music Hub.
-            const isManager = isFndr;
-            const uploadTabBtn = document.getElementById('snxStudioTabBtn_upload');
-            if (uploadTabBtn) uploadTabBtn.style.display = isManager ? '' : 'none';
-            const queueTabBtn = document.getElementById('snxStudioTabBtn_queue');
-            if (queueTabBtn)  queueTabBtn.style.display  = isManager ? '' : 'none';
-            const libUploadBtn = document.getElementById('snxLibUploadBtn');
-            if (libUploadBtn) libUploadBtn.style.display = isManager ? 'flex' : 'none';
-            const adminPanel = document.getElementById('snxMHAdminPanel');
-            if (adminPanel)   adminPanel.style.display   = isManager ? '' : 'none';
-        }
+        window.snxMHRefreshHome();
+    } else {
+        // snxMHRefreshHome not yet registered (studio.js still loading) —
+        // apply minimal tab gating directly so tabs are correct on first open.
+        const isManager = isFndr;
+        const uploadTabBtn = document.getElementById('snxStudioTabBtn_upload');
+        if (uploadTabBtn) uploadTabBtn.style.display = isManager ? '' : 'none';
+        const queueTabBtn = document.getElementById('snxStudioTabBtn_queue');
+        if (queueTabBtn)  queueTabBtn.style.display  = isManager ? '' : 'none';
+        const libUploadBtn = document.getElementById('snxLibUploadBtn');
+        if (libUploadBtn) libUploadBtn.style.display = isManager ? 'flex' : 'none';
+        const adminPanel = document.getElementById('snxMHAdminPanel');
+        if (adminPanel)   adminPanel.style.display   = isManager ? '' : 'none';
+        const plCreateBtn = document.getElementById('snxPLCreateBtn');
+        if (plCreateBtn)  plCreateBtn.style.display  = isManager ? '' : 'none';
     }
 };
 /* Backward-compat alias so any existing callers of _showFounderUI still work */
@@ -25510,7 +25614,7 @@ function _supportStopCanvas() {
 <script src="script.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
 
 <!-- ── Shadow Nexus 24-Hour Studio — Music Library, Upload, Playlists, Queue ── -->
-<script src="studio.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
+<script src="studio.js?v=SNS-2026-MH-FOUNDER-002"></script>
 
 <!-- ── Shadow Nexus NEXUS — channel discovery and management ── -->
 <script src="nexus.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
@@ -34768,5 +34872,779 @@ window.snxFounderPanelCleanup = (function() {
       // No-op: auth flow already drove the app to the correct state.
   };
 </script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     SHADOW NEXUS GUEST MODE
+     Access layer — does NOT touch Firebase Auth, Storage, or Rules.
+     Does NOT add a competing onAuthStateChanged listener.
+     State lives in sessionStorage. Auth always takes priority.
+     ═══════════════════════════════════════════════════════════ -->
+
+<!-- ── Guest Mode Modals ────────────────────────────────────── -->
+
+<!-- 1. GUEST RULES MODAL -->
+<div id="snxGuestRulesModal" style="display:none;position:fixed;inset:0;z-index:8100;background:rgba(0,3,15,0.92);align-items:center;justify-content:center;padding:14px;box-sizing:border-box;backdrop-filter:blur(7px);">
+  <div style="background:#060d1e;border:1px solid rgba(57,255,20,0.35);border-radius:18px;width:100%;max-width:460px;max-height:90vh;overflow-y:auto;box-shadow:0 0 60px rgba(0,100,255,0.22);animation:deleteModalIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both;padding:26px 22px 22px;box-sizing:border-box;-webkit-overflow-scrolling:touch;">
+
+    <!-- Header -->
+    <div style="text-align:center;margin-bottom:18px;">
+      <div style="font-size:32px;margin-bottom:8px;">⚡</div>
+      <h2 style="margin:0 0 6px;color:#fff;font-size:19px;font-weight:800;letter-spacing:1px;">WELCOME TO SHADOW NEXUS</h2>
+      <p style="margin:0;color:#6a90b8;font-size:12px;line-height:1.5;">Explore the Nexus before creating an account.</p>
+    </div>
+
+    <!-- Two-column feature list -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px;">
+      <!-- Guests Can -->
+      <div style="background:rgba(0,60,30,0.22);border:1px solid rgba(57,255,20,0.22);border-radius:12px;padding:12px 14px;">
+        <div style="font-size:11px;font-weight:800;color:#39FF14;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">GUESTS CAN</div>
+        <div style="font-size:11.5px;color:#7aaaa8;line-height:2;display:flex;flex-direction:column;gap:1px;">
+          <span>✓ Browse public posts</span>
+          <span>✓ View public profiles</span>
+          <span>✓ Search public content</span>
+          <span>✓ Watch Shadow Nexus TV</span>
+          <span>✓ Watch public Live streams</span>
+          <span>✓ Browse Creator Channels</span>
+          <span>✓ Watch public Replays</span>
+          <span>✓ Explore Music Hub</span>
+          <span>✓ Listen to SNX Radio</span>
+          <span>✓ Listen to public music</span>
+          <span>✓ Browse public playlists</span>
+        </div>
+      </div>
+      <!-- Members Can Also -->
+      <div style="background:rgba(0,40,100,0.22);border:1px solid rgba(0,174,239,0.22);border-radius:12px;padding:12px 14px;">
+        <div style="font-size:11px;font-weight:800;color:#00AEEF;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">MEMBERS CAN ALSO</div>
+        <div style="font-size:11.5px;color:#7a9ab8;line-height:2;display:flex;flex-direction:column;gap:1px;">
+          <span>✓ Post &amp; Like</span>
+          <span>✓ Comment</span>
+          <span>✓ Follow creators</span>
+          <span>✓ Send messages</span>
+          <span>✓ Join Live Chat</span>
+          <span>✓ Create Stories</span>
+          <span>✓ Creator Channel</span>
+          <span>✓ Go Live</span>
+          <span>✓ Notifications</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Community Rules -->
+    <div style="background:rgba(0,20,50,0.55);border:1px solid rgba(0,174,239,0.18);border-radius:10px;padding:14px 16px;margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:800;color:#00AEEF;letter-spacing:1px;text-transform:uppercase;margin-bottom:10px;">SHADOW NEXUS COMMUNITY RULES</div>
+      <ul style="margin:0;padding-left:16px;font-size:11.5px;color:#7a9ab8;line-height:2.0;list-style:disc;">
+        <li>Respect other members.</li>
+        <li>No harassment, bullying or threats.</li>
+        <li>No hate or discrimination.</li>
+        <li>No spam, scams or impersonation.</li>
+        <li>Respect privacy.</li>
+        <li>Respect copyright and content ownership.</li>
+        <li>Do not attempt to bypass account restrictions or platform security.</li>
+        <li>Keep public content appropriate for the Shadow Nexus community.</li>
+      </ul>
+      <button onclick="snxGuestViewFullRules()" style="margin-top:10px;background:none;border:1px solid rgba(0,174,239,0.28);border-radius:8px;color:#4a8ab8;font-size:11px;padding:5px 12px;cursor:pointer;transition:color 0.15s,border-color 0.15s;">📜 VIEW FULL COMMUNITY RULES</button>
+    </div>
+
+    <!-- Agreement text -->
+    <p style="font-size:11px;color:#4a6a88;line-height:1.7;margin:0 0 14px;text-align:center;">By continuing as a guest, you understand that Guest Mode has limited features and agree to follow the Shadow Nexus Community Rules.</p>
+
+    <!-- Buttons -->
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button onclick="snxGuestAccept()" style="width:100%;padding:12px;border-radius:10px;background:linear-gradient(135deg,#003d1a,#006633);border:1px solid rgba(57,255,20,0.55);color:#39FF14;font-size:14px;font-weight:800;box-shadow:0 0 18px rgba(57,255,20,0.20);letter-spacing:0.3px;">👁 CONTINUE AS GUEST</button>
+      <button onclick="snxGuestGoRegister()" style="width:100%;padding:11px;border-radius:10px;background:linear-gradient(135deg,#003d99,#0066cc);border:1px solid rgba(0,174,239,0.65);color:#fff;font-size:13px;font-weight:700;">⚡ CREATE ACCOUNT</button>
+      <button onclick="snxGuestRulesCancel()" style="width:100%;padding:10px;border-radius:10px;background:transparent;border:1px solid rgba(255,255,255,0.1);color:#445;font-size:13px;font-weight:600;">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<!-- 2. GUEST DISPLAY NAME MODAL -->
+<div id="snxGuestNameModal" style="display:none;position:fixed;inset:0;z-index:8200;background:rgba(0,3,15,0.92);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;backdrop-filter:blur(7px);">
+  <div style="background:#060d1e;border:1px solid rgba(57,255,20,0.38);border-radius:18px;width:100%;max-width:380px;padding:30px 24px;box-sizing:border-box;box-shadow:0 0 60px rgba(0,100,255,0.22);animation:deleteModalIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both;text-align:center;">
+    <div style="font-size:40px;margin-bottom:14px;">🌑</div>
+    <h2 style="margin:0 0 8px;color:#fff;font-size:18px;font-weight:800;letter-spacing:1px;">WELCOME TO THE NEXUS</h2>
+    <p style="color:#6a90b8;font-size:13px;margin:0 0 20px;line-height:1.6;">What should we call you while you're exploring?</p>
+    <input id="snxGuestNameInput" placeholder="Display Name (e.g. Chris)" maxlength="32" autocomplete="off" style="margin:0 0 6px;text-align:center;font-size:15px;border-color:rgba(57,255,20,0.38);">
+    <p style="font-size:10px;color:#3a5a3a;margin:0 0 18px;">This is temporary and not saved anywhere.</p>
+    <button id="snxGuestEnterBtn" onclick="snxGuestEnter()" style="width:100%;padding:12px;border-radius:10px;background:linear-gradient(135deg,#003d1a,#006633);border:1px solid rgba(57,255,20,0.55);color:#39FF14;font-size:15px;font-weight:800;box-shadow:0 0 18px rgba(57,255,20,0.20);">⚡ ENTER SHADOW NEXUS</button>
+  </div>
+</div>
+
+<!-- 3. JOIN SHADOW NEXUS MODAL (reusable — one instance) -->
+<div id="snxJoinModal" style="display:none;position:fixed;inset:0;z-index:8300;background:rgba(0,3,15,0.90);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;backdrop-filter:blur(6px);">
+  <div style="background:#060d1e;border:1px solid rgba(0,174,239,0.38);border-radius:18px;width:100%;max-width:400px;padding:28px 22px 22px;box-sizing:border-box;box-shadow:0 0 60px rgba(0,100,255,0.22);animation:deleteModalIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both;text-align:center;">
+    <div style="font-size:32px;margin-bottom:10px;">⚡</div>
+    <h2 style="margin:0 0 8px;color:#fff;font-size:18px;font-weight:800;letter-spacing:1px;">JOIN SHADOW NEXUS</h2>
+    <p style="color:#6a90b8;font-size:13px;margin:0 0 14px;line-height:1.6;">You're exploring Shadow Nexus as a guest.<br>Create your free account to unlock the full Nexus.</p>
+    <div style="background:rgba(0,40,100,0.30);border:1px solid rgba(0,174,239,0.18);border-radius:10px;padding:12px 16px;margin-bottom:18px;text-align:left;">
+      <div style="font-size:11px;font-weight:700;color:#00AEEF;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:8px;">UNLOCK FULL ACCESS</div>
+      <div style="font-size:12px;color:#7a9ab8;line-height:2;display:grid;grid-template-columns:1fr 1fr;gap:0;">
+        <span>✓ Post &amp; Comment</span>
+        <span>✓ Follow Creators</span>
+        <span>✓ Private Messages</span>
+        <span>✓ Live Chat</span>
+        <span>✓ Creator Channel</span>
+        <span>✓ Go Live</span>
+        <span>✓ Notifications</span>
+        <span>✓ Stories</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button onclick="snxJoinGoRegister()" style="width:100%;padding:12px;border-radius:10px;background:linear-gradient(135deg,#003d99,#0066cc);border:1px solid rgba(0,174,239,0.65);color:#fff;font-size:14px;font-weight:800;">⚡ CREATE ACCOUNT</button>
+      <button onclick="snxJoinClose()" id="snxJoinExploreBtn" style="width:100%;padding:10px;border-radius:10px;background:transparent;border:1px solid rgba(57,255,20,0.28);color:#39FF14;font-size:13px;font-weight:700;">👁 KEEP EXPLORING</button>
+    </div>
+  </div>
+</div>
+
+<!-- 4. GUEST INDICATOR (fixed badge — does not cover content) -->
+<div id="snxGuestIndicator" style="display:none;position:fixed;bottom:14px;right:14px;z-index:9500;background:rgba(5,12,28,0.94);border:1px solid rgba(57,255,20,0.45);border-radius:30px;padding:7px 13px 7px 10px;align-items:center;gap:8px;box-shadow:0 2px 16px rgba(0,0,0,0.55),0 0 10px rgba(57,255,20,0.14);backdrop-filter:blur(6px);cursor:default;max-width:calc(100vw - 28px);">
+  <span style="font-size:14px;">👁</span>
+  <span style="font-size:11px;font-weight:700;color:#39FF14;letter-spacing:0.5px;white-space:nowrap;">GUEST MODE</span>
+  <span id="snxGuestNameLabel" style="font-size:11px;color:#5a8a7a;white-space:nowrap;max-width:80px;overflow:hidden;text-overflow:ellipsis;"></span>
+  <div style="display:flex;gap:5px;margin-left:4px;">
+    <button onclick="snxGuestShowJoin()" style="background:rgba(0,120,255,0.2);border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:9px;font-weight:800;padding:3px 8px;border-radius:10px;cursor:pointer;letter-spacing:0.5px;white-space:nowrap;">JOIN</button>
+    <button onclick="snxGuestShowRulesInfo()" style="background:rgba(57,255,20,0.08);border:1px solid rgba(57,255,20,0.28);color:#39FF14;font-size:9px;font-weight:700;padding:3px 8px;border-radius:10px;cursor:pointer;letter-spacing:0.5px;white-space:nowrap;">RULES</button>
+    <button onclick="snxGuestExit()" style="background:rgba(255,50,80,0.1);border:1px solid rgba(255,50,80,0.28);color:#ff7788;font-size:9px;font-weight:700;padding:3px 8px;border-radius:10px;cursor:pointer;letter-spacing:0.5px;white-space:nowrap;">EXIT</button>
+  </div>
+</div>
+
+<!-- 5. GUEST MODE JAVASCRIPT ────────────────────────────────── -->
+<script>
+/* ═══════════════════════════════════════════════════════════
+   SHADOW NEXUS GUEST MODE — snx-guest.js (inline)
+   Version: SNS-2026-GUEST-001
+
+   RULES:
+   • No Firebase Auth user created.
+   • No competing onAuthStateChanged.
+   • No Firebase writes for guest state.
+   • Auth (window._snxCurrentUser) ALWAYS takes priority.
+   • State lives in sessionStorage (temp, session-scoped).
+   • Firebase/Firestore rules remain authoritative.
+   ═══════════════════════════════════════════════════════════ */
+(function _snxGuestMode() {
+    'use strict';
+
+    /* ── Internal state ── */
+    const _SS_KEY_ACTIVE = 'snxGuestActive';
+    const _SS_KEY_NAME   = 'snxGuestName';
+
+    /* ── Check if auth user is present (auth ALWAYS wins) ── */
+    function _isAuthUser() {
+        return !!(window._snxCurrentUser || (window._snxAuth && window._snxAuth.currentUser));
+    }
+
+    /* ── Read current guest session from sessionStorage ── */
+    function _loadSession() {
+        try {
+            return {
+                active: sessionStorage.getItem(_SS_KEY_ACTIVE) === '1',
+                name:   sessionStorage.getItem(_SS_KEY_NAME) || ''
+            };
+        } catch(e) { return { active: false, name: '' }; }
+    }
+
+    /* ── Persist guest session ── */
+    function _saveSession(name) {
+        try {
+            sessionStorage.setItem(_SS_KEY_ACTIVE, '1');
+            sessionStorage.setItem(_SS_KEY_NAME, name || '');
+        } catch(e) {}
+        window._snxGuest         = true;
+        window._snxGuestName     = name || '';
+        window.guestDisplayName  = name || '';
+    }
+
+    /* ── Clear guest session ── */
+    function _clearSession() {
+        try {
+            sessionStorage.removeItem(_SS_KEY_ACTIVE);
+            sessionStorage.removeItem(_SS_KEY_NAME);
+        } catch(e) {}
+        window._snxGuest        = false;
+        window._snxGuestName    = '';
+        window.guestDisplayName = '';
+    }
+
+    /* ── Is currently in active guest mode? ── */
+    window.snxIsGuest = function() {
+        if (_isAuthUser()) return false;   // Auth always wins
+        return !!(window._snxGuest);
+    };
+
+    /* ── Update indicator badge visibility ── */
+    function _updateIndicator() {
+        const ind = document.getElementById('snxGuestIndicator');
+        if (!ind) return;
+        if (window.snxIsGuest()) {
+            ind.style.display = 'flex';
+            const lbl = document.getElementById('snxGuestNameLabel');
+            if (lbl && window._snxGuestName) {
+                lbl.textContent = '• ' + window._snxGuestName;
+            } else if (lbl) {
+                lbl.textContent = '';
+            }
+        } else {
+            ind.style.display = 'none';
+        }
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       PUBLIC FLOW FUNCTIONS
+    ───────────────────────────────────────────────────────── */
+
+    /* Called by "CONTINUE AS GUEST" button on login screen */
+    window.snxGuestBegin = function() {
+        if (_isAuthUser()) return;   // auth user present — do nothing
+        const modal = document.getElementById('snxGuestRulesModal');
+        if (modal) { modal.style.display = 'flex'; }
+    };
+
+    /* Called by "CONTINUE AS GUEST" inside the rules modal */
+    window.snxGuestAccept = function() {
+        const modal = document.getElementById('snxGuestRulesModal');
+        if (modal) modal.style.display = 'none';
+        const nameModal = document.getElementById('snxGuestNameModal');
+        if (nameModal) {
+            nameModal.style.display = 'flex';
+            const inp = document.getElementById('snxGuestNameInput');
+            if (inp) { inp.value = ''; inp.focus(); }
+        }
+    };
+
+    /* Called by CANCEL in rules modal */
+    window.snxGuestRulesCancel = function() {
+        const modal = document.getElementById('snxGuestRulesModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    /* Called by "CREATE ACCOUNT" in rules modal */
+    window.snxGuestGoRegister = function() {
+        const modal = document.getElementById('snxGuestRulesModal');
+        if (modal) modal.style.display = 'none';
+        // Open register flow on login page
+        if (typeof show === 'function') show('login');
+        const regBtn = document.getElementById('btnRegister');
+        if (regBtn) setTimeout(() => regBtn.click(), 100);
+    };
+
+    /* Called by "VIEW FULL COMMUNITY RULES" in rules modal */
+    window.snxGuestViewFullRules = function() {
+        // Enter guest mode first (temporary), then show rules page
+        _saveSession('');
+        window._snxGuest = true;
+        const modal = document.getElementById('snxGuestRulesModal');
+        if (modal) modal.style.display = 'none';
+        if (typeof realmNavTo === 'function') realmNavTo('communityRulesPage');
+        else if (typeof navTo === 'function') navTo('communityRulesPage');
+        // Show indicator so they can navigate back/exit
+        _updateIndicator();
+    };
+
+    /* Called by "ENTER SHADOW NEXUS" in display name modal */
+    window.snxGuestEnter = function() {
+        const inp  = document.getElementById('snxGuestNameInput');
+        const name = (inp ? inp.value.trim() : '') || 'Visitor';
+        // Sanitize: strip < > to prevent XSS in display
+        const safeName = name.replace(/[<>]/g, '').slice(0, 32) || 'Visitor';
+
+        _saveSession(safeName);
+
+        const nameModal = document.getElementById('snxGuestNameModal');
+        if (nameModal) nameModal.style.display = 'none';
+
+        // Navigate to feed (guest will see public posts)
+        if (typeof navTo === 'function') navTo('feed');
+        else if (typeof realmNavTo === 'function') realmNavTo('feed');
+
+        // Show sidebar hamburger so guest can navigate
+        const menuBtn = document.getElementById('menuButton');
+        if (menuBtn) menuBtn.style.display = 'flex';
+
+        _updateIndicator();
+    };
+
+    /* Show the indicator once guest is active */
+    window.snxGuestShowIndicator = _updateIndicator;
+
+    /* Called by JOIN button in indicator */
+    window.snxGuestShowJoin = function() {
+        snxRequireMember('join');
+    };
+
+    /* Called by RULES button in indicator */
+    window.snxGuestShowRulesInfo = function() {
+        if (typeof realmNavTo === 'function') realmNavTo('communityRulesPage');
+        else if (typeof navTo === 'function') navTo('communityRulesPage');
+    };
+
+    /* Called by EXIT button in indicator */
+    window.snxGuestExit = function() {
+        _clearSession();
+        _updateIndicator();
+        // Close sidebar / drawer
+        if (typeof closeSidebar === 'function') closeSidebar();
+        // Hide hamburger menu button
+        const menuBtn = document.getElementById('menuButton');
+        if (menuBtn) menuBtn.style.display = 'none';
+        // Do NOT call Firebase signOut — guest is not a Firebase session
+        if (typeof show === 'function') show('login');
+    };
+
+    /* ─────────────────────────────────────────────────────────
+       JOIN MODAL — one reusable instance
+    ───────────────────────────────────────────────────────── */
+
+    /* Open Join modal. mediaProtect=true → KEEP EXPLORING won't stop media. */
+    window.snxJoinOpen = function(mediaProtect) {
+        const modal = document.getElementById('snxJoinModal');
+        if (!modal) return;
+        modal.style.display = 'flex';
+        // KEEP EXPLORING button — label varies but always closes modal
+        const btn = document.getElementById('snxJoinExploreBtn');
+        if (btn) btn.textContent = mediaProtect ? '🎵 KEEP EXPLORING' : '👁 KEEP EXPLORING';
+    };
+
+    window.snxJoinClose = function() {
+        const modal = document.getElementById('snxJoinModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    window.snxJoinGoRegister = function() {
+        snxJoinClose();
+        snxGuestExit();
+        // Scroll to register form
+        const regBtn = document.getElementById('btnRegister');
+        if (regBtn) setTimeout(() => regBtn.click(), 100);
+    };
+
+    /* ─────────────────────────────────────────────────────────
+       CORE GUARD — requireMember
+       Logic:
+         - Authenticated Firebase member → allow action
+         - Guest mode                   → show Join modal, block action
+         - Signed out                   → show login (existing behavior)
+    ───────────────────────────────────────────────────────── */
+
+    window.snxRequireMember = function(actionOrContext, mediaProtect) {
+        if (_isAuthUser()) return true;        // authenticated — allow
+        if (window.snxIsGuest()) {
+            snxJoinOpen(mediaProtect);
+            return false;                      // blocked
+        }
+        // Not auth, not guest — send to login (fallback)
+        if (typeof show === 'function') show('login');
+        return false;
+    };
+
+    /* ─────────────────────────────────────────────────────────
+       FEATURE GUARDS
+       Hooked into existing SNS functions.
+       All guards check snxIsGuest() first;
+       authenticated members are NEVER affected.
+    ───────────────────────────────────────────────────────── */
+
+    /* ── Guard: Post Broadcast (btnBroadcast) ── */
+    function _hookPostBroadcast() {
+        const btn = document.getElementById('btnBroadcast');
+        if (!btn) return;
+        const _origOnclick = btn.onclick;
+        btn.onclick = function(e) {
+            if (!_isAuthUser() && window.snxIsGuest()) {
+                snxJoinOpen();
+                return;
+            }
+            if (_origOnclick) _origOnclick.call(this, e);
+        };
+    }
+
+    /* ── Guard: Create Story bubble ── */
+    function _hookStoryBubble() {
+        const bubble = document.getElementById('storyAddBubble');
+        if (!bubble) return;
+        const origOnclick = bubble.getAttribute('onclick');
+        bubble.removeAttribute('onclick');
+        bubble.addEventListener('click', function() {
+            if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+            if (typeof openCreateStoryModal === 'function') openCreateStoryModal();
+        });
+    }
+
+    /* ── Guard: Go Live ── */
+    function _hookGoLive() {
+        if (window._snxGuestGoLiveHooked) return;
+        const orig = window.goLiveOrWatch;
+        if (!orig) return;
+        window._snxGuestGoLiveHooked = true;
+        window.goLiveOrWatch = function() {
+            if (!_isAuthUser() && window.snxIsGuest()) {
+                // Show specific "ready to go live" message
+                const modal = document.getElementById('snxJoinModal');
+                if (modal) {
+                    const title = modal.querySelector('h2');
+                    if (title) title.textContent = '🔴 READY TO GO LIVE?';
+                    const desc = modal.querySelector('p');
+                    if (desc) desc.textContent = 'Create your Shadow Nexus account to get your own Creator Channel and start broadcasting.';
+                }
+                snxJoinOpen();
+                // Restore title for next use
+                setTimeout(() => {
+                    const modal2 = document.getElementById('snxJoinModal');
+                    if (!modal2) return;
+                    const title2 = modal2.querySelector('h2');
+                    if (title2) title2.textContent = '⚡ JOIN SHADOW NEXUS';
+                    const desc2 = modal2.querySelector('p');
+                    if (desc2) desc2.textContent = "You're exploring Shadow Nexus as a guest.\nCreate your free account to unlock the full Nexus.";
+                }, 500);
+                return;
+            }
+            orig.apply(this, arguments);
+        };
+    }
+
+    /* ── Guard: Navigation (inbox, notifications, my channel) — combined + idempotent ── */
+    function _hookInboxPage() {
+        if (window._snxGuestNavHooked) return;
+        const _baseRealmNavTo = window.realmNavTo;
+        const _baseNavTo      = window.navTo;
+        if (!_baseRealmNavTo && !_baseNavTo) return;  // not ready yet — caller will retry
+        window._snxGuestNavHooked = true;
+
+        function _guestNavGuard(pageId) {
+            if (!_isAuthUser() && window.snxIsGuest()) {
+                if (pageId === 'inboxPage')         { _showGuestMessagesBlock(); return true; }
+                if (pageId === 'notificationsPage') { _showGuestNotifBlock();    return true; }
+            }
+            return false;
+        }
+
+        if (_baseRealmNavTo) {
+            window.realmNavTo = function(pageId) {
+                if (_guestNavGuard(pageId)) return;
+                return _baseRealmNavTo.apply(this, arguments);
+            };
+        }
+        if (_baseNavTo) {
+            window.navTo = function(pageId) {
+                if (_guestNavGuard(pageId)) return;
+                return _baseNavTo.apply(this, arguments);
+            };
+        }
+    }
+
+    /* ── Guest Messages placeholder screen ── */
+    function _showGuestMessagesBlock() {
+        // Navigate to the inbox page but show the guest block instead of querying Firestore
+        // First switch to the page via the original navTo to handle any nav state
+        const origNavTo = window._snxOrigNavTo || window.navTo;
+        // Directly show page element
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        const inboxEl = document.getElementById('inboxPage');
+        if (inboxEl) {
+            inboxEl.classList.add('active');
+            // Show the guest block, hide the normal inbox content
+            let guestBlock = document.getElementById('snxGuestMsgBlock');
+            if (!guestBlock) {
+                guestBlock = document.createElement('div');
+                guestBlock.id = 'snxGuestMsgBlock';
+                guestBlock.style.cssText = 'padding:40px 20px;text-align:center;max-width:400px;margin:0 auto;';
+                guestBlock.innerHTML = `
+                  <div style="font-size:40px;margin-bottom:12px;">🔒</div>
+                  <h3 style="color:#fff;font-size:17px;font-weight:800;margin:0 0 8px;">PRIVATE MESSAGES</h3>
+                  <p style="color:#6a90b8;font-size:13px;line-height:1.6;margin:0 0 20px;">Create a Shadow Nexus account to privately connect with members.</p>
+                  <div style="display:flex;flex-direction:column;gap:8px;">
+                    <button onclick="snxJoinGoRegister()" style="padding:12px;border-radius:10px;background:linear-gradient(135deg,#003d99,#0066cc);border:1px solid rgba(0,174,239,0.65);color:#fff;font-size:14px;font-weight:800;">⚡ CREATE ACCOUNT</button>
+                    <button onclick="snxJoinClose()" style="padding:10px;border-radius:10px;background:transparent;border:1px solid rgba(57,255,20,0.28);color:#39FF14;font-size:13px;font-weight:700;">👁 KEEP EXPLORING</button>
+                  </div>
+                `;
+                inboxEl.prepend(guestBlock);
+            } else {
+                guestBlock.style.display = 'block';
+            }
+            // Hide real inbox content so no Firestore query is triggered
+            const splitEl = inboxEl.querySelector('.inbox-split');
+            if (splitEl) splitEl.style.display = 'none';
+            const titleEl = inboxEl.querySelector('.inbox-page-title');
+            if (titleEl) titleEl.style.display = 'none';
+        }
+        // Update nav active state
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active-nav'));
+        const navInbox = document.getElementById('navInbox');
+        if (navInbox) navInbox.classList.add('active-nav');
+    }
+
+    /* Restore inbox when guest logs in */
+    function _restoreInbox() {
+        const guestBlock = document.getElementById('snxGuestMsgBlock');
+        if (guestBlock) guestBlock.style.display = 'none';
+        const inboxEl = document.getElementById('inboxPage');
+        if (inboxEl) {
+            const splitEl = inboxEl.querySelector('.inbox-split');
+            const titleEl = inboxEl.querySelector('.inbox-page-title');
+            if (splitEl) splitEl.style.display = '';
+            if (titleEl) titleEl.style.display = '';
+        }
+    }
+
+    /* ── Guard: ipcOpen (direct message) ── */
+    function _hookIpcOpen() {
+        if (window._snxGuestIpcHooked) return;
+        const orig = window.ipcOpen;
+        if (!orig) return;
+        window._snxGuestIpcHooked = true;
+        window.ipcOpen = function(targetUid) {
+            if (!_isAuthUser() && window.snxIsGuest()) {
+                snxJoinOpen();
+                return Promise.resolve();
+            }
+            return orig.apply(this, arguments);
+        };
+    }
+
+    /* ── Guard: Notifications page ── (combined into _hookInboxPage above) */
+    function _hookNotificationsPage() { _hookInboxPage(); }
+
+    /* ── Guest Notifications placeholder ── */
+    function _showGuestNotifBlock() {
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        const notifEl = document.getElementById('notificationsPage');
+        if (!notifEl) return;
+        notifEl.classList.add('active');
+        let guestBlock = document.getElementById('snxGuestNotifBlock');
+        if (!guestBlock) {
+            guestBlock = document.createElement('div');
+            guestBlock.id = 'snxGuestNotifBlock';
+            guestBlock.style.cssText = 'padding:40px 20px;text-align:center;max-width:400px;margin:0 auto;';
+            guestBlock.innerHTML = `
+              <div style="font-size:40px;margin-bottom:12px;">🔔</div>
+              <h3 style="color:#fff;font-size:17px;font-weight:800;margin:0 0 8px;">NOTIFICATIONS</h3>
+              <p style="color:#6a90b8;font-size:13px;line-height:1.6;margin:0 0 20px;">Create an account to receive replies, follows and Live alerts.</p>
+              <button onclick="snxJoinGoRegister()" style="padding:12px 24px;border-radius:10px;background:linear-gradient(135deg,#003d99,#0066cc);border:1px solid rgba(0,174,239,0.65);color:#fff;font-size:14px;font-weight:800;">⚡ CREATE ACCOUNT</button>
+            `;
+            notifEl.prepend(guestBlock);
+        } else {
+            guestBlock.style.display = 'block';
+        }
+        // Hide normal notification content
+        notifEl.querySelectorAll(':scope > *:not(#snxGuestNotifBlock)').forEach(el => { el.style.display = 'none'; });
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active-nav'));
+        const navNotifs = document.getElementById('navNotifs');
+        if (navNotifs) navNotifs.classList.add('active-nav');
+    }
+
+    /* ── Guard: My Channel (creator) ── */
+    function _hookMyChannel() {
+        if (window._snxGuestMyChannelHooked) return;
+        if (typeof window.openMyChannel === 'function') {
+            window._snxGuestMyChannelHooked = true;
+            const origOMC = window.openMyChannel;
+            window.openMyChannel = function() {
+                if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+                return origOMC.apply(this, arguments);
+            };
+        }
+    }
+
+    function _showGuestChannelBlock() { snxJoinOpen(); }
+
+    /* ── Guard: Live Chat write (ipcModalInput send button) ── */
+    function _hookLiveChatInput() {
+        // The ipcModal send button / input — we guard it on focus/click
+        document.addEventListener('focusin', function(e) {
+            const inp = e.target;
+            if (!inp) return;
+            if (inp.id === 'ipcModalInput' || inp.id === 'inboxChatInput') {
+                if (!_isAuthUser() && window.snxIsGuest()) {
+                    inp.blur();
+                    snxJoinOpen();
+                }
+            }
+        }, true);
+    }
+
+    /* ── Patch: like / comment guard (post action buttons) ── */
+    /* We patch submitPostComment and the like function after they load */
+    function _hookPostActions() {
+        // Like button — uses event delegation on feedPosts
+        const feedPosts = document.getElementById('feedPosts');
+        if (feedPosts) {
+            feedPosts.addEventListener('click', function(e) {
+                if (_isAuthUser() || !window.snxIsGuest()) return;
+                // Intercept react-btn (like/dislike/react buttons) and comment submit
+                const btn = e.target.closest('.react-btn, .comment-submit-btn, .btn-del-post');
+                if (btn) {
+                    e.stopImmediatePropagation();
+                    snxJoinOpen();
+                }
+            }, true);
+        }
+    }
+
+    /* ── Patch: follow button on profile page ── */
+    function _hookFollowToggle() {
+        if (window._snxGuestFollowHooked) return;
+        const origTF = window.toggleFollowLink;
+        if (!origTF) return;
+        window._snxGuestFollowHooked = true;
+        window.toggleFollowLink = function() {
+            if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+            return origTF.apply(this, arguments);
+        };
+    }
+
+    /* ── Patch: story bubble comment / react (in story viewer) ── */
+    function _hookStoryActions() {
+        if (window._snxGuestStoryHooked) return;
+        const origSubmitStory = window.submitStoryReply;
+        if (origSubmitStory) {
+            window._snxGuestStoryHooked = true;
+            window.submitStoryReply = function() {
+                if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+                return origSubmitStory.apply(this, arguments);
+            };
+        }
+    }
+
+    /* ── Patch: Music upload / queue (founder-only anyway, but guest guard) ── */
+    function _hookMusicActions() {
+        if (window._snxGuestMusicHooked) return;
+        const fnNames = ['snxMusicOpenFilePicker', 'snxMusicFilesSelected', 'snxMHManageRadio', 'snxMHManageLibrary', 'snxMHManageFeatured', 'snxMHFeatureTrackPicker'];
+        let anyHooked = false;
+        fnNames.forEach(name => {
+            const orig = window[name];
+            if (orig) {
+                anyHooked = true;
+                window[name] = function() {
+                    if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+                    return orig.apply(this, arguments);
+                };
+            }
+        });
+        if (anyHooked) window._snxGuestMusicHooked = true;
+    }
+
+    /* ── Patch: submit post comment ── */
+    function _hookSubmitComment() {
+        if (window._snxGuestCommentHooked) return;
+        const orig = window.submitPostComment;
+        if (!orig) return;
+        window._snxGuestCommentHooked = true;
+        window.submitPostComment = function() {
+            if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+            return orig.apply(this, arguments);
+        };
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       STARTUP — attach all hooks after DOM is ready
+    ───────────────────────────────────────────────────────── */
+
+    function _attachHooks() {
+        _hookPostBroadcast();
+        _hookStoryBubble();
+        _hookPostActions();
+        _hookLiveChatInput();
+
+        // Functions may not be defined yet — hook with a short retry
+        function _tryHook(fn) {
+            fn();
+            // Retry once after 1 s in case the module loaded after us
+            setTimeout(fn, 1000);
+            setTimeout(fn, 2500);
+        }
+        _tryHook(_hookGoLive);
+        _tryHook(_hookIpcOpen);
+        _tryHook(_hookFollowToggle);
+        _tryHook(_hookStoryActions);
+        _tryHook(_hookMusicActions);
+        _tryHook(_hookSubmitComment);
+        _tryHook(_hookInboxPage);
+        _tryHook(_hookNotificationsPage);
+        _tryHook(_hookMyChannel);
+
+        // Guard _startInboxListener so it never queries Firestore for guests
+        function _hookInboxListener() {
+            if (window._snxGuestInboxListenerHooked) return;
+            const orig = window._startInboxListener;
+            if (!orig) return;
+            window._snxGuestInboxListenerHooked = true;
+            window._startInboxListener = function() {
+                if (!_isAuthUser() && window.snxIsGuest()) return;  // no Firestore query
+                return orig.apply(this, arguments);
+            };
+        }
+        _tryHook(_hookInboxListener);
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       RESTORE on real auth login — clear guest state
+       Watches snxAuthStateChanged custom event (fired by onAuthStateChanged)
+    ───────────────────────────────────────────────────────── */
+    window.addEventListener('snxAuthStateChanged', function(e) {
+        if (e.detail && e.detail.user) {
+            // Real user just signed in — clear guest session
+            _clearSession();
+            _updateIndicator();
+            _restoreInbox();
+        }
+    });
+
+    /* ─────────────────────────────────────────────────────────
+       RESUME SESSION on page load
+       If sessionStorage says guest was active and no auth user,
+       restore guest state silently.
+    ───────────────────────────────────────────────────────── */
+    function _resumeIfGuest() {
+        if (_isAuthUser()) return;              // auth wins
+        const s = _loadSession();
+        if (!s.active) return;
+        window._snxGuest     = true;
+        window._snxGuestName = s.name;
+        window.guestDisplayName = s.name;
+        // Wait for app to be ready before showing indicator / navigating.
+        // Uses a polling approach to avoid clobbering the single __shadowNexusAppReadyCb slot.
+        function _whenReady(cb) {
+            if (window.__shadowNexusAppReady) { cb(); return; }
+            let _tries = 0;
+            const _t = setInterval(function() {
+                _tries++;
+                if (window.__shadowNexusAppReady || _tries > 100) {
+                    clearInterval(_t);
+                    if (window.__shadowNexusAppReady) cb();
+                }
+            }, 120);
+        }
+        _whenReady(function() {
+            // Auth may have resolved by now — check again
+            if (_isAuthUser()) { _clearSession(); return; }
+            const menuBtn = document.getElementById('menuButton');
+            if (menuBtn) menuBtn.style.display = 'flex';
+            _updateIndicator();
+            if (typeof navTo === 'function') navTo('feed');
+        });
+    }
+
+    /* ── Input keydown guard: Enter in name modal ── */
+    document.addEventListener('keydown', function(e) {
+        const nameModal = document.getElementById('snxGuestNameModal');
+        if (nameModal && nameModal.style.display === 'flex' && e.key === 'Enter') {
+            snxGuestEnter();
+        }
+    });
+
+    /* ── Init ── */
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            _attachHooks();
+            // Resume check is deferred so auth has time to resolve first
+            setTimeout(_resumeIfGuest, 400);
+        });
+    } else {
+        _attachHooks();
+        setTimeout(_resumeIfGuest, 400);
+    }
+
+})();
+</script>
+
 </body>
 </html>

@@ -1,9 +1,9 @@
 {
-  "buildId": "SNS-2026-ROLLBACK-1943",
-  "swVersion": "v66",
-  "deployedAt": "2026-09-27T19:43:00Z",
+  "buildId": "SNS-2026-GUEST-001",
+  "swVersion": "v69",
+  "deployedAt": "2026-10-03T00:00:00Z",
   "project": "horr-a08f4",
-  "studioVersion": "3.0.1",
+  "studioVersion": "3.1.0",
   "nexusVersion": "1.0.1",
-  "note": "ROLLBACK-1943: Restored to b475018 (19:35 baseline). Reverted Music Hub Home tab (studio.js/css), nexus-intro.js session-key fix, snxMHReapplyFounder hook. SW v66 busts v64+v65 caches on all devices."
+  "note": "GUEST-001: Guest Mode implemented. Continue as Guest button on login. Guest Rules modal with community rules. Display Name modal. Guest session via sessionStorage (window._snxGuest). Guest indicator (fixed bottom-right badge). Join modal (reusable). Feature guards for post/like/comment/follow/message/stories/golive/inbox/notifications/music-upload. Auth always takes priority. No Firebase writes for guests. No extra onAuthStateChanged."
 }

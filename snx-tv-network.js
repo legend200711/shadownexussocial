@@ -223,8 +223,10 @@ function _switchTab(tab, silent = false) {
     if (vid && !vid.paused) { try { vid.pause(); } catch(_) {} }
     if (aud && !aud.paused) { try { aud.pause(); } catch(_) {} }
   }
-  // Returning to MAIN TV: resume media
-  if (!wasMainTv && tab === 'main-tv') {
+  // Returning to MAIN TV: resume media ONLY if the TVpage is actually active.
+  // Guard: if snxTvTeardown has been called (full SNS navigation away), do NOT
+  // restart audio here — snxTvInit will reload the correct item on re-entry.
+  if (!wasMainTv && tab === 'main-tv' && window._snxTvPageActive !== false) {
     const vid = document.getElementById('ax-video');
     const aud = document.getElementById('ax-audio');
     if (vid && vid.src && vid.paused) { vid.play().catch(() => {}); }

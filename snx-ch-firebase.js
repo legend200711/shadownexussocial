@@ -18,7 +18,7 @@
  * Firebase project: remix-studio-4bf8a  (Firestore / channel data)
  */
 
-import { initializeApp }                        from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { initializeApp, getApps }               from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword,
          createUserWithEmailAndPassword,
          sendPasswordResetEmail, signOut,
@@ -51,7 +51,11 @@ const firebaseConfig = {
    NOTE: auth object is intentionally NOT exported from this file.
    Use the SNS auth proxy exported by snx-ch-auth-bridge.js instead.
 ══════════════════════════════════════════════════════════════ */
-const _app  = initializeApp(firebaseConfig);
+// Guard: only initialise a second Firebase app for the Aurenix project once.
+// Uses a named app so it never conflicts with the SNS [DEFAULT] app (horr-a08f4).
+const _AURENIX_APP_NAME = 'aurenix-channel';
+const _app  = getApps().find(a => a.name === _AURENIX_APP_NAME)
+           || initializeApp(firebaseConfig, _AURENIX_APP_NAME);
 const _aurenixAuth = getAuth(_app); // kept internally for onAuthStateChanged re-export
 
 // Disable Firestore offline persistence for the channel-state listener.

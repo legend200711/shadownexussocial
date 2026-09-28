@@ -115,14 +115,22 @@ window.snxTvInit = function () {
 
 /**
  * Called by SNS when user navigates away from tvPage.
- * Pauses local playback only — the broadcast channel continues on the server.
+ * Stops ALL local playback — the broadcast channel continues on the server.
  * Keeps _gateOpen = true so re-entry is instant (no Watch Now again).
+ *
+ * FIX: explicitly clear src after pause so browser media pipeline cannot
+ * restart via snx-tv-network _switchTab resume logic or bfcache.
  */
 window.snxTvTeardown = function () {
   _tvActive = false;
   // Do NOT reset _gateOpen — viewer already consented; re-entry should be instant.
-  _stopMedia();
+  _stopMediaFull();
   _stopTick();
+  // Signal the TV Network module that MAIN TV is no longer the active page so
+  // its internal _switchTab resume guard (which fires vid.play/aud.play when
+  // returning to main-tv) cannot accidentally restart audio while we are on
+  // a completely different SNS page.
+  window._snxTvPageActive = false;
 };
 
 /* ════════════════════════════════════════════════════
@@ -132,6 +140,16 @@ function _startWithUser(user) {
   console.log('[24TV] Engine starting — user:', user?.email || 'anonymous');
   _user      = user;
   _isFounder = !!(user && user.email?.trim().toLowerCase() === FOUNDER_EMAIL.toLowerCase());
+
+  // FIX: always kill any leftover media before (re-)initialising to prevent
+  // double audio when returning to tvPage.  _stopMediaFull clears src so the
+  // browser truly stops the stream even if a previous async _loadMedia call
+  // never finished cleaning up.
+  _stopMediaFull();
+  _stopTick();
+
+  // Mark the TV page as active NOW so the snx-tv-network resume path is permitted.
+  window._snxTvPageActive = true;
 
   // Subscribe to Main TV feature state (all users — they need to react to featured live)
   _subscribeMainTvState();
@@ -273,13 +291,33 @@ function _subscribeChannels() {
       if (_tvActive) _startTick();
     }
   }, (err) => {
-    console.error('[24TV ERROR] Failed to load channels from Firestore:', err?.code, err?.message);
+    // ── CRITICAL: log exact error so the console makes the cause clear ──
+    // Most common cause: remix-studio-4bf8a Firestore rules deny unauthenticated
+    // reads on network_channels.  Fix: set  allow read: if true;  on that
+    // collection in the remix-studio-4bf8a Firebase console.
+    console.error(
+      '[24TV ERROR] network_channels query failed.',
+      'code:', err?.code,
+      'message:', err?.message,
+      '\nFix: ensure remix-studio-4bf8a Firestore rules allow',
+      '  match /network_channels/{id} { allow read: if true; }',
+    );
     if (!_networkReady) {
       _networkReady = true;
       if (!document.getElementById('ax-media-area')) {
         _rebuildTvShell();
         if (_isFounder) _renderFounderBar();
       }
+      // Show a readable error in the player area when channels can't be loaded.
+      const errCode = err?.code || 'unknown';
+      const npTitle = document.getElementById('ax-np-title');
+      const npArtist = document.getElementById('ax-np-artist');
+      const statusText = document.getElementById('snx-tv-status-text');
+      if (npTitle)  npTitle.textContent  = 'Channel data unavailable';
+      if (npArtist) npArtist.textContent = errCode === 'permission-denied'
+        ? 'Firestore permission denied — contact site admin'
+        : ('Error: ' + errCode);
+      if (statusText) statusText.textContent = 'ERROR';
       if (_channels[0]) _setActiveChannel(_channels[0].id);
       _startTick();
     }
@@ -981,6 +1019,10 @@ function _isMediaStale() {
 }
 
 async function _loadMedia(item, elapsed) {
+  // FIX: abort immediately if the TV page has been torn down while this
+  // async call was pending (e.g. rapid navigation away then back).
+  if (!_tvActive) return;
+
   console.log('[24TV] Loading media — title:', item.title, 'url:', item.url?.slice(0, 80), 'elapsed:', elapsed.toFixed(1) + 's');
   const video = document.getElementById('ax-video');
   const audio = document.getElementById('ax-audio');
@@ -1095,15 +1137,20 @@ async function _loadMedia(item, elapsed) {
   // ─────────────────────────────────────────────────────────────────────────────
   try {
     await _mediaEl.play();
+    // FIX: check _tvActive after the async play() resolves — user may have
+    // navigated away during the await, in which case we must stop immediately.
+    if (!_tvActive) { _stopMediaFull(); return; }
     console.log('[24TV] Autoplay with sound ✓');
     const ts = document.getElementById('ax-tap-sound');
     if (ts) ts.style.display = 'none';
     _hideTvGate();
   } catch (audibleErr) {
+    if (!_tvActive) return; // navigated away during await
     console.log('[24TV] Audible autoplay blocked (' + audibleErr?.name + ') — trying muted');
     try {
       _mediaEl.muted = true;
       await _mediaEl.play();
+      if (!_tvActive) { _stopMediaFull(); return; }
       console.log('[24TV] Muted autoplay ✓ — showing Tap for Sound');
       _updateMuteBtn();
       _hideTvGate();
@@ -1150,11 +1197,39 @@ function _onMediaError() {
 /* ════════════════════════════════════════════════════
    STOP MEDIA
 ════════════════════════════════════════════════════ */
+
+/**
+ * Full stop: pause, clear src, and call load() to release the browser's
+ * media pipeline completely.  Use on page exit / re-init to ensure
+ * no stale audio leaks after navigation.
+ */
+function _stopMediaFull() {
+  const video = document.getElementById('ax-video');
+  const audio = document.getElementById('ax-audio');
+  if (video) {
+    try { video.pause(); } catch (_) {}
+    video.removeAttribute('src');
+    try { video.load(); } catch (_) {}
+    video.style.display = 'none';
+  }
+  if (audio) {
+    try { audio.pause(); } catch (_) {}
+    audio.removeAttribute('src');
+    try { audio.load(); } catch (_) {}
+  }
+  _mediaEl = null; _mediaType = null;
+  _currentMediaId = null;
+}
+
+/**
+ * Lightweight stop used during channel switches or item advances.
+ * Does NOT call load() — cheaper, and re-entry is expected shortly.
+ */
 function _stopMedia() {
   const video = document.getElementById('ax-video');
   const audio = document.getElementById('ax-audio');
-  if (video) { video.pause(); video.src = ''; video.style.display = 'none'; }
-  if (audio) { audio.pause(); audio.src = ''; }
+  if (video) { try { video.pause(); } catch (_) {} video.src = ''; video.style.display = 'none'; }
+  if (audio) { try { audio.pause(); } catch (_) {} audio.src = ''; }
   _mediaEl = null; _mediaType = null;
 }
 
