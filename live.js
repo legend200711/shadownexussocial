@@ -1,6 +1,6 @@
 /**
  * Shadow Nexus Social — Live System
- * live.js  (SNS-2026-LIVE-001)
+ * live.js  (SNS-2026-LIVE-002)
  *
  * ONE canonical Live engine for Shadow Nexus Social.
  * ES module — loaded as <script type="module"> in index.html.
@@ -11,8 +11,12 @@
  *   livePresence/{roomId}/{viewerId}     — viewer presence
  *   liveChats/{roomId}/{msgId}           — chat messages
  *
+ * Room schema (liveRooms/{roomId}):
+ *   roomId, sessionId, hostId, hostName, hostAvatar,
+ *   title, status, startedAt, lastHeartbeat,
+ *   viewerCount, likeCount
+ *
  * No external broadcaster required. No OBS. No RTMP.
- * No old live.js / Avenora / Wave dependencies.
  */
 
 import {
@@ -22,9 +26,7 @@ import {
 
 /* ══════════════════════════════════════════════════════════
    ICE CONFIGURATION
-   Centralised — add TURN credentials here when available.
-   DO NOT embed TURN secrets directly in source.
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 const _ICE_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -34,9 +36,20 @@ const _ICE_CONFIG = {
 };
 
 /* ══════════════════════════════════════════════════════════
+   STALE SESSION DETECTION
+   A room is stale if lastHeartbeat has not been updated for
+   STALE_THRESHOLD_MS. Heartbeat fires every HB_INTERVAL_MS,
+   so this allows ~6 missed beats before declaring stale —
+   tolerates brief network hiccups but catches crashes.
+════════════════════════════════════════════════════════════ */
+const HB_INTERVAL_MS    = 15_000;   // heartbeat period
+const STALE_THRESHOLD_MS = 90_000;  // 6 missed beats → stale
+
+/* ══════════════════════════════════════════════════════════
    HELPERS
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _log(msg)   { console.log('[SNX-LIVE] ' + msg); }
+function _disc(msg)  { console.log('[SNX-LIVE-DISCOVERY] ' + msg); }
 function _err(stage, service, op, code, msg) {
   console.error('[SNX-LIVE] ERROR | stage=' + stage + ' svc=' + service + ' op=' + op + ' code=' + code + ' | ' + msg);
 }
@@ -55,16 +68,68 @@ function _user()     {
 function _userData() { return window._snxUserData || {}; }
 
 /* ══════════════════════════════════════════════════════════
+   SHARED ACTIVE-ROOM FILTER
+   Called by both the Live Hub and the Feed Live Banner.
+
+   Rules applied to the raw RTDB liveRooms snapshot:
+     1. status === 'live'
+     2. lastHeartbeat (or startedAt) within STALE_THRESHOLD_MS
+     3. Deduplicate by hostId — keep the room with the most
+        recent startedAt for each host.
+
+   Returns a sorted array of valid active room objects.
+════════════════════════════════════════════════════════════ */
+function _filterActiveRooms(allRoomsVal) {
+  const now       = Date.now();
+  const allRooms  = Object.values(allRoomsVal || {});
+
+  const totalRecords = allRooms.length;
+  const statusLive   = allRooms.filter(r => r && r.status === 'live');
+
+  // Step 1: status=live + not stale
+  const fresh = statusLive.filter(r => {
+    const hb   = r.lastHeartbeat || r.hostHb || r.startedAt || 0;
+    const age  = now - hb;
+    return age < STALE_THRESHOLD_MS;
+  });
+  const staleCount = statusLive.length - fresh.length;
+
+  // Step 2: deduplicate by hostId — newest startedAt wins
+  const byHost = new Map();
+  fresh.forEach(r => {
+    const existing = byHost.get(r.hostId);
+    if (!existing || (r.startedAt || 0) > (existing.startedAt || 0)) {
+      byHost.set(r.hostId, r);
+    }
+  });
+  const dupCount = fresh.length - byHost.size;
+
+  const result = [...byHost.values()].sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
+
+  _disc('total room records: '   + totalRecords);
+  _disc('status-live rooms: '    + statusLive.length);
+  _disc('stale rooms: '          + staleCount);
+  _disc('duplicate hosts: '      + dupCount);
+  _disc('final displayed lives: '+ result.length);
+
+  return result;
+}
+
+// Expose for index.html Feed Live Banner
+window._snxLiveFilterActiveRooms = _filterActiveRooms;
+
+/* ══════════════════════════════════════════════════════════
    MODULE STATE
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 const _S = {
   /* host */
   hostRoomId:    null,
+  hostSessionId: null,
   hostStream:    null,
   hostCamOn:     true,
   hostMicOn:     true,
-  hostPeers:     {},     // viewerId → RTCPeerConnection
-  hostSigRef:    null,   // RTDB ref being listened on
+  hostPeers:     {},
+  hostSigRef:    null,
   hostHbTimer:   null,
   hostCountTimer:null,
   hostStartedAt: null,
@@ -74,15 +139,15 @@ const _S = {
   viewSessId:    null,
   viewPc:        null,
   viewPresRef:   null,
-  viewUnsubs:    [],     // cleanup fns
+  viewUnsubs:    [],
   /* hub */
   hubRef:        null,
   hubCb:         null,
 };
 
 /* ══════════════════════════════════════════════════════════
-   PUBLIC API — registered on window
-══════════════════════════════════════════════════════════ */
+   PUBLIC API
+════════════════════════════════════════════════════════════ */
 
 window.goLiveOrWatch = function() { window.snxLiveOpenGoLive(); };
 
@@ -112,7 +177,7 @@ window.snxLivePageOpen = function() {
 
 /* ══════════════════════════════════════════════════════════
    OVERLAY
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _getOverlay() {
   let ov = _el('snxLiveOverlay');
   if (!ov) {
@@ -135,7 +200,7 @@ function _closeOverlay() {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 1 — SETUP / GO LIVE SCREEN
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _openSetupScreen() {
   _log('Opening Go Live setup');
   _showOverlay(_buildSetupHTML());
@@ -267,38 +332,84 @@ function _buildSetupHTML() {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 2 — CREATE FIREBASE LIVE ROOM
-══════════════════════════════════════════════════════════ */
+   Before creating a new room, any existing status=live room
+   belonging to this host is marked ended and cleaned up.
+   This prevents ghost rooms when the host refreshes or
+   crashes and comes back.
+════════════════════════════════════════════════════════════ */
+async function _endAbandonedRooms(userId, db) {
+  _log('Checking for abandoned rooms for host: ' + userId);
+  try {
+    const snap = await get(ref(db, 'liveRooms'));
+    if (!snap.exists()) return;
+    const all = snap.val() || {};
+    const abandoned = Object.values(all).filter(
+      r => r && r.hostId === userId && r.status === 'live'
+    );
+    for (const r of abandoned) {
+      _log('Ending abandoned room: ' + r.roomId);
+      try {
+        await update(ref(db, 'liveRooms/' + r.roomId), {
+          status: 'ended',
+          endedAt: Date.now(),
+        });
+      } catch (_) {}
+      try { await remove(ref(db, 'liveSignaling/' + r.roomId)); } catch (_) {}
+      try { await remove(ref(db, 'livePresence/'  + r.roomId)); } catch (_) {}
+    }
+    if (abandoned.length) _log('Cleaned ' + abandoned.length + ' abandoned room(s)');
+  } catch (e) {
+    _err('startLive','RTDB','endAbandoned', e.name, e.message);
+  }
+}
+
 async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   _log('Auth ready — uid=' + user.uid);
 
   const db = _db();
   if (!db) throw new Error('Firebase RTDB not initialised');
 
-  const ud   = _userData();
-  const roomId    = user.uid.replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,20) + '_' + Date.now().toString(36);
-  const hostName  = ud.displayName || ud.username || user.displayName || user.email || 'Creator';
-  const hostAvatar= ud.profileImage || ud.photoURL || user.photoURL || '';
-  const startedAt = Date.now();
+  // ── End any abandoned rooms from previous sessions before creating a new one
+  await _endAbandonedRooms(user.uid, db);
+
+  const ud         = _userData();
+  const sessionId  = _uid();
+  const roomId     = user.uid.replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,20) + '_' + Date.now().toString(36);
+  const hostName   = ud.displayName || ud.username || user.displayName || user.email || 'Creator';
+  const hostAvatar = ud.profileImage || ud.photoURL || user.photoURL || '';
+  const startedAt  = Date.now();
 
   const roomRef = ref(db, 'liveRooms/' + roomId);
   await set(roomRef, {
-    roomId, hostId: user.uid, hostName, hostAvatar,
-    title: title || '', status: 'live',
-    startedAt, viewerCount: 0, likeCount: 0,
+    roomId,
+    sessionId,
+    hostId: user.uid,
+    hostName,
+    hostAvatar,
+    title: title || '',
+    status: 'live',
+    startedAt,
+    lastHeartbeat: startedAt,
+    viewerCount: 0,
+    likeCount: 0,
   });
-  _log('Room created: ' + roomId);
+  _log('Room created: ' + roomId + ' sessionId: ' + sessionId);
 
-  // Auto-end if host disconnects
+  // Auto-end if host disconnects unexpectedly (browser crash / close)
   onDisconnect(ref(db, 'liveRooms/' + roomId + '/status')).set('ended');
+  onDisconnect(ref(db, 'liveRooms/' + roomId + '/endedAt')).set(Date.now());
+  // Freeze lastHeartbeat at disconnect time so stale detection kicks in correctly
+  onDisconnect(ref(db, 'liveRooms/' + roomId + '/lastHeartbeat')).set(0);
 
   // Module state
-  _S.hostRoomId   = roomId;
-  _S.hostStream   = localStream;
-  _S.hostCamOn    = camOn;
-  _S.hostMicOn    = micOn;
-  _S.hostPeers    = {};
-  _S.hostEnded    = false;
-  _S.hostStartedAt= startedAt;
+  _S.hostRoomId    = roomId;
+  _S.hostSessionId = sessionId;
+  _S.hostStream    = localStream;
+  _S.hostCamOn     = camOn;
+  _S.hostMicOn     = micOn;
+  _S.hostPeers     = {};
+  _S.hostEnded     = false;
+  _S.hostStartedAt = startedAt;
 
   _log('Signaling ready');
 
@@ -307,11 +418,11 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
 
   _log('WebRTC ready');
 
-  // Heartbeat
-  const hbRef = ref(db, 'liveRooms/' + roomId + '/hostHb');
+  // Heartbeat — updates lastHeartbeat every HB_INTERVAL_MS
+  const hbRef = ref(db, 'liveRooms/' + roomId + '/lastHeartbeat');
   _S.hostHbTimer = setInterval(async () => {
     try { await set(hbRef, Date.now()); } catch (_) {}
-  }, 15000);
+  }, HB_INTERVAL_MS);
 
   // Open host stage
   _openHostStage(user, roomId, title, hostName, localStream, db, camOn, micOn);
@@ -321,9 +432,9 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 3 — HOST WebRTC
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _startHostWebRTC(user, roomId, localStream, db) {
-  const sigBase = 'liveSignaling/' + roomId;
+  const sigBase    = 'liveSignaling/' + roomId;
   const viewersRef = ref(db, sigBase);
 
   const cb = onValue(viewersRef, async (snap) => {
@@ -337,9 +448,7 @@ function _startHostWebRTC(user, roomId, localStream, db) {
     }
   });
 
-  _S.hostSigRef = viewersRef;
-  // Store cleanup: off(viewersRef, 'value', cb) — but since we use modular SDK,
-  // we store the unsubscribe pattern by wrapping
+  _S.hostSigRef  = viewersRef;
   _S._hostSigOff = () => off(viewersRef, 'value', cb);
 }
 
@@ -352,7 +461,6 @@ async function _hostConnectViewer(viewerId, roomId, localStream, db) {
 
   const sigPath = 'liveSignaling/' + roomId + '/' + viewerId;
 
-  // Send host ICE candidates
   const hostCands = [];
   pc.onicecandidate = async ({ candidate }) => {
     if (candidate) {
@@ -362,58 +470,44 @@ async function _hostConnectViewer(viewerId, roomId, localStream, db) {
   };
 
   pc.onconnectionstatechange = () => {
-    _log('Host peer ' + viewerId + ' → ' + pc.connectionState);
-    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected' || pc.connectionState === 'closed') {
+    _log('Host peer [' + viewerId + '] → ' + pc.connectionState);
+    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
       _cleanHostPeer(viewerId, db, roomId);
     }
   };
 
-  // Offer
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
   await set(ref(db, sigPath + '/offer'), { type: offer.type, sdp: offer.sdp });
 
-  // Watch for answer
+  // Watch for viewer answer
   const ansRef = ref(db, sigPath + '/answer');
-  let _ansApplied = false;
-  const ansOff = onValue(ansRef, async (snap) => {
-    if (!snap.exists() || _ansApplied) return;
-    if (pc.signalingState !== 'have-local-offer') return;
-    _ansApplied = true;
-    try { await pc.setRemoteDescription(new RTCSessionDescription(snap.val())); }
-    catch (e) { _err('host','webrtc','setAnswer', e.name, e.message); }
+  const ansCb  = onValue(ansRef, async (s) => {
+    if (!s.exists() || pc.signalingState === 'stable') return;
+    try {
+      await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
+    } catch (_) {}
   });
 
-  // Watch viewer ICE
+  // Watch for viewer ICE candidates
   const vcRef = ref(db, sigPath + '/viewerCandidates');
-  const vcApplied = new Set();
-  const vcOff = onValue(vcRef, async (snap) => {
-    if (!snap.exists()) return;
-    const cands = snap.val();
-    if (!Array.isArray(cands)) return;
-    for (let i = 0; i < cands.length; i++) {
-      if (!vcApplied.has(i)) {
-        vcApplied.add(i);
-        try { await pc.addIceCandidate(new RTCIceCandidate(cands[i])); } catch (_) {}
-      }
+  const vcCb  = onValue(vcRef, async (s) => {
+    if (!s.exists()) return;
+    for (const c of (s.val() || [])) {
+      try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
     }
   });
 
-  // Store cleanup
   _S.hostPeers[viewerId + '_cleanup'] = () => {
-    off(ansRef, 'value', ansOff);
-    off(vcRef,  'value', vcOff);
+    try { off(ansRef, 'value', ansCb); } catch (_) {}
+    try { off(vcRef,  'value', vcCb);  } catch (_) {}
+    try { pc.close(); } catch (_) {}
   };
-
-  // Update viewer count
-  _refreshViewerCount(roomId, db);
 }
 
 function _cleanHostPeer(viewerId, db, roomId) {
   const cleanup = _S.hostPeers[viewerId + '_cleanup'];
   if (cleanup) { try { cleanup(); } catch (_) {} }
-  const pc = _S.hostPeers[viewerId];
-  if (pc) { try { pc.close(); } catch (_) {} }
   delete _S.hostPeers[viewerId];
   delete _S.hostPeers[viewerId + '_cleanup'];
   try { remove(ref(db, 'liveSignaling/' + roomId + '/' + viewerId)); } catch (_) {}
@@ -430,7 +524,7 @@ function _refreshViewerCount(roomId, db) {
 
 /* ══════════════════════════════════════════════════════════
    HOST LIVE STAGE UI
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, micOn) {
   _showOverlay(_buildHostStageHTML(hostName, title, camOn, micOn));
 
@@ -451,7 +545,7 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
 
   // Viewer count (live presence)
   const presRef = ref(db, 'livePresence/' + roomId);
-  const presCb = onValue(presRef, (snap) => {
+  const presCb  = onValue(presRef, (snap) => {
     const count = snap.exists() ? Object.keys(snap.val() || {}).length : 0;
     const el = _el('snxLiveViewerCount');
     if (el) el.textContent = '👁 ' + count;
@@ -540,7 +634,7 @@ function _buildHostStageHTML(hostName, title, camOn, micOn) {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 8 — END LIVE (host)
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 async function _endLive(user, roomId, db, presRef, presCb) {
   if (_S.hostEnded) return;
   _S.hostEnded = true;
@@ -564,14 +658,21 @@ async function _endLive(user, roomId, db, presRef, presCb) {
   if (_S.hostStream) { _S.hostStream.getTracks().forEach(t => t.stop()); _S.hostStream = null; }
 
   // Mark room ended
-  try { await update(ref(db, 'liveRooms/' + roomId), { status: 'ended', endedAt: Date.now() }); }
+  try {
+    await update(ref(db, 'liveRooms/' + roomId), {
+      status: 'ended',
+      endedAt: Date.now(),
+      lastHeartbeat: 0,  // ensures stale filter removes it immediately
+    });
+  }
   catch (e) { _err('end','RTDB','markEnded', e.name, e.message); }
 
-  // Cleanup RTDB
+  // Cleanup temporary RTDB paths
   try { await remove(ref(db, 'liveSignaling/' + roomId)); } catch (_) {}
-  try { await remove(ref(db, 'livePresence/' + roomId)); } catch (_) {}
+  try { await remove(ref(db, 'livePresence/'  + roomId)); } catch (_) {}
 
-  _S.hostRoomId = null;
+  _S.hostRoomId    = null;
+  _S.hostSessionId = null;
 
   _showOverlay(_buildEndedHTML(true));
   const backBtn = _el('snxLiveEndedBack');
@@ -585,7 +686,8 @@ async function _endLive(user, roomId, db, presRef, presCb) {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 4 — LIVE HUB
-══════════════════════════════════════════════════════════ */
+   Uses shared _filterActiveRooms() — same logic as Feed.
+════════════════════════════════════════════════════════════ */
 function _renderHub() {
   const container = _el('snxLiveHubCards');
   if (!container) return;
@@ -593,7 +695,6 @@ function _renderHub() {
   const db = _db();
   if (!db) {
     container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>Live is loading…</div>';
-    // Retry once RTDB ready
     setTimeout(() => { if (_db()) _renderHub(); }, 500);
     return;
   }
@@ -608,14 +709,12 @@ function _renderHub() {
       container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>No one is live right now.</div>';
       return;
     }
-    const all = snap.val();
-    const live = Object.values(all).filter(r => r && r.status === 'live');
-    if (live.length === 0) {
+    const active = _filterActiveRooms(snap.val());
+    if (!active.length) {
       container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>No one is live right now.</div>';
       return;
     }
-    live.sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
-    live.forEach(room => container.appendChild(_buildHubCard(room)));
+    active.forEach(room => container.appendChild(_buildHubCard(room)));
   });
 
   _S.hubRef = roomsRef;
@@ -645,8 +744,8 @@ function _buildHubCard(room) {
 }
 
 /* ══════════════════════════════════════════════════════════
-   VIEWER SCREEN (Stage 3 viewer + 5 presence + 6 chat + 7 likes)
-══════════════════════════════════════════════════════════ */
+   VIEWER SCREEN
+════════════════════════════════════════════════════════════ */
 async function _openViewerScreen(roomId) {
   _log('Opening viewer for room: ' + roomId);
   const db = _db();
@@ -823,7 +922,7 @@ function _buildViewerHTML(room) {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 6 — CHAT
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _initChat(user, roomId, db, isHost, storeUnsub) {
   const msgsEl  = _el('snxLiveChatMessages');
   const inputEl = _el('snxLiveChatInput');
@@ -863,7 +962,7 @@ function _initChat(user, roomId, db, isHost, storeUnsub) {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 7 — LIKES
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _watchLikes(roomId, db) {
   const likeRef = ref(db, 'liveRooms/' + roomId + '/likeCount');
   onValue(likeRef, (snap) => {
@@ -893,7 +992,7 @@ function _animateHeart() {
 
 /* ══════════════════════════════════════════════════════════
    ENDED SCREEN
-══════════════════════════════════════════════════════════ */
+════════════════════════════════════════════════════════════ */
 function _buildEndedHTML(isHost) {
   return `
 <div class="snx-live-ended">
@@ -908,8 +1007,7 @@ function _buildEndedHTML(isHost) {
 
 /* ══════════════════════════════════════════════════════════
    GUEST MODE HOOK
-══════════════════════════════════════════════════════════ */
-// _hookGoLive is referenced by guest mode — provide it
+════════════════════════════════════════════════════════════ */
 function _hookGoLive() {
   if (window._snxGuestGoLiveHooked) return;
   const orig = window.snxLiveOpenGoLive;
@@ -923,7 +1021,6 @@ function _hookGoLive() {
     return orig.apply(this, arguments);
   };
 }
-// Expose for guest mode script
 window._hookGoLive = _hookGoLive;
 
-_log('live.js loaded — SNS-2026-LIVE-001');
+_log('live.js loaded — SNS-2026-LIVE-002');
