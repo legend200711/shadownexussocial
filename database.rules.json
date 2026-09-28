@@ -72,7 +72,7 @@
     },
 
     "liveConnections": {
-      "$hostUid": {
+      "$roomId": {
         ".read":  "auth != null",
         ".write": "auth != null"
       }

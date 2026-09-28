@@ -752,7 +752,7 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
 
   let chatSending = false;
 
-  const handle = await joinCreatorLive(user, liveId, videoEl, async event => {
+  async function _onLiveEvent(event) {
     const { type } = event;
 
     if (type === 'not_found') {
@@ -777,11 +777,62 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
         if (titleEl) titleEl.textContent = event.roomData.title || '';
       }
     }
-    if (type === 'stream' || type === 'connected') {
+    if (type === 'stream') {
+      if (videoEl && event.stream) {
+        videoEl.srcObject = event.stream;
+        videoEl.autoplay  = true;
+        videoEl.playsInline = true;
+        videoEl.play().then(() => {
+          console.log('[SNX-WEBRTC] VIDEO PLAYING');
+          _hideConnBanner(overlay);
+          const unmuteEl = overlay.querySelector('.crl-unmute-prompt');
+          if (unmuteEl) unmuteEl.style.display = 'block';
+        }).catch(err => {
+          if (err.name === 'NotAllowedError') {
+            // Autoplay blocked — show tap-to-play instead of "Connecting"
+            _hideConnBanner(overlay);
+            _showConnBanner(overlay, 'Tap to play Live', 'Browser blocked autoplay');
+            const tapBtn = document.createElement('button');
+            tapBtn.textContent = '▶ Tap to Play';
+            tapBtn.style.cssText = 'margin-top:12px;padding:10px 24px;font-size:16px;border-radius:8px;border:none;background:#e11d48;color:#fff;cursor:pointer;';
+            tapBtn.onclick = () => {
+              videoEl.play().then(() => {
+                console.log('[SNX-WEBRTC] VIDEO PLAYING (tap)');
+                _hideConnBanner(overlay);
+                const unmuteEl = overlay.querySelector('.crl-unmute-prompt');
+                if (unmuteEl) unmuteEl.style.display = 'block';
+              }).catch(() => {});
+              tapBtn.remove();
+            };
+            const banner = overlay.querySelector('.crl-conn-banner');
+            if (banner) banner.appendChild(tapBtn);
+          } else {
+            console.warn('[SNX-WEBRTC] video.play() error:', err.name, err.message);
+            _hideConnBanner(overlay);
+          }
+        });
+      } else {
+        _hideConnBanner(overlay);
+      }
+    }
+    if (type === 'connected') {
       _hideConnBanner(overlay);
-      // Show unmute prompt
-      const unmuteEl = overlay.querySelector('.crl-unmute-prompt');
-      if (unmuteEl) unmuteEl.style.display = 'block';
+    }
+    if (type === 'timeout') {
+      _showConnBanner(overlay, 'Unable to connect to this Live.', 'Connection timed out');
+      // Retry button
+      const retryBtn = document.createElement('button');
+      retryBtn.textContent = '↺ Retry';
+      retryBtn.style.cssText = 'margin-top:12px;padding:10px 24px;font-size:15px;border-radius:8px;border:none;background:#3b82f6;color:#fff;cursor:pointer;';
+      retryBtn.onclick = async () => {
+        retryBtn.disabled = true;
+        await leaveCreatorLive();
+        retryBtn.remove();
+        _showConnBanner(overlay, 'Connecting to Live…', '');
+        joinCreatorLive(user, liveId, videoEl, _onLiveEvent).catch(() => {});
+      };
+      const banner = overlay.querySelector('.crl-conn-banner');
+      if (banner) banner.appendChild(retryBtn);
     }
     if (type === 'waiting') {
       _showConnBanner(overlay, 'Waiting for stream…', '');
@@ -804,7 +855,9 @@ export async function openViewerLiveStage(user, userData, channel, liveId) {
     if (type === 'chat') {
       _appendChatMsg(chatMsgs, event.message, user.uid);
     }
-  });
+  }
+
+  const handle = await joinCreatorLive(user, liveId, videoEl, _onLiveEvent);
 
   // Unmute on tap
   const unmuteEl = overlay.querySelector('.crl-unmute-prompt');

@@ -447,6 +447,7 @@ export async function startCreatorBroadcast(user, userData, opts = {}) {
 function _hostStartWebRTC() {
   if (!_hostState) return;
   const { rtdbRoomId } = _hostState;
+  // Viewer registers itself at liveConnections/{roomId}/viewers/{viewerUid}
   const viewersRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers`);
 
   if (_hostState.signalUnsub) { try { _hostState.signalUnsub(); } catch (_) {} }
@@ -457,8 +458,9 @@ function _hostStartWebRTC() {
     const viewers = snap.val() || {};
     for (const [viewerUid, viewerData] of Object.entries(viewers)) {
       if (!viewerData || _hostState.viewerPeers[viewerUid]) continue;
+      console.log('[SNX-WEBRTC] Host detected viewer', viewerUid);
       await _hostCreateViewerPeer(viewerUid).catch(err => {
-        console.warn('[SNX LIVE] Failed to create viewer peer for', viewerUid, err);
+        console.warn('[SNX-WEBRTC] Failed to create viewer peer for', viewerUid, err);
       });
     }
   });
@@ -466,57 +468,103 @@ function _hostStartWebRTC() {
 
 async function _hostCreateViewerPeer(viewerUid) {
   if (!_hostState) return;
-  const { rtdbRoomId, liveId, localStream } = _hostState;
+  const { rtdbRoomId, localStream } = _hostState;
+
+  console.log('[SNX-WEBRTC] Host peer created for', viewerUid);
 
   const pc = new RTCPeerConnection(ICE);
-  _hostState.viewerPeers[viewerUid] = { pc, appliedCandKeys: new Set() };
+  _hostState.viewerPeers[viewerUid] = { pc, appliedCandKeys: new Set(), pendingCands: [] };
 
-  // Add all tracks from local stream
-  if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  // HOST is the offerer — it has the local tracks to transmit
+  if (localStream) {
+    const tracks = localStream.getTracks();
+    console.log('[SNX-WEBRTC] Host tracks added:', tracks.map(t => `${t.kind}(${t.readyState})`).join(', '));
+    tracks.forEach(t => pc.addTrack(t, localStream));
+  } else {
+    console.warn('[SNX-WEBRTC] Host localStream is null — no tracks to add!');
+  }
 
+  // Write host ICE candidates to RTDB for this viewer
   pc.onicecandidate = e => {
     if (!e.candidate) return;
-    const candRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${viewerUid}/${Date.now()}`);
+    const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const candRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${viewerUid}/${key}`);
     set(candRef, e.candidate.toJSON()).catch(() => {});
+    console.log('[SNX-WEBRTC] Host ICE candidate written for viewer', viewerUid);
   };
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
+    console.log('[SNX-WEBRTC] Host connectionState →', s, 'viewer:', viewerUid);
     if (s === 'failed' || s === 'disconnected' || s === 'closed') {
       _hostRebuildViewerPeer(viewerUid);
     }
   };
 
   pc.oniceconnectionstatechange = () => {
+    console.log('[SNX-WEBRTC] Host iceConnectionState →', pc.iceConnectionState, 'viewer:', viewerUid);
     if (pc.iceConnectionState === 'failed') {
       try { pc.restartIce(); } catch (_) {}
     }
   };
 
-  // Read viewer offer
-  const offerRef  = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/offer`);
-  const offerSnap = await get(offerRef);
-  if (!offerSnap.exists()) { _hostTeardownViewerPeer(viewerUid); return; }
+  // HOST creates the offer (offerer sends tracks)
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  console.log('[SNX-WEBRTC] Offer created for viewer', viewerUid);
 
-  await pc.setRemoteDescription(new RTCSessionDescription(offerSnap.val()));
+  // Write offer under liveConnections/{roomId}/viewers/{viewerUid}/offer
+  await set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${viewerUid}/offer`),
+    { type: offer.type, sdp: offer.sdp });
+  console.log('[SNX-WEBRTC] Offer written for viewer', viewerUid);
 
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-
+  // Listen for viewer answer
   const answerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${viewerUid}`);
-  await set(answerRef, { type: answer.type, sdp: answer.sdp });
-
-  // Subscribe to viewer ICE candidates
-  const vCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${viewerUid}`);
-  onValue(vCandRef, snap => {
-    if (!snap.exists()) return;
-    const cands = snap.val() || {};
-    for (const [key, cand] of Object.entries(cands)) {
-      if (_hostState?.viewerPeers[viewerUid]?.appliedCandKeys?.has(key)) continue;
-      _hostState?.viewerPeers[viewerUid]?.appliedCandKeys?.add(key);
-      pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+  const answerUnsub = onValue(answerRef, async snap => {
+    if (!snap.exists() || !_hostState) return;
+    const peer = _hostState.viewerPeers[viewerUid];
+    if (!peer || peer.pc.remoteDescription) return; // already applied
+    console.log('[SNX-WEBRTC] Host received answer for viewer', viewerUid);
+    try {
+      await peer.pc.setRemoteDescription(new RTCSessionDescription(snap.val()));
+      console.log('[SNX-WEBRTC] Host set remote description for viewer', viewerUid);
+      // Flush pending viewer ICE candidates
+      for (const c of peer.pendingCands) {
+        await peer.pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => {
+          console.warn('[SNX-WEBRTC] Host flush pendingCand error:', e.message);
+        });
+      }
+      peer.pendingCands = [];
+    } catch (e) {
+      console.error('[SNX-WEBRTC] Host setRemoteDescription (answer) FAILED:', e.message);
     }
   });
+
+  // Subscribe to viewer ICE candidates — queue if remoteDescription not yet ready
+  const vCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${viewerUid}`);
+  const vCandUnsub = onValue(vCandRef, snap => {
+    if (!snap.exists()) return;
+    const cands = snap.val() || {};
+    const peer = _hostState?.viewerPeers[viewerUid];
+    if (!peer) return;
+    for (const [key, cand] of Object.entries(cands)) {
+      if (peer.appliedCandKeys.has(key)) continue;
+      peer.appliedCandKeys.add(key);
+      if (peer.pc.remoteDescription) {
+        peer.pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => {
+          console.warn('[SNX-WEBRTC] Host addIceCandidate error:', e.message);
+        });
+      } else {
+        peer.pendingCands.push(cand);
+      }
+    }
+  });
+
+  // Store unsubscribe handles so teardown can clean them up
+  if (_hostState.viewerPeers[viewerUid]) {
+    _hostState.viewerPeers[viewerUid].answerUnsub  = answerUnsub;
+    _hostState.viewerPeers[viewerUid].vCandUnsub   = vCandUnsub;
+  }
 }
 
 function _hostRebuildViewerPeer(viewerUid) {
@@ -531,6 +579,8 @@ function _hostTeardownViewerPeer(viewerUid) {
   if (!_hostState) return;
   const peer = _hostState.viewerPeers[viewerUid];
   if (!peer) return;
+  try { peer.answerUnsub?.(); } catch (_) {}
+  try { peer.vCandUnsub?.(); } catch (_) {}
   try { peer.pc.close(); } catch (_) {}
   delete _hostState.viewerPeers[viewerUid];
 }
@@ -777,53 +827,93 @@ async function _viewerStartWebRTC(roomData, onEvent) {
   if (!_viewerState) return;
   const { uid, rtdbRoomId } = _viewerState;
 
+  console.log('[SNX-WEBRTC] Viewer entered room', rtdbRoomId);
+  console.log('[SNX-WEBRTC] Viewer ID created', uid);
+
   const pc = new RTCPeerConnection(ICE);
   _viewerState.rtcPc = pc;
+  console.log('[SNX-WEBRTC] RTCPeerConnection created');
+
+  // Pending host ICE candidates that arrive before remoteDescription is set
+  const pendingHostCands = [];
+  const appliedHostCandKeys = new Set();
 
   pc.ontrack = e => {
-    if (e.streams?.[0]) onEvent?.({ type: 'stream', stream: e.streams[0] });
+    const stream = e.streams?.[0] || new MediaStream([e.track]);
+    console.log('[SNX-WEBRTC] Viewer ontrack fired — kind:', e.track.kind);
+    console.log('[SNX-WEBRTC] Remote stream attached');
+    onEvent?.({ type: 'stream', stream });
   };
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
+    console.log('[SNX-WEBRTC] Viewer connectionState →', s,
+      '| iceConnectionState:', pc.iceConnectionState,
+      '| signalingState:', pc.signalingState);
     onEvent?.({ type: 'connState', state: s });
+    if (s === 'connected') {
+      console.log('[SNX-WEBRTC] ICE connected');
+    }
     if (s === 'failed' || s === 'disconnected') {
       _viewerScheduleReconnect(roomData, onEvent);
     }
   };
 
   pc.oniceconnectionstatechange = () => {
+    console.log('[SNX-WEBRTC] Viewer iceConnectionState →', pc.iceConnectionState);
     if (pc.iceConnectionState === 'failed') {
       try { pc.restartIce(); } catch (_) {}
     }
   };
 
+  // Write viewer ICE candidates to RTDB
   pc.onicecandidate = e => {
     if (!e.candidate) return;
     const key = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}/${key}`), e.candidate.toJSON()).catch(() => {});
+    set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewerCandidates/${uid}/${key}`),
+      e.candidate.toJSON()).catch(() => {});
+    console.log('[SNX-WEBRTC] Viewer ICE candidate written');
   };
 
-  // Create offer
-  const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
-  await pc.setLocalDescription(offer);
+  // Register viewer presence so host's onValue fires
+  await set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}`), { uid, joinedAt: Date.now() });
 
-  // Write offer to RTDB
-  await set(ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}/offer`), { type: offer.type, sdp: offer.sdp });
-
-  // Wait for answer
-  const answerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${uid}`);
-  const appliedHostCandKeys = new Set();
-
-  const answerUnsub = onValue(answerRef, async snap => {
-    if (!snap.exists() || !_viewerState || _viewerState.leftFlag) return;
-    if (pc.remoteDescription) return; // already applied
+  // Helper: apply host offer, create and write answer, flush queued ICE candidates
+  async function _applyOfferAndAnswer(offerVal) {
+    if (pc.remoteDescription) return; // idempotent
     try {
-      await pc.setRemoteDescription(new RTCSessionDescription(snap.val()));
-    } catch (_) {}
+      await pc.setRemoteDescription(new RTCSessionDescription(offerVal));
+      console.log('[SNX-WEBRTC] Viewer set remote description');
+
+      // Flush host candidates that arrived before the offer
+      for (const c of pendingHostCands) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => {
+          console.warn('[SNX-WEBRTC] Viewer flush pendingCand error:', e.message);
+        });
+      }
+      pendingHostCands.length = 0;
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      console.log('[SNX-WEBRTC] Viewer answer created');
+
+      await set(ref(liveDB, `liveConnections/${rtdbRoomId}/answers/${uid}`),
+        { type: answer.type, sdp: answer.sdp });
+      console.log('[SNX-WEBRTC] Viewer answer written');
+    } catch (e) {
+      console.error('[SNX-WEBRTC] Viewer offer/answer FAILED:', e.message);
+    }
+  }
+
+  // Wait for host's offer — host is now the offerer
+  const offerRef = ref(liveDB, `liveConnections/${rtdbRoomId}/viewers/${uid}/offer`);
+  const offerUnsub = onValue(offerRef, async snap => {
+    if (!snap.exists() || !_viewerState || _viewerState.leftFlag) return;
+    console.log('[SNX-WEBRTC] Viewer received offer');
+    await _applyOfferAndAnswer(snap.val());
   });
 
-  // Subscribe to host ICE candidates
+  // Subscribe to host ICE candidates — queue until offer applied
   const hCandRef = ref(liveDB, `liveConnections/${rtdbRoomId}/hostCandidates/${uid}`);
   const hCandUnsub = onValue(hCandRef, snap => {
     if (!snap.exists()) return;
@@ -832,12 +922,31 @@ async function _viewerStartWebRTC(roomData, onEvent) {
       if (appliedHostCandKeys.has(key)) continue;
       appliedHostCandKeys.add(key);
       if (pc.remoteDescription) {
-        pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+        pc.addIceCandidate(new RTCIceCandidate(cand)).catch(e => {
+          console.warn('[SNX-WEBRTC] Viewer addIceCandidate error:', e.message);
+        });
+      } else {
+        pendingHostCands.push(cand);
       }
     }
   });
 
-  _viewerState.signalUnsub = () => { try { answerUnsub(); } catch (_) {} try { hCandUnsub(); } catch (_) {} };
+  _viewerState.signalUnsub = () => {
+    try { offerUnsub(); } catch (_) {}
+    try { hCandUnsub(); } catch (_) {}
+  };
+
+  // Connection timeout — 30 s
+  _viewerState.connTimeout = setTimeout(() => {
+    if (!_viewerState || _viewerState.leftFlag) return;
+    const s = pc.connectionState;
+    if (s !== 'connected' && s !== 'completed') {
+      console.warn('[SNX-WEBRTC] Connection timeout. connectionState:', s,
+        'iceConnectionState:', pc.iceConnectionState,
+        'signalingState:', pc.signalingState);
+      onEvent?.({ type: 'timeout' });
+    }
+  }, 30000);
 }
 
 function _viewerScheduleReconnect(roomData, onEvent) {
@@ -849,6 +958,7 @@ function _viewerScheduleReconnect(roomData, onEvent) {
   _viewerState.reconnectTimer = setTimeout(async () => {
     _viewerState.reconnectTimer = null;
     if (!_viewerState || _viewerState.leftFlag) return;
+    if (_viewerState.connTimeout) { clearTimeout(_viewerState.connTimeout); _viewerState.connTimeout = null; }
     if (_viewerState.rtcPc) { try { _viewerState.rtcPc.close(); } catch (_) {} _viewerState.rtcPc = null; }
     if (_viewerState.signalUnsub) { try { _viewerState.signalUnsub(); } catch (_) {} _viewerState.signalUnsub = null; }
     await _viewerStartWebRTC(roomData, onEvent).catch(() => {});
@@ -863,7 +973,7 @@ function _viewerSubscribeChat(rtdbRoomId, callerUid, onEvent) {
     const chatQ = q(col(db, 'liveRooms', rtdbRoomId, 'liveMessages'), ob('createdAt', 'asc'), lim(80));
     const unsub = onSnapshot(chatQ, snap => {
       snap.docChanges().forEach(ch => {
-        if (ch.type === 'added') onEvent?.({ type: 'chat', msg: ch.doc.data() });
+        if (ch.type === 'added') onEvent?.({ type: 'chat', message: ch.doc.data() });
       });
     });
     if (_viewerState) _viewerState.chatUnsub = unsub;
@@ -900,6 +1010,7 @@ export async function leaveCreatorLive() {
 
   if (_viewerState.hbInterval) clearInterval(_viewerState.hbInterval);
   if (_viewerState.reconnectTimer) clearTimeout(_viewerState.reconnectTimer);
+  if (_viewerState.connTimeout) clearTimeout(_viewerState.connTimeout);
   if (_viewerState.frozenInterval) clearInterval(_viewerState.frozenInterval);
   if (_viewerState.signalUnsub) { try { _viewerState.signalUnsub(); } catch (_) {} }
   if (_viewerState.chatUnsub)   { try { _viewerState.chatUnsub(); } catch (_) {} }
