@@ -1006,8 +1006,10 @@ async function startLive() {
   // ── Adapter bridge: notify the social layer that this broadcast is live.
   //    broadcastStarted() writes creatorChannels status=live, currentLiveId=roomId
   //    so the creator appears in Live Now / Creator Channel on the main website.
-  //    Fire-and-forget — the RTDB room and Live Hub work even if this write fails. ──
+  //    Fire-and-forget — the RTDB room and Live Hub work even if this write fails.
+  //    All errors are now surfaced (no silent catch) so root cause is visible in console. ──
   ;(async () => {
+    console.log('[LIVE-BRIDGE] BRIDGE CALL START — uid:', _user.uid, 'roomId:', _roomId);
     try {
       const { broadcastStarted } = await import('./snx-live-adapter.js');
       await broadcastStarted(_user.uid, _roomId, {
@@ -1015,8 +1017,10 @@ async function startLive() {
         username:    _userData?.username || '',
         avatar:      _userData?.avatar   || _userData?.profilePicture || null,
       });
+      console.log('[LIVE-BRIDGE] BRIDGE CALL SUCCESS — creator now visible in Live Now');
     } catch (_bridgeErr) {
-      console.warn('[live.js] broadcastStarted bridge failed (non-critical):', _bridgeErr.message);
+      console.error('[LIVE-BRIDGE] BRIDGE CALL FAILED — creator will NOT appear in Live Now until fixed!',
+        'code:', _bridgeErr.code, 'message:', _bridgeErr.message, _bridgeErr);
     }
   })();
 
@@ -1302,6 +1306,8 @@ async function endLive() {
   if (_creatorEndedFlag) return;   // prevent double-call
   _creatorEndedFlag = true;
 
+  console.log('[END-LIVE] START — roomId:', _roomId, 'uid:', _user?.uid);
+
   // Cancel the onDisconnect trigger — we are ending cleanly ourselves
   if (_roomId) {
     try { await onDisconnect(ref(_liveDB, `liveRooms/${_roomId}`)).cancel(); } catch (_) {}
@@ -1321,12 +1327,14 @@ async function endLive() {
   _hostTeardownAllViewerPeers();
   // _hostTeardownAllViewerPeers handles _rtcSignalUnsub; also clear _rtcPc if left
   if (_rtcPc)  { try { _rtcPc.close(); } catch (_) {} _rtcPc = null; }
+  console.log('[END-LIVE] WEBRTC_CLOSE — all peer connections closed');
 
   // Tear down all relay PCs (host→viewer per-guest relay)
   _hostTeardownAllRelayPeers();
   if (_chatUnsub)        { _chatUnsub();         _chatUnsub        = null; }
   if (_viewerCountUnsub) { try { _viewerCountUnsub(); } catch(_) {} _viewerCountRef = null; _viewerCountUnsub = null; }
   if (_hostLikeCountRef) { try { off(_hostLikeCountRef); } catch(_) {} _hostLikeCountRef = null; _hostLikeCountUnsub = null; }
+  console.log('[END-LIVE] PRESENCE_STOP — listeners unsubscribed');
 
   /* ── Remove WebRTC signaling from LIVE RTDB ── */
   if (_roomId) {
@@ -1338,16 +1346,26 @@ async function endLive() {
   if (_audioMixer) { try { _audioMixer.stop(); } catch(_) {} _audioMixer = null; }
   _csMusicPlaying = false;
 
-  if (_localStream) { _localStream.getTracks().forEach(t => t.stop()); _localStream = null; }
+  console.log('[END-LIVE] MEDIA_STOP_START — stopping camera/mic tracks');
+  if (_localStream) {
+    _localStream.getTracks().forEach(t => {
+      t.stop();
+      console.log('[END-LIVE] track stopped:', t.kind, 'readyState:', t.readyState);
+    });
+    _localStream = null;
+  }
+  console.log('[END-LIVE] MEDIA_STOP_DONE');
 
   /* ── Mark room as ended in LIVE RTDB ── */
   const _endedRoomId = _roomId;
+  console.log('[END-LIVE] ROOM_END_START — marking RTDB liveRooms/', _endedRoomId, 'as ended');
   try {
     await update(ref(_liveDB, `liveRooms/${_endedRoomId}`), {
       status:  'ended',
       isLive:  false,
       endedAt: Date.now(),
     });
+    console.log('[END-LIVE] ROOM_END_DONE — RTDB room status=ended');
   } catch (_) {}
 
   /* ── Clear live status from main Firestore user doc ── */
@@ -1402,19 +1420,40 @@ async function endLive() {
   if (typeof window._cohostCleanup === 'function') { try { window._cohostCleanup(); } catch(_){} }
 
   // ── Adapter bridge: notify the social layer that the broadcast has ended.
-  //    broadcastEnded() clears creatorChannels so creator leaves Live Now. ──
+  //    broadcastEnded() clears creatorChannels status → offline so creator leaves Live Now.
+  //    CRITICAL: this is awaited (not fire-and-forget) so the creator channel is guaranteed
+  //    offline BEFORE the ended overlay is shown. Failure is logged, not silently swallowed. ──
+  console.log('[END-LIVE] ADAPTER_OFFLINE_START — clearing creatorChannels');
   if (_user) {
-    ;(async () => {
+    try {
+      const { broadcastEnded } = await import('./snx-live-adapter.js');
+      await broadcastEnded(_user.uid, _endedRoomId);
+      console.log('[END-LIVE] ADAPTER_OFFLINE_DONE — creatorChannels status:offline ✓');
+    } catch (_bridgeErr) {
+      console.error('[END-LIVE] ADAPTER_OFFLINE_FAILED — creator may still appear in Live Now!',
+        'code:', _bridgeErr.code, 'message:', _bridgeErr.message);
+      // Best-effort fallback: try direct Firestore write without the adapter module overhead
       try {
-        const { broadcastEnded } = await import('./snx-live-adapter.js');
-        await broadcastEnded(_user.uid, _endedRoomId);
-      } catch (_bridgeErr) {
-        console.warn('[live.js] broadcastEnded bridge failed (non-critical):', _bridgeErr.message);
+        const { updateDoc: _ud, doc: _d, serverTimestamp: _st } =
+          await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
+        await _ud(_d(_db, 'creatorChannels', _user.uid), {
+          status: 'offline', currentLiveId: null, currentStartedAt: null,
+          updatedAt: _st(),
+        });
+        console.log('[END-LIVE] ADAPTER_OFFLINE_DONE (fallback direct write) ✓');
+      } catch (_fbErr) {
+        console.error('[END-LIVE] ADAPTER_OFFLINE_FALLBACK ALSO FAILED:', _fbErr.message);
       }
-    })();
+    }
   }
 
+  // ── Reset local live state so host UI stops showing LIVE ──
+  _roomId     = null;
+  _roomHostId = null;
+  console.log('[END-LIVE] UI_RESET — _roomId cleared, showing ended overlay');
+
   _showEndedOverlay(true);
+  console.log('[END-LIVE] COMPLETE — host is no longer live');
 }
 
 /* ═══════════════════════════════════════════════════

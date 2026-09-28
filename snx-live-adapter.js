@@ -203,8 +203,15 @@ export async function watchLive(user, userData, channel, liveIdOrRoomId, opts = 
    @param {object} [meta] — optional { displayName, username, avatar }
 ══════════════════════════════════════════════════════════════ */
 export async function broadcastStarted(uid, roomId, meta = {}) {
-  if (!uid || !roomId) return;
-  console.log('[SNX ADAPTER] broadcastStarted — uid:', uid, 'roomId:', roomId);
+  if (!uid || !roomId) {
+    console.error('[LIVE-BRIDGE] broadcastStarted called with missing uid or roomId — uid:', uid, 'roomId:', roomId);
+    return;
+  }
+
+  console.log('[LIVE-BRIDGE] START — uid:', uid, 'roomId:', roomId);
+  console.log('[LIVE-BRIDGE] UID:', uid);
+  console.log('[LIVE-BRIDGE] ROOM_ID:', roomId);
+  console.log('[LIVE-BRIDGE] Firebase project: horr-a08f4 (creatorChannels)');
 
   const chData = {
     status:           'live',
@@ -213,6 +220,7 @@ export async function broadcastStarted(uid, roomId, meta = {}) {
     updatedAt:        serverTimestamp(),
   };
 
+  console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_START — creatorChannels/', uid);
   try {
     const chRef = doc(_db, 'creatorChannels', uid);
     const snap  = await getDoc(chRef);
@@ -228,10 +236,11 @@ export async function broadcastStarted(uid, roomId, meta = {}) {
         ...chData,
       });
     }
-    console.log('[SNX ADAPTER] broadcastStarted — creatorChannels updated ✓');
+    console.log('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_SUCCESS — status:live, currentLiveId:', roomId);
   } catch (err) {
-    console.warn('[SNX ADAPTER] broadcastStarted — creatorChannels write failed:', err.message);
-    // Non-fatal: RTDB room is live, Live Hub still works even if creatorChannels missed
+    console.error('[LIVE-BRIDGE] CREATOR_CHANNEL_WRITE_FAILED — code:', err.code, '— message:', err.message, '— full error:', err);
+    // Re-throw so callers know it failed — silent failure is what caused the invisibility bug
+    throw err;
   }
 }
 
@@ -243,8 +252,11 @@ export async function broadcastStarted(uid, roomId, meta = {}) {
    @param {string} [roomId] — the RTDB liveRooms key (for logging)
 ══════════════════════════════════════════════════════════════ */
 export async function broadcastEnded(uid, roomId) {
-  if (!uid) return;
-  console.log('[SNX ADAPTER] broadcastEnded — uid:', uid, 'roomId:', roomId);
+  if (!uid) {
+    console.error('[LIVE-BRIDGE] broadcastEnded called with no uid');
+    return;
+  }
+  console.log('[LIVE-BRIDGE] ADAPTER_OFFLINE_START — uid:', uid, 'roomId:', roomId);
 
   try {
     await updateDoc(doc(_db, 'creatorChannels', uid), {
@@ -253,9 +265,10 @@ export async function broadcastEnded(uid, roomId) {
       currentStartedAt: null,
       updatedAt:        serverTimestamp(),
     });
-    console.log('[SNX ADAPTER] broadcastEnded — creatorChannels offline ✓');
+    console.log('[LIVE-BRIDGE] ADAPTER_OFFLINE_DONE — creatorChannels status:offline ✓');
   } catch (err) {
-    console.warn('[SNX ADAPTER] broadcastEnded — creatorChannels write failed:', err.message);
+    console.error('[LIVE-BRIDGE] ADAPTER_OFFLINE_FAILED — code:', err.code, '— message:', err.message, '— full error:', err);
+    throw err;
   }
 }
 

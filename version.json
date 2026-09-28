@@ -1,9 +1,9 @@
 {
-  "buildId": "SNS-2026-GUEST-001",
-  "swVersion": "v69",
-  "deployedAt": "2026-10-03T00:00:00Z",
+  "buildId": "SNS-2026-LIVE-BRIDGE-R2-001",
+  "swVersion": "v72",
+  "deployedAt": "2026-10-05T12:00:00Z",
   "project": "horr-a08f4",
-  "studioVersion": "3.1.0",
+  "studioVersion": "3.2.1",
   "nexusVersion": "1.0.1",
-  "note": "GUEST-001: Guest Mode implemented. Continue as Guest button on login. Guest Rules modal with community rules. Display Name modal. Guest session via sessionStorage (window._snxGuest). Guest indicator (fixed bottom-right badge). Join modal (reusable). Feature guards for post/like/comment/follow/message/stories/golive/inbox/notifications/music-upload. Auth always takes priority. No Firebase writes for guests. No extra onAuthStateChanged."
+  "note": "LIVE-BRIDGE-R2-001: (1) SNX Live social bridge repair — broadcastStarted/broadcastEnded no longer silently swallow errors, full [LIVE-BRIDGE] diagnostics, broadcastEnded now awaited before UI reset, _roomId cleared after endLive, fallback direct Firestore write on adapter failure. (2) Music Hub R2 audit — confirmed R2 already authoritative, added upload step phases (Uploading→Saving→Published), featured/recently-added tracks now playable from Home tab without opening Library first, _snxInjectAndPlay helper. SW v72 to flush stale JS."
 }

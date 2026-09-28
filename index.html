@@ -11234,14 +11234,16 @@ body.arcade-fs-ios body::after { display:none !important; }
     <div style="font-size:13px;font-weight:800;color:#00AEEF;letter-spacing:1px;margin-bottom:16px;">&#11014; UPLOAD MUSIC</div>
 
     <!-- Drag-and-drop zone -->
+    <!-- REPAIR: removed inline ondrop — studio.js _initMusicLibrary attaches the
+         authoritative drop listener via addEventListener so there is exactly ONE
+         handler. The inline version caused a double-upload on every drag-and-drop. -->
     <div id="snxUploadZone"
       onclick="snxMusicOpenFilePicker()"
       style="border:2px dashed rgba(0,174,239,0.40);border-radius:16px;padding:36px 20px;
       text-align:center;cursor:pointer;background:rgba(0,174,239,0.04);
       transition:background 0.2s,border-color 0.2s;margin-bottom:16px;"
       ondragover="event.preventDefault();this.style.background='rgba(0,174,239,0.12)';this.style.borderColor='rgba(0,174,239,0.80)';"
-      ondragleave="this.style.background='rgba(0,174,239,0.04)';this.style.borderColor='rgba(0,174,239,0.40)';"
-      ondrop="event.preventDefault();this.style.background='rgba(0,174,239,0.04)';this.style.borderColor='rgba(0,174,239,0.40)';if(event.dataTransfer&&event.dataTransfer.files&&event.dataTransfer.files.length){var inp=document.getElementById('snxMusicFileInput');var fakeEvt={target:{files:event.dataTransfer.files}};snxMusicFilesSelected(fakeEvt);}">
+      ondragleave="this.style.background='rgba(0,174,239,0.04)';this.style.borderColor='rgba(0,174,239,0.40)';">
       <div style="font-size:40px;margin-bottom:12px;">&#11014;&#65039;</div>
       <div style="font-size:15px;font-weight:800;color:#00AEEF;margin-bottom:6px;">Click or Drag &amp; Drop to Upload</div>
       <div style="font-size:12px;color:#4a7a9a;">Supported: MP3, M4A, AAC, OGG, WAV, FLAC, OPUS<br>Up to 1,000 files at once</div>
@@ -12434,6 +12436,79 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
 
 
+<!-- ═══════════════════════════════════════════════════════════════
+     SNX STARTUP TIMING INSTRUMENTATION
+     Measures every stage of the auth / startup lifecycle.
+     Access via:  window.__snxT  (object of label → DOMHighResTimeStamp)
+     Quick report:  window.snxTimingReport()
+  ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+  'use strict';
+  var _T0 = performance.now();
+
+  // Stamp the very first JS execution point (APP_BOOT)
+  window.__snxT = {};
+  window.__snxT.APP_BOOT = _T0;
+  window.__snxT.FIREBASE_INIT = null;
+  window.__snxT.AUTH_LISTENER_ATTACHED = null;
+  window.__snxT.AUTH_FIRST_CALLBACK = null;
+  window.__snxT.AUTH_USER_FOUND = null;
+  window.__snxT.GLOBAL_USER_SET = null;
+  window.__snxT.FIRST_PAGE_RENDER = null;
+  window.__snxT.APP_INTERACTIVE = null;
+  window.__snxT.LOGIN_SUBMITTED = null;
+  window.__snxT.LOGIN_FIREBASE_SUCCESS = null;
+  window.__snxT.LOGOUT_START = null;
+  window.__snxT.LOGOUT_COMPLETE = null;
+
+  // Stamp INTRO_START when it first renders
+  var _introCheck = setInterval(function() {
+    if (document.getElementById('snxIntroOverlay')) {
+      if (!window.__snxT.INTRO_START) {
+        window.__snxT.INTRO_START = performance.now();
+        console.log('[SNX] INTRO_START +' + Math.round(window.__snxT.INTRO_START) + 'ms');
+      }
+      clearInterval(_introCheck);
+    }
+  }, 20);
+  // Stop checking after 5s
+  setTimeout(function() { clearInterval(_introCheck); }, 5000);
+
+  // Public report utility
+  window.snxTimingReport = function() {
+    var t = window.__snxT;
+    var keys = [
+      'APP_BOOT','INTRO_START','FIREBASE_INIT',
+      'AUTH_LISTENER_ATTACHED','AUTH_FIRST_CALLBACK','AUTH_USER_FOUND',
+      'GLOBAL_USER_SET','FIRST_PAGE_RENDER','APP_INTERACTIVE',
+      'LOGIN_SUBMITTED','LOGIN_FIREBASE_SUCCESS',
+      'LOGOUT_START','LOGOUT_COMPLETE'
+    ];
+    console.group('[SNX] Startup / Auth Timing Report');
+    var prev = 0;
+    keys.forEach(function(k) {
+      var v = t[k];
+      if (v === null || v === undefined) {
+        console.log('  ' + k + ': (not reached)');
+        return;
+      }
+      var abs = Math.round(v);
+      var delta = prev ? '+' + Math.round(v - prev) + 'ms' : '';
+      console.log('  ' + k + ': ' + abs + 'ms since page load ' + delta);
+      prev = v;
+    });
+    console.groupEnd();
+    return t;
+  };
+
+  console.log('[SNX] APP_BOOT at +0ms (instrumentation attached)');
+})();
+</script>
+
+
+
+
 <script type="module">
   import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, browserLocalPersistence, setPersistence, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
@@ -12457,6 +12532,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   const db = getFirestore(app);
   const _presenceRtdb = _getRtdb(app);
   const _storage = getStorage(app);
+
+  // ── Timing: Firebase app + auth instance created ──
+  if (window.__snxT) window.__snxT.FIREBASE_INIT = performance.now();
+  console.log('[SNX] FIREBASE_INIT +' + Math.round(window.__snxT ? window.__snxT.FIREBASE_INIT : 0) + 'ms');
 
   // ── Ensure auth token is always persisted in localStorage (survives tab/app close) ──
   setPersistence(auth, browserLocalPersistence).catch(() => {});
@@ -12813,9 +12892,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       const email = document.getElementById("userEmail").value.trim();
       const pass  = document.getElementById("userPass").value;
       if (!email || !pass) { toastNotification("Please enter your email and password."); return; }
+      // ── Timing: login button pressed ──
+      if (window.__snxT) { window.__snxT.LOGIN_SUBMITTED = performance.now(); console.log('[SNX] LOGIN_SUBMITTED +' + Math.round(window.__snxT.LOGIN_SUBMITTED) + 'ms'); }
       _showLoginLoading('Signing you in…');
       try {
           await signInWithEmailAndPassword(auth, email, pass);
+          // ── Timing: Firebase accepted credentials ──
+          if (window.__snxT) { window.__snxT.LOGIN_FIREBASE_SUCCESS = performance.now(); console.log('[SNX] LOGIN_FIREBASE_SUCCESS +' + Math.round(window.__snxT.LOGIN_FIREBASE_SUCCESS) + 'ms (delta from submit: +' + Math.round(window.__snxT.LOGIN_FIREBASE_SUCCESS - (window.__snxT.LOGIN_SUBMITTED||0)) + 'ms)'); }
           // onAuthStateChanged will navigate to feed — no manual navTo needed here
       } catch(e) {
           _hideLoginLoading();
@@ -13055,7 +13138,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       _purgeStale(rawDocs);
     }
 
-    onAuthStateChanged(auth, user => {
+    // ── Use canonical auth-ready queue instead of a second onAuthStateChanged ──
+    // This avoids a competing auth listener that runs in parallel with the canonical
+    // startup listener and adds unnecessary Firebase SDK overhead on cold start.
+    window._snxOnAuthReady(function() {
+      const user = window._snxCurrentUser;
       if (!user || _hubUnsub) return;
 
       // Merge rooms from liveRooms (SNS Live) and studioLiveRooms (Studio Live) into a single rendered list.
@@ -13251,7 +13338,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       }
     }
 
-    onAuthStateChanged(auth, user => {
+    // ── Use canonical auth-ready queue instead of a second onAuthStateChanged ──
+    window._snxOnAuthReady(function() {
+      const user = window._snxCurrentUser;
       if (!user)     return;
       if (_liveUnsub) return;
 
@@ -13276,6 +13365,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   })();
 
   window.handleLogout = async () => {
+      // ── Timing: logout initiated ──
+      if (window.__snxT) { window.__snxT.LOGOUT_START = performance.now(); console.log('[SNX] LOGOUT_START +' + Math.round(window.__snxT.LOGOUT_START) + 'ms'); }
       // ── Step 1: Creator Live cleanup — must happen before signOut so RTDB
       //    writes still have auth. Use a tight timeout so a stalled cleanup
       //    never blocks the sign-out.
@@ -13312,6 +13403,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       // onAuthStateChanged(null) will handle all remaining UI teardown.
       try {
           await signOut(auth);
+          // ── Timing: signOut resolved ──
+          if (window.__snxT) { window.__snxT.LOGOUT_COMPLETE = performance.now(); console.log('[SNX] LOGOUT_COMPLETE +' + Math.round(window.__snxT.LOGOUT_COMPLETE) + 'ms (signOut took +' + Math.round(window.__snxT.LOGOUT_COMPLETE - (window.__snxT.LOGOUT_START||0)) + 'ms)'); }
       } catch (_signOutErr) {
           // Even if signOut throws (e.g. already signed out), clear local state
           window._snxCurrentUser  = null;
@@ -13468,6 +13561,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // ── Safety net: dismiss the auth gate after 10 s even if onAuthStateChanged
   //    never fires (e.g. Firebase CDN blocked, network error).
   //    This prevents a permanent loading screen on bad networks.
+  // ── Timing: canonical auth listener is now attached ──
+  if (window.__snxT) { window.__snxT.AUTH_LISTENER_ATTACHED = performance.now(); console.log('[SNX] AUTH_LISTENER_ATTACHED +' + Math.round(window.__snxT.AUTH_LISTENER_ATTACHED) + 'ms'); }
+
   const _authGateTimeout = setTimeout(() => {
       if (!_authFirstResolved) {
           _authFirstResolved = true;
@@ -13487,8 +13583,17 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       clearTimeout(_authGateTimeout);
       const _firstCall = !_authFirstResolved;
       _authFirstResolved = true;
+      // ── Timing: first callback fired ──
+      if (window.__snxT) {
+          if (!window.__snxT.AUTH_FIRST_CALLBACK) {
+              window.__snxT.AUTH_FIRST_CALLBACK = performance.now();
+              console.log('[SNX] AUTH_FIRST_CALLBACK +' + Math.round(window.__snxT.AUTH_FIRST_CALLBACK) + 'ms (user=' + (user ? user.uid.slice(0,8) + '…' : 'null') + ')');
+          }
+      }
       if (user) {
           currentUser = user;
+          // ── Timing: user found ──
+          if (window.__snxT && !window.__snxT.AUTH_USER_FOUND) window.__snxT.AUTH_USER_FOUND = performance.now();
 
           // ── Guest state MUST be cleared when a real Firebase user is present ──
           // Guest mode uses sessionStorage only (no Firebase). Clear all traces
@@ -13514,6 +13619,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // never block navTo('feed') or the intro exit.
           window._snxCurrentUser = user;
           if (userData) window._snxUserData = userData;
+          // ── Timing: global user set ──
+          if (window.__snxT && !window.__snxT.GLOBAL_USER_SET) { window.__snxT.GLOBAL_USER_SET = performance.now(); console.log('[SNX] GLOBAL_USER_SET +' + Math.round(window.__snxT.GLOBAL_USER_SET) + 'ms'); }
 
           // Best-effort presence + status writes — fire-and-forget (no await).
           // A slow or offline network should NEVER delay the feed from appearing.
@@ -13735,6 +13842,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               try { window.__shadowNexusAppReadyCb(); } catch(_) {}
               window.__shadowNexusAppReadyCb = null;
           }
+          // ── Timing: first page render (feed) ──
+          if (window.__snxT) { window.__snxT.FIRST_PAGE_RENDER = performance.now(); console.log('[SNX] FIRST_PAGE_RENDER (navTo feed) +' + Math.round(window.__snxT.FIRST_PAGE_RENDER) + 'ms'); }
           navTo('feed');
 
           // ── Post-nav: role + maintenance checks (deferred so navTo('feed') runs first) ──
@@ -13787,6 +13896,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           if (typeof window._initStorySystem === 'function') window._initStorySystem();
           // Check if user has earned the OG badge (first 100 users, 50+ days old account)
           checkOGBadgeEligibility(user.uid);
+          // ── Timing: app is now interactive (all critical init complete) ──
+          if (window.__snxT) { window.__snxT.APP_INTERACTIVE = performance.now(); console.log('[SNX] APP_INTERACTIVE +' + Math.round(window.__snxT.APP_INTERACTIVE) + 'ms'); console.log('[SNX] ⚡ Login→Interactive delta: ' + Math.round(window.__snxT.APP_INTERACTIVE - (window.__snxT.LOGIN_FIREBASE_SUCCESS || window.__snxT.AUTH_FIRST_CALLBACK || 0)) + 'ms'); }
           // Start push notifications (requests permission if not yet granted)
           window._snxInitPush = initPushNotifications;
           setTimeout(initPushNotifications, 2500);

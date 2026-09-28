@@ -2509,13 +2509,22 @@ function _uploadOneTrack(job) {
       _music.uploadActive--;
       if (xhr.status === 200) {
         var res; try { res = JSON.parse(xhr.responseText); } catch(e) { res = {}; }
-        job.status = 'done';
-        _music.uploadDone++;
-        // Update track doc as 'ready' with public URL and the server-assigned R2 key
+        // R2 upload done — now saving metadata to Firestore
+        job.status = 'saving';
+        job.progress = 100;
+        _renderUploadDashboard();
+
         trackDoc.status = 'ready';
         trackDoc.url    = res.url || res.publicUrl || '';
         if (res.key) trackDoc.r2Key = res.key; // use the key the server actually stored
+
+        // Save to Firestore (synchronous from caller's perspective)
         _mlSaveTrack(trackDoc);
+
+        // Mark fully published
+        job.status = 'done';
+        _music.uploadDone++;
+
         // Add to in-memory library
         var existing = _music.tracks.findIndex(function(t) { return t.id === job.trackId; });
         if (existing === -1) _music.tracks.unshift(Object.assign({}, trackDoc));
@@ -2660,21 +2669,41 @@ function _showUploadDashboard() {
 function _renderUploadDashboard() {
   var el = document.getElementById('snxUploadDashboard');
   if (!el) return;
-  var total   = _music.uploadTotal;
-  var done    = _music.uploadDone;
-  var failed  = _music.uploadFailed;
-  var pct     = total > 0 ? Math.round((done / total) * 100) : 0;
+  var total    = _music.uploadTotal;
+  var done     = _music.uploadDone;
+  var failed   = _music.uploadFailed;
+  var pct      = total > 0 ? Math.round((done / total) * 100) : 0;
   var remaining = total - done - failed;
-  var pending = _music.uploadJobs.filter(function(j) { return j.status === 'uploading'; });
-  var currentFile = pending.length ? pending[0].file.name : (done === total ? 'All done!' : '—');
 
-  // Calculate speed (rough estimate)
-  var speed = '—';
+  // Active uploading job (for file name display)
+  var uploading = _music.uploadJobs.filter(function(j) { return j.status === 'uploading'; });
+  var saving    = _music.uploadJobs.filter(function(j) { return j.status === 'saving'; });
+  var allDone   = done === total && total > 0 && failed === 0;
+  var allFailed = failed === total && total > 0;
+
+  // Status line: what is happening right now
+  var statusLine;
+  if (allDone) {
+    statusLine = '&#10003; Published — ' + done + ' track' + (done !== 1 ? 's' : '') + ' added to your library.';
+  } else if (allFailed) {
+    statusLine = '&#10005; All uploads failed.';
+  } else if (saving.length) {
+    statusLine = '&#128190; Saving track' + (saving.length > 1 ? 's' : '') + ' to library\u2026';
+  } else if (uploading.length) {
+    // Show per-file progress for the first active upload
+    var activeJob = uploading[0];
+    var filePct = activeJob.progress || 0;
+    statusLine = '\u2191 Uploading to Shadow Nexus Cloud\u2026 ' + _esc(activeJob.file.name) + ' (' + filePct + '%)';
+  } else if (_music.uploadPaused) {
+    statusLine = '\u23F8 Paused — ' + remaining + ' file' + (remaining !== 1 ? 's' : '') + ' waiting.';
+  } else {
+    statusLine = '\u23F3 Processing\u2026 ' + remaining + ' remaining.';
+  }
 
   el.innerHTML =
     '<div class="snx-upload-dashboard">' +
       '<div class="snx-upload-header">' +
-        '<span class="snx-upload-title">&#127925; Uploading Music</span>' +
+        '<span class="snx-upload-title">&#127925; ' + (allDone ? 'Upload Complete' : 'Uploading Music') + '</span>' +
         '<span class="snx-upload-badge">' + done + ' / ' + total + '</span>' +
       '</div>' +
       '<div class="snx-upload-progress-bar-wrap"><div class="snx-upload-progress-bar" style="width:' + pct + '%"></div></div>' +
@@ -2686,13 +2715,14 @@ function _renderUploadDashboard() {
         '<div class="snx-upload-stat"><div class="us-val">' + _music.uploadActive + '</div><div class="us-lbl">Active</div></div>' +
         '<div class="snx-upload-stat"><div class="us-val">' + total + '</div><div class="us-lbl">Total</div></div>' +
       '</div>' +
-      '<div class="snx-upload-current">&#9654; ' + _esc(currentFile) + '</div>' +
+      '<div class="snx-upload-current">' + statusLine + '</div>' +
       '<div class="snx-upload-controls">' +
-        (_music.uploadPaused
-          ? '<button class="snx-upload-ctl-btn" onclick="snxUploadResume()">&#9654; Resume</button>'
-          : '<button class="snx-upload-ctl-btn" onclick="snxUploadPause()">&#9646;&#9646; Pause</button>') +
+        (allDone ? '' :
+          (_music.uploadPaused
+            ? '<button class="snx-upload-ctl-btn" onclick="snxUploadResume()">&#9654; Resume</button>'
+            : '<button class="snx-upload-ctl-btn" onclick="snxUploadPause()">&#9646;&#9646; Pause</button>')) +
         (failed > 0 ? '<button class="snx-upload-ctl-btn" onclick="snxUploadRetryFailed()">&#8635; Retry Failed (' + failed + ')</button>' : '') +
-        '<button class="snx-upload-ctl-btn danger" onclick="snxUploadCancel()">&#10005; Cancel</button>' +
+        (!allDone ? '<button class="snx-upload-ctl-btn danger" onclick="snxUploadCancel()">&#10005; Cancel</button>' : '') +
       '</div>' +
     '</div>';
 }
@@ -3223,6 +3253,18 @@ window.snxMusicAddToQueue = function(trackId) {
 };
 
 /* ── Play a track from the library by clicking its info row ── */
+/* Inject a minimal track into the in-memory library and play it.
+   Used by featured tracks whose full metadata may not be loaded yet. */
+window._snxInjectAndPlay = function(trackId, url, title, artist) {
+  if (!trackId || !url) return;
+  var existing = _music.tracks.find(function(t) { return t.id === trackId; });
+  if (!existing) {
+    existing = { id: trackId, uid: _state.user ? _state.user.uid : '', title: title || 'Untitled', artist: artist || '', url: url, status: 'ready', duration: 0, uploadedAt: Date.now() };
+    _music.tracks.unshift(existing);
+  }
+  window.snxMusicPlayFromLibrary(trackId);
+};
+
 window.snxMusicPlayFromLibrary = function(trackId) {
   var track = _music.tracks.find(function(t) { return t.id === trackId; });
   if (!track) return;
@@ -3264,8 +3306,9 @@ window.snxMusicPlayPause = function() {
 
   if (_music.playing) {
     _pauseAudio();
+    _mhSyncAllNowPlaying(track, false);
   } else {
-    _playAudio(track);
+    _playAudio(track); // _playAudio calls _mhSyncAllNowPlaying internally
   }
   _renderNowPlayingBar();
 };
@@ -3316,6 +3359,8 @@ function _playAudio(track) {
   if (!track || !track.url) {
     _toastError('Track has no audio URL. Re-upload may be needed.'); return;
   }
+  // REPAIR: stop radio if it is running — one music source at a time
+  if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
   _stopAudio();
   _music.playing = true;
 
@@ -3325,10 +3370,30 @@ function _playAudio(track) {
   _music.currentAudio = audio;
 
   audio.ontimeupdate = function() {
+    // REPAIR: update ALL progress surfaces — NowPlayingBar, Home hero, Playing tab
+    var timeStr = _formatDuration(Math.floor(audio.currentTime));
+    var pct     = audio.duration ? ((audio.currentTime / audio.duration) * 100) + '%' : '0%';
+
+    // Now Playing Bar (inside snxNowPlayingBarEl)
     var cur  = document.getElementById('snxNpbCurrentTime');
     var fill = document.getElementById('snxNpbProgressFill');
-    if (cur)  cur.textContent  = _formatDuration(Math.floor(audio.currentTime));
-    if (fill && audio.duration) fill.style.width = ((audio.currentTime / audio.duration) * 100) + '%';
+    if (cur)  cur.textContent = timeStr;
+    if (fill) fill.style.width = pct;
+
+    // Playing tab
+    var npCur  = document.getElementById('snxNPCurrentTime');
+    var npFill = document.getElementById('snxNPProgressFill');
+    if (npCur)  npCur.textContent = timeStr;
+    if (npFill) npFill.style.width = pct;
+
+    // Home hero progress
+    var mhFill = document.getElementById('snxMHNPFill');
+    var mhCur  = document.getElementById('snxMHNPCurrentTime');
+    var mhDur  = document.getElementById('snxMHNPDuration');
+    if (mhFill) mhFill.style.width = pct;
+    if (mhCur)  mhCur.textContent = timeStr;
+    if (mhDur && audio.duration)
+      mhDur.textContent = _formatDuration(Math.floor(audio.duration));
   };
 
   audio.onended = function() {
@@ -3342,6 +3407,7 @@ function _playAudio(track) {
       _music.playing = false;
       _toast('Playlist ended. Enable Repeat or add more tracks.');
       _renderNowPlayingBar();
+      _mhSyncAllNowPlaying(null, false);
     }
   };
 
@@ -3351,10 +3417,71 @@ function _playAudio(track) {
   };
 
   audio.play().catch(function(e) {
-    _toastError('Playback failed: ' + e.message + '. Tap Play to try again.');
+    if (e.name === 'NotAllowedError') {
+      _toastError('Tap Play to start audio — browser requires a user gesture.');
+    } else {
+      _toastError('Could not start this track: ' + e.message);
+    }
     _music.playing = false;
     _renderNowPlayingBar();
   });
+
+  // REPAIR: sync Home hero and Playing tab to show the new track immediately
+  _mhSyncAllNowPlaying(track, true);
+}
+
+/* ── _mhSyncAllNowPlaying — update Home hero + Playing tab for library tracks ── */
+function _mhSyncAllNowPlaying(track, playing) {
+  // Home hero — active state
+  var emptyEl  = document.getElementById('snxMHNPEmpty');
+  var activeEl = document.getElementById('snxMHNPActiveState');
+  var ctrlsEl  = document.getElementById('snxMHNPControls');
+  var mhTitle  = document.getElementById('snxMHNPTitle');
+  var mhArtist = document.getElementById('snxMHNPArtist');
+  var mhEq     = document.getElementById('snxMHNPEQRow');
+  var mhBtn    = document.getElementById('snxMHPlayBtn');
+
+  if (playing && track) {
+    if (emptyEl)  emptyEl.style.display  = 'none';
+    if (activeEl) activeEl.style.display = '';
+    if (ctrlsEl)  ctrlsEl.style.display  = '';
+    if (mhTitle)  mhTitle.textContent  = track.title  || 'Untitled';
+    if (mhArtist) mhArtist.textContent = track.artist || '';
+    if (mhEq)     mhEq.style.display   = 'flex';
+    if (mhBtn)    mhBtn.innerHTML       = '&#9646;&#9646;';
+  } else {
+    if (emptyEl)  emptyEl.style.display  = '';
+    if (activeEl) activeEl.style.display = 'none';
+    if (ctrlsEl)  ctrlsEl.style.display  = 'none';
+    if (mhEq)     mhEq.style.display     = 'none';
+    if (mhBtn)    mhBtn.innerHTML        = '&#9654;';
+  }
+
+  // Playing tab
+  var npTitle  = document.getElementById('snxNPTitle');
+  var npArtist = document.getElementById('snxNPArtist');
+  var npDur    = document.getElementById('snxNPDuration');
+  var npNext   = document.getElementById('snxNPNextRow');
+  var npNextTt = document.getElementById('snxNPNextTitle');
+  if (playing && track) {
+    if (npTitle)  npTitle.textContent  = track.title  || 'Untitled';
+    if (npArtist) npArtist.textContent = track.artist || '';
+    if (npDur && track.duration) npDur.textContent = _formatDuration(track.duration);
+    // UP NEXT
+    var nextIdx  = (_music.queueIndex + 1) % _music.queue.length;
+    var nextTrack = _music.queue.length > 1 ? _music.queue[nextIdx] : null;
+    if (npNext && npNextTt && nextTrack) {
+      npNextTt.textContent   = nextTrack.title || 'Untitled';
+      npNext.style.display   = '';
+    } else if (npNext) {
+      npNext.style.display = 'none';
+    }
+  } else {
+    if (npTitle)  npTitle.textContent  = '—';
+    if (npArtist) npArtist.textContent = '';
+    if (npDur)    npDur.textContent    = '—';
+    if (npNext)   npNext.style.display = 'none';
+  }
 }
 
 function _pauseAudio() {
@@ -3472,6 +3599,11 @@ var _origInitMusicMode = typeof _initMusicMode === 'function' ? _initMusicMode :
 
 /* ═══════════════════════════════════════════════════════
    19. PAGE HOOK — auto-init when studio page is navigated to
+   ─────────────────────────────────────────────────────
+   REPAIR: guard with _snxStudioHooked so this IIFE never
+   wraps realmNavTo more than once across navigations.
+   The tab-system IIFE (section 32) has its own guard
+   (_snxTabHooked) and fires after this one has run.
 ═══════════════════════════════════════════════════════ */
 (function hookRealmNavTo() {
   var orig = window.realmNavTo;
@@ -3479,7 +3611,8 @@ var _origInitMusicMode = typeof _initMusicMode === 'function' ? _initMusicMode :
     document.addEventListener('DOMContentLoaded', function() { hookRealmNavTo(); });
     return;
   }
-  window.realmNavTo = function(pageId) {
+  if (orig._snxStudioHooked) return; // already hooked — do not double-wrap
+  var wrapped = function(pageId) {
     orig.apply(this, arguments);
     if (pageId === 'studioPage') {
       document.body.classList.add('snx-studio-open');
@@ -3488,6 +3621,8 @@ var _origInitMusicMode = typeof _initMusicMode === 'function' ? _initMusicMode :
       document.body.classList.remove('snx-studio-open');
     }
   };
+  wrapped._snxStudioHooked = true;
+  window.realmNavTo = wrapped;
 })();
 
 /* ═══════════════════════════════════════════════════════
@@ -3780,6 +3915,13 @@ window._snxRenderCSPl          = function() { _renderCSPlaylistPanel(); };
 window._snxRenderCSLib         = function() { _renderCSLibrary(); };
 window._snxSqRenderQueue       = function() { _sqRenderQueue(); };
 window._snxRenderNowPlaying    = function() { _renderNowPlayingBar(); };
+
+/* ── REPAIR: expose _music playing state so Music Hub IIFE can read it ── */
+window._snxMusicPlaying        = function() { return _music ? !!_music.playing : false; };
+window._snxMusicCurrentTrack   = function() {
+  if (!_music || !_music.queue || !_music.queue.length) return null;
+  return _music.queue[_music.queueIndex] || null;
+};
 
 // After track list changes, refresh the Queue tab library list if it's open
 var _origRenderLibrary = _renderLibrary;
@@ -4350,18 +4492,21 @@ function _mhSyncNowPlayingHero() {
   var ctrlsEl    = document.getElementById('snxMHNPControls');
   if (!emptyEl) return; // Home tab not in DOM yet
 
-  // Detect if something is playing via the shared music state
-  var tracks = (typeof window._snxStudioTracks === 'function') ? window._snxStudioTracks() : [];
-  var hasQueue = tracks.length > 0;
+  // REPAIR: use authoritative window bridges set by the main IIFE.
+  // Do NOT infer state from DOM text — that produced false negatives
+  // because snxMHNPTitle was never written by the library player.
+  var musicPlaying = (typeof window._snxMusicPlaying === 'function')
+    ? window._snxMusicPlaying() : false;
+  var hasQueue = (typeof window._snxStudioTracks === 'function')
+    ? (window._snxStudioTracks().length > 0) : false;
 
-  // Check the NowPlaying bar title — if set, something is active
-  var npTitle  = document.getElementById('snxMHNPTitle');
-  var isActive = npTitle && npTitle.textContent && npTitle.textContent !== 'Nothing playing';
+  var isActive = musicPlaying || _mhRadioPlaying;
 
   if (isActive) {
     if (emptyEl)  emptyEl.style.display  = 'none';
     if (activeEl) activeEl.style.display = '';
-    if (ctrlsEl)  ctrlsEl.style.display  = '';
+    // Show prev/next controls only for library tracks (not radio)
+    if (ctrlsEl)  ctrlsEl.style.display  = _mhRadioPlaying ? 'none' : '';
   } else {
     if (emptyEl)  emptyEl.style.display  = '';
     if (activeEl) activeEl.style.display = 'none';
@@ -4474,8 +4619,25 @@ function _mhLoadFeatured() {
       var removeBtn = isFounder
         ? '<button class="snx-mh-unfeature-btn" onclick="snxMHUnfeatureTrack(\'' + _mhEsc(t.id) + '\')">&#10005; Remove</button>'
         : '';
-      return '<div class="snx-mh-featured-item">' +
-        '<div class="snx-mh-featured-artwork">&#127925;</div>' +
+      // Allow play directly from the featured doc's stored url — does not require
+      // library to be loaded first. Clicking the card tries the library path first,
+      // then falls back to playing the url directly.
+      var playAttr = t.url
+        ? 'onclick="(function(){' +
+            'var tk=window._snxStudioTracks?window._snxStudioTracks().find(function(x){return x.id===\'' + _mhEsc(t.id) + '\';}) : null;' +
+            'if(tk&&typeof snxMusicPlayFromLibrary===\'function\'){snxMusicPlayFromLibrary(\'' + _mhEsc(t.id) + '\');return;}' +
+            'if(typeof snxMusicPlayFromLibrary===\'function\'){' +
+              'window._music=window._music||{};' +
+              'if(!window._snxStudioTracks){return;}' +
+            '}' +
+            // Fallback: inject into library and play
+            'if(typeof window._snxInjectAndPlay===\'function\'){window._snxInjectAndPlay(\'' + _mhEsc(t.id) + '\',\'' + _mhEsc(t.url) + '\',\'' + _mhEsc(t.title || 'Untitled') + '\',\'' + _mhEsc(t.artist || '') + '\');return;}' +
+            // Last resort: open audio directly
+            'var a=new Audio(\'' + _mhEsc(t.url) + '\');a.play().catch(function(){});' +
+          '})()"'
+        : '';
+      return '<div class="snx-mh-featured-item" style="cursor:pointer;" ' + playAttr + ' title="' + _mhEsc(t.title || 'Untitled') + '">' +
+        '<div class="snx-mh-featured-artwork">&#9654;</div>' +
         '<div class="snx-mh-featured-info">' +
           '<div class="snx-mh-featured-title">' + _mhEsc(t.title || 'Untitled') + '</div>' +
           '<div class="snx-mh-featured-artist">' + _mhEsc(t.artist || '') + '</div>' +
@@ -4493,14 +4655,29 @@ function _mhLoadPlaylists() {
   var gridEl = document.getElementById('snxMHPlaylistGrid');
   if (!gridEl) return;
 
-  var uid = _mhUid();
   var fs  = _mhFs();
-  if (!uid || !fs) return; // empty state text already set by snxMHRefreshHome
+  // REPAIR: playlists are stored under the founder's UID only.
+  // Using the current viewer's UID caused regular users (and the founder
+  // on a different device) to always see an empty playlist grid on Home.
+  // The Music Hub is a shared catalogue — always load from the founder's path.
+  var founderUid = null;
+  if (typeof window._snxCurrentUser !== 'undefined') {
+    // Prefer the canonical auth UID when signed in as founder
+    var u = window._snxCurrentUser;
+    if (u && (u.email || '').trim().toLowerCase() === MH_FOUNDER_EMAIL) {
+      founderUid = u.uid;
+    }
+  }
+  // Fall back to the stored founder UID if we have it cached from a previous load
+  if (!founderUid) founderUid = window._snxMHFounderUid || null;
 
-  var isFounder = isMHFounder();
+  if (!founderUid || !fs) return; // no founder reference available — show empty state
+
+  // Cache it for subsequent calls by non-founder sessions
+  window._snxMHFounderUid = founderUid;
 
   fs.getDocs(fs.query(
-    fs.collection(fs.db, 'studioPlaylists', uid, 'playlists'),
+    fs.collection(fs.db, 'studioPlaylists', founderUid, 'playlists'),
     fs.orderBy('createdAt', 'desc'),
     fs.limit(50)
   )).then(function(snap) {
@@ -4525,12 +4702,22 @@ function _mhLoadRecent() {
   var listEl = document.getElementById('snxMHRecentList');
   if (!listEl) return;
 
-  var uid = _mhUid();
   var fs  = _mhFs();
-  if (!uid || !fs) return;
+  // REPAIR: recently added tracks live under the founder's UID (same as playlists).
+  // Regular users do not have their own cloudStreamTracks documents — loading
+  // from the current viewer's UID always returned empty for non-founder accounts.
+  var founderUid = window._snxMHFounderUid || null;
+  if (!founderUid && typeof window._snxCurrentUser !== 'undefined') {
+    var u = window._snxCurrentUser;
+    if (u && (u.email || '').trim().toLowerCase() === MH_FOUNDER_EMAIL) {
+      founderUid = u.uid;
+      window._snxMHFounderUid = founderUid;
+    }
+  }
+  if (!founderUid || !fs) return;
 
   fs.getDocs(fs.query(
-    fs.collection(fs.db, 'cloudStreamTracks', uid, 'tracks'),
+    fs.collection(fs.db, 'cloudStreamTracks', founderUid, 'tracks'),
     fs.orderBy('uploadedAt', 'desc'),
     fs.limit(8)
   )).then(function(snap) {
@@ -4540,8 +4727,12 @@ function _mhLoadRecent() {
     }
     listEl.innerHTML = snap.docs.map(function(d) {
       var t = Object.assign({ id: d.id }, d.data());
-      return '<div class="snx-mh-recent-item" onclick="snxMusicPlayFromLibrary(\'' + _mhEsc(t.id) + '\')">' +
-        '<div class="snx-mh-recent-artwork">&#127925;</div>' +
+      // Use _snxInjectAndPlay so the track plays even if not yet in library memory
+      var clickFn = t.url
+        ? 'window._snxInjectAndPlay&&_snxInjectAndPlay(\'' + _mhEsc(t.id) + '\',\'' + _mhEsc(t.url) + '\',\'' + _mhEsc(t.title || 'Untitled') + '\',\'' + _mhEsc(t.artist || '') + '\')'
+        : 'snxMusicPlayFromLibrary(\'' + _mhEsc(t.id) + '\')';
+      return '<div class="snx-mh-recent-item" style="cursor:pointer;" onclick="' + clickFn + '">' +
+        '<div class="snx-mh-recent-artwork">&#9654;</div>' +
         '<div class="snx-mh-recent-info">' +
           '<div class="snx-mh-recent-title">' + _mhEsc(t.title || 'Untitled') + '</div>' +
           '<div class="snx-mh-recent-artist">' + _mhEsc(t.artist || '') + '</div>' +
@@ -4843,6 +5034,14 @@ function _mhEsc(str) {
 (function _hookAuthReady() {
   if (typeof window._snxOnAuthReady === 'function') {
     window._snxOnAuthReady(function() {
+      // REPAIR: seed the founder UID cache as soon as auth resolves.
+      // This allows _mhLoadPlaylists / _mhLoadRecent to serve founder content
+      // to regular users without requiring a cross-session lookup.
+      var u = window._snxCurrentUser;
+      if (u && (u.email || '').trim().toLowerCase() === MH_FOUNDER_EMAIL) {
+        window._snxMHFounderUid = u.uid;
+      }
+
       if (typeof window.snxMHRefreshHome === 'function') {
         // Only refresh if Music Hub is currently visible
         var page = document.getElementById('studioPage');
