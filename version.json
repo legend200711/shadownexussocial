@@ -1,9 +1,9 @@
 {
-  "buildId": "SNX-LIVE-RECOVERY-2026-09-28",
-  "swVersion": "v76",
-  "deployedAt": "2026-09-28T12:00:00Z",
+  "buildId": "SNX-LIVE-AVENORA-ENGINE-2026-09-29",
+  "swVersion": "v77",
+  "deployedAt": "2026-09-29T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.1",
   "nexusVersion": "1.1.0",
-  "note": "SNX-LIVE-RECOVERY-2026-09-28: Founder live.html gate bypass (async email check + sessionStorage reload), SW v76 cache bust. Firebase horr-a08f4 confirmed. All Live startup checkpoints, RTDB/Firestore rules, WebRTC/signaling, chat, likes, viewer count, guest boxes intact."
+  "note": "SNX-LIVE-AVENORA-ENGINE-2026-09-29: Restored Live startLive() from proven Avenora engine. Removed blocking getIdToken(forceRefresh) and auth.currentUser double-check. Removed _withTimeout wrappers and 60s outer timeout. Restored clean sequential Avenora startup flow. SNS Firebase horr-a08f4 preserved. All SNS features intact."
 }
