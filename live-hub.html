@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Shadow Nexus Wave — Live Hub 📡</title>
+<title>Shadow Nexus — Live Hub 📡</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="theme-color" content="#0B1F3A">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -36,7 +36,7 @@
   <div class="hub-auth-icon">🔒</div>
   <h2 class="hub-auth-title">Sign in Required</h2>
   <p class="hub-auth-sub">You need to be signed in to access the Live Hub.</p>
-  <a href="sfl-home.html" class="hub-back-btn">← Go to Shadow Nexus Wave</a>
+  <a href="index.html" class="hub-back-btn">← Go to Shadow Nexus</a>
 </div>
 
 <!-- ══════════════════════════════════════════════
@@ -87,15 +87,14 @@
 
 <script type="module">
 /**
- * Shadow Nexus Wave Hub — inline module
+ * Shadow Nexus Live Hub — inline module
  *
  * Shows all active live rooms from Firestore (liveRooms collection, status == 'live').
  * Real-time updates via onSnapshot — no page refresh needed.
- * Go Live → navigates to live.html (main live engine)
- * Watch  → navigates to live.html?room=<roomId>
+ * Go Live → navigates to live-room.html?host=1
+ * Watch  → navigates to live-room.html?room=<roomId>
  */
 
-import { snxGetNameFromData } from './snx-profile.js';
 import { initializeApp, getApps, getApp }
   from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
 import { getAuth, onAuthStateChanged }
@@ -108,13 +107,13 @@ import {
 
 /* ── Firebase config ── */
 const _CFG = {
-  apiKey:            'AIzaSyBO4IIDLMp-SKgBaA3RINsYaj-UELLUXZE',
-  authDomain:        'shadow-nexus-wave.firebaseapp.com',
-  databaseURL:       'https://shadow-nexus-wave-default-rtdb.firebaseio.com',
-  projectId:         'shadow-nexus-wave',
-  storageBucket:     'shadow-nexus-wave.firebasestorage.app',
-  messagingSenderId: '68850298302',
-  appId:             '1:68850298302:web:603bbb8539079903cb1def',
+  apiKey:            'AIzaSyByZRmp6R9HY17T2_WdJUFWeeaLNOP6y2Y',
+  authDomain:        'horr-a08f4.firebaseapp.com',
+  databaseURL:       'https://horr-a08f4-default-rtdb.firebaseio.com',
+  projectId:         'horr-a08f4',
+  storageBucket:     'horr-a08f4.firebasestorage.app',
+  messagingSenderId: '933810617818',
+  appId:             '1:933810617818:web:efb24f123337dd987c14e3',
 };
 const _app  = getApps().length ? getApp() : initializeApp(_CFG);
 const _auth = getAuth(_app);
@@ -175,7 +174,7 @@ async function _checkFeatureFlag() {
         'Live Hub is temporarily offline. Please check back soon!</div>' +
         '<a href="index.html" style="display:inline-block;padding:10px 28px;background:rgba(0,174,239,0.15);' +
         'border:1px solid rgba(0,174,239,0.5);color:#00aeef;border-radius:24px;text-decoration:none;' +
-        'font-size:14px;font-weight:600;">← Back to Shadow Nexus Wave</a>' +
+        'font-size:14px;font-weight:600;">← Back to Shadow Nexus</a>' +
         '</div>';
       return false;
     }
@@ -212,7 +211,7 @@ async function _loadUserData() {
 
 /* ── Go Live ── */
 function _goLive() {
-  window.location.href = 'live.html';
+  window.location.href = 'live-room.html?host=1';
 }
 D.goLiveBtn      && D.goLiveBtn.addEventListener('click', _goLive);
 D.goLiveBtnEmpty && D.goLiveBtnEmpty.addEventListener('click', _goLive);
@@ -244,9 +243,7 @@ function _subscribeRooms() {
         if (!r.hostId) return;
         if (r.status !== 'live') return;
         // Skip stale rooms older than 4 hours (auto-cleanup guard)
-        // createdAt may be a Firestore Timestamp or a plain epoch number
-        const createdMs = r.createdAt?.toMillis ? r.createdAt.toMillis() : (r.createdAt || 0);
-        const age = now - createdMs;
+        const age = now - (r.createdAt || 0);
         if (age > 4 * 60 * 60 * 1000) return;
         rooms.push(r);
       });
@@ -319,12 +316,11 @@ function _renderRooms(rooms) {
 
 /* ── Build a room card ── */
 function _buildCard(room, rid) {
-  const _resolvedHost = snxGetNameFromData({ displayName: room.hostName, username: room.hostUsername || room.username });
-  const hostName = _esc(_resolvedHost);
-  const title    = _esc(room.title    || 'Shadow Nexus Wave');
+  const hostName = _esc(room.hostName || room.username || 'Creator');
+  const title    = _esc(room.title    || 'Shadow Nexus LIVE');
   const viewers  = room.viewers ?? 0;
   const avatar   = room.hostAvatar || room.avatar || '';
-  const initial  = _resolvedHost[0].toUpperCase();
+  const initial  = (room.hostName || room.username || 'C')[0].toUpperCase();
 
   const avatarHtml = avatar
     ? `<div class="hub-card-avatar" style="background-image:url('${_esc(avatar)}');background-size:cover;background-position:center;"></div>`
@@ -351,7 +347,7 @@ function _buildCard(room, rid) {
   `;
 
   const _goWatch = () => {
-    window.location.href = `live.html?room=${encodeURIComponent(rid)}`;
+    window.location.href = `live-room.html?room=${encodeURIComponent(rid)}`;
   };
   card.querySelector('.hub-card-watch-btn').addEventListener('click', e => { e.stopPropagation(); _goWatch(); });
   card.querySelector('.hub-card-thumb').addEventListener('click', _goWatch);
@@ -365,7 +361,7 @@ function _updateCard(card, room) {
   const vc = card.querySelector('.hub-card-viewer-count');
   if (vc) vc.textContent = room.viewers ?? 0;
   const tc = card.querySelector('.hub-card-title');
-  if (tc) tc.textContent = room.title || 'Shadow Nexus Wave';
+  if (tc) tc.textContent = room.title || 'Shadow Nexus LIVE';
 }
 </script>
 

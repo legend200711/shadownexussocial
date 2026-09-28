@@ -1,15 +1,15 @@
 /**
- * Shadow Nexus Wave — live.js
+ * Shadow Nexus Live — live.js
  *
  * Firebase split architecture:
  *
- *  MAIN Firebase (shadow-nexus-wave) — Firestore:
+ *  MAIN Firebase (horr-a08f4) — Firestore:
  *    - Auth / user profiles
  *    - Feed posts, stories, notifications
  *    - Live chat messages  (liveRooms/{roomId}/liveMessages)
  *    - Likes counter       (liveRooms/{roomId}.likes)
  *
- *  LIVE Firebase (Shadow Nexus Wave) — Realtime Database:
+ *  LIVE Firebase (Shadow Nexus Live) — Realtime Database:
  *    - Room status             (liveRooms/{roomId})
  *    - WebRTC per-viewer slots (liveConnections/{roomId}/viewers/{viewerUid})
  *      host writes offer+hostCandidates; viewer writes answer+viewerCandidates
@@ -42,43 +42,60 @@
 
 'use strict';
 
-import { snxGetDisplayName } from './snx-profile.js';
+/* ── Audio Mixer — mixes mic + music into the outgoing WebRTC stream ── */
+import { SNXAudioMixer } from './snx-audio-mixer.js';
 
 /* ── Main Firebase imports (Firestore + Auth) ── */
-import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
+import { initializeApp, getApps, getApp } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js';
 import {
-  getAuth, onAuthStateChanged
+  getAuth, onAuthStateChanged,
+  browserLocalPersistence, setPersistence
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 import {
   getFirestore,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, addDoc,
   collection, query, orderBy, limit, onSnapshot,
-  serverTimestamp, increment, where, deleteField, arrayUnion, arrayRemove
+  serverTimestamp, increment, where, deleteField, arrayUnion
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
 
 /* ── Realtime Database imports (signaling + room status) ── */
 import {
   getDatabase,
   ref, set, get, update, remove, push, onValue, off, onDisconnect,
+  runTransaction,
   serverTimestamp as rtdbTimestamp
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js';
 
 /* ════════════════════════════════════════════════════
-   MAIN Firebase — live.html is a standalone page.
-   index.html is NOT loaded here — no conflict exists.
+   MAIN Firebase — live.html may load standalone OR
+   inside a Studio iframe that already initialised the
+   default app.  Always reuse the existing [DEFAULT]
+   app so Auth shares the same persisted session.
    ════════════════════════════════════════════════════ */
 const _CFG = {
-  apiKey:            'AIzaSyBO4IIDLMp-SKgBaA3RINsYaj-UELLUXZE',
-  authDomain:        'shadow-nexus-wave.firebaseapp.com',
-  databaseURL:       'https://shadow-nexus-wave-default-rtdb.firebaseio.com',
-  projectId:         'shadow-nexus-wave',
-  storageBucket:     'shadow-nexus-wave.firebasestorage.app',
-  messagingSenderId: '68850298302',
-  appId:             '1:68850298302:web:603bbb8539079903cb1def',
+  apiKey:            'AIzaSyByZRmp6R9HY17T2_WdJUFWeeaLNOP6y2Y',
+  authDomain:        'horr-a08f4.firebaseapp.com',
+  databaseURL:       'https://horr-a08f4-default-rtdb.firebaseio.com',
+  projectId:         'horr-a08f4',
+  storageBucket:     'horr-a08f4.firebasestorage.app',
+  messagingSenderId: '933810617818',
+  appId:             '1:933810617818:web:efb24f123337dd987c14e3',
 };
 
-const _app    = initializeApp(_CFG);
+/* Reuse the existing [DEFAULT] app if it is already initialised
+   (e.g. when live.html is loaded inside a Studio iframe whose
+   parent page already called initializeApp).  Creating a second
+   [DEFAULT] app would start a fresh Auth session and cause the
+   onAuthStateChanged cold-start null → logout race. */
+const _app    = getApps().length ? getApp() : initializeApp(_CFG);
 const _auth   = getAuth(_app);
+
+/* Ensure the auth instance always reads from localStorage.
+   This is the default for web but we set it explicitly so the
+   persisted session is available immediately on page load and
+   we avoid the cold-start null → redirect race. */
+setPersistence(_auth, browserLocalPersistence).catch(() => {});
+
 const _db     = getFirestore(_app);
 const _liveDB = getDatabase(_app);
 
@@ -93,6 +110,15 @@ const _ICE_SERVERS = {
   ],
 };
 
+/* ── Auth init guard ──
+   onAuthStateChanged fires once with null while Firebase reads the
+   persisted session from localStorage.  We must not treat that
+   transient null as a genuine "logged out" signal.
+   _authInitialized becomes true after the FIRST callback fires.
+   _authRedirectScheduled prevents scheduling a redirect twice.     */
+let _authInitialized       = false;
+let _authRedirectScheduled = false;
+
 /* ── State ── */
 let _user         = null;   // Firebase Auth user
 let _userData     = null;   // Firestore user doc data
@@ -104,6 +130,14 @@ let _localStream  = null;
 let _camOn        = true;
 let _micOn        = true;
 let _facingMode   = 'user';
+
+/* ── Audio Mixer state (creator only) ── */
+let _audioMixer     = null;   // SNXAudioMixer instance
+let _csQueue        = [];     // CloudStream music queue  [{id,title,artist,url,duration}]
+let _csQueueIndex   = 0;      // index into _csQueue
+let _csMusicPlaying = false;  // whether CS music is currently playing in the mixer
+let _csMusicVolume  = 80;     // 0-100 (maps to 0.0-1.0 for GainNode)
+let _csMicVolume    = 100;    // 0-100
 
 /* ── Performance: send-lock prevents double-send on rapid taps ── */
 let _chatSending  = false;
@@ -134,10 +168,10 @@ const _VIEWER_PRESENCE_HB_MS = 30000; // 30 s keep-alive write to RTDB
 let _chatUnsub        = null;
 let _viewerCountRef   = null;   // RTDB ref for viewer count listener
 let _viewerCountUnsub = null;
-let _likesRef         = null;   // RTDB ref for host likes listener
-let _likesUnsub       = null;   // onValue unsubscribe for likes (host only)
-
+let _hostLikeCountRef = null;   // RTDB ref for host like-count listener
+let _hostLikeCountUnsub = null; // unsubscribe fn for host like-count listener
 let _roomWatchRef     = null;   // saved RTDB ref so we can call off() on it
+let _offerWaitUnsub   = null;   // viewer: unsubscribe for offer-arrival watcher (must survive _viewerLeave)
 let _toastTimer       = null;
 let _viewerLeftFlag   = false;  // guard: prevent double-decrement on mobile
 let _creatorEndedFlag = false;  // guard: prevent beforeunload re-running endLive cleanup
@@ -360,16 +394,152 @@ document.addEventListener('DOMContentLoaded', () => {
     D.stage.classList.toggle('live-controls-hidden');
   });
 
+  // ── postMessage bridge: Studio Control Room can signal end-live or cam/mic toggles ──
+  window.addEventListener('message', async (e) => {
+    // Accept messages only from same origin (parent Studio page)
+    if (e.origin && e.origin !== location.origin) return;
+    const msg = e.data;
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'snx_end_live') {
+      if (_mode === 'creator') {
+        await endLive().catch(() => {});
+        // Notify parent that live has ended
+        try { window.parent.postMessage({ type: 'snx_live_ended' }, '*'); } catch(_) {}
+      }
+    }
+    if (msg.type === 'snx_toggle_cam' && _mode === 'creator') { toggleLiveCam(); }
+    if (msg.type === 'snx_toggle_mic' && _mode === 'creator') { toggleLiveMic();  }
+    if (msg.type === 'snx_flip_cam'   && _mode === 'creator') { flipLiveCamera(); }
+
+    // ── Cloud Stream audio mixer commands (creator only) ──
+    if (_mode === 'creator') {
+      if (msg.type === 'snx_music_set_queue' && Array.isArray(msg.queue)) {
+        _csQueue      = msg.queue;
+        _csQueueIndex = msg.index || 0;
+        // If a track should immediately play, start it
+        if (msg.autoplay) _mixerPlayCurrentTrack();
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_play') {
+        if (msg.track) {
+          // Studio sent a specific track object  {id, title, artist, url}
+          const idx = _csQueue.findIndex(t => t.id === msg.track.id);
+          if (idx >= 0) _csQueueIndex = idx;
+          _mixerPlayCurrentTrack();
+        } else if (!_csMusicPlaying) {
+          // Resume
+          if (_audioMixer) _audioMixer.resume();
+          _csMusicPlaying = true;
+        }
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_pause') {
+        if (_audioMixer) _audioMixer.pause();
+        _csMusicPlaying = false;
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_next') {
+        _csQueueIndex = (_csQueueIndex + 1) % (_csQueue.length || 1);
+        _mixerPlayCurrentTrack();
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_prev') {
+        _csQueueIndex = (_csQueueIndex - 1 + (_csQueue.length || 1)) % (_csQueue.length || 1);
+        _mixerPlayCurrentTrack();
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_volume' && msg.value != null) {
+        _csMusicVolume = Math.max(0, Math.min(100, Number(msg.value)));
+        if (_audioMixer) _audioMixer.setMusicVolume(_csMusicVolume / 100);
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_mic_volume' && msg.value != null) {
+        _csMicVolume = Math.max(0, Math.min(100, Number(msg.value)));
+        if (_audioMixer) _audioMixer.setMicVolume(_csMicVolume / 100);
+        _renderLiveMusicPanel();
+      }
+      if (msg.type === 'snx_music_stop') {
+        if (_audioMixer) { _audioMixer.pause(); }
+        _csMusicPlaying = false;
+        _renderLiveMusicPanel();
+      }
+    }
+  });
+
   onAuthStateChanged(_auth, user => {
+    const isFirstCallback = !_authInitialized;
+    _authInitialized = true;
+
     if (!user) {
-      _hideLoading();
-      window.location.href = 'index.html';
+      // ── Guard: do NOT immediately redirect on the first callback ──
+      // Firebase Auth restores a persisted session asynchronously from
+      // localStorage.  The very first onAuthStateChanged call can be
+      // null while that read is in flight.  We must wait one tick to
+      // see whether Auth resolves a real user before sending the user
+      // to the login page.
+      //
+      // If this is NOT the first callback it means the user was already
+      // authenticated and has now genuinely signed out (e.g. the token
+      // truly expired or an explicit signOut() was called).  In that
+      // case we redirect only if we are not in autostart (iframe) mode,
+      // where the parent Studio page owns the session.
+      if (_authRedirectScheduled) return;
+      _authRedirectScheduled = true;
+
+      if (isFirstCallback) {
+        // Give Firebase up to 4 s to restore the persisted session.
+        // Most cold-start restorations complete within 1-2 s.
+        // Only navigate away if no user has appeared after 4 s.
+        setTimeout(() => {
+          if (!_user) {
+            _hideLoading();
+            // In iframe / autostart mode the parent owns auth — do not
+            // navigate the outer page; just notify via postMessage.
+            const _inIframe = window.parent && window.parent !== window;
+            if (_inIframe) {
+              try { window.parent.postMessage({ type: 'snx_live_auth_error' }, '*'); } catch(_) {}
+            } else {
+              window.location.href = 'index.html';
+            }
+          } else {
+            // User resolved — reset the redirect guard so a future
+            // genuine signOut can still redirect.
+            _authRedirectScheduled = false;
+          }
+        }, 4000);
+      } else {
+        // Subsequent null: user genuinely signed out.
+        // In autostart (iframe) mode the parent owns the session; just
+        // notify rather than hard-navigating.
+        const _inIframe = window.parent && window.parent !== window;
+        _hideLoading();
+        if (_inIframe) {
+          try { window.parent.postMessage({ type: 'snx_live_auth_error' }, '*'); } catch(_) {}
+        } else {
+          window.location.href = 'index.html';
+        }
+      }
       return;
     }
+
+    // User is authenticated — cancel any pending redirect guard.
+    _authRedirectScheduled = false;
+
     _user = user;
     _loadUserData().then(() => {
       if (D.goLiveBtn) { D.goLiveBtn.disabled = false; }
-      _resolveMode();
+      // ── ?action=end: creator came from Studio Control Room End Live button ──
+      const _urlParams  = new URLSearchParams(location.search);
+      const _urlAction  = _urlParams.get('action');
+      const _urlAutostart = _urlParams.get('autostart') === '1';
+      if (_urlAction === 'end') {
+        // Clean up any active live session for this user then go home
+        endLive().catch(() => {}).finally(() => {
+          setTimeout(() => { window.location.href = 'index.html'; }, 1800);
+        });
+        return;
+      }
+      _resolveMode(_urlAutostart);
       // ── One-time update check per session ──
       _checkForUpdate();
     });
@@ -380,103 +550,43 @@ document.addEventListener('DOMContentLoaded', () => {
 async function _loadUserData() {
   try {
     const snap = await getDoc(doc(_db, 'users', _user.uid));
-    if (snap.exists()) {
-      _userData = snap.data();
-    } else if (!_user.isAnonymous) {
-      // Profile doc missing — create it so the user never appears as "Unknown".
-      const fallbackName = _user.displayName || _user.email?.split('@')[0] || 'Wave User';
-      const profileData = {
-        uid:              _user.uid,
-        displayName:      fallbackName,
-        displayNameLower: fallbackName.toLowerCase(),
-        username:         '',
-        email:            _user.email || '',
-        avatar:           _user.photoURL || '',
-        bio:              '',
-        role:             'member',
-        followers:        [],
-        following:        [],
-        followerCount:    0,
-        followingCount:   0,
-        isLive:           false,
-        liveRoomId:       null,
-        createdAt:        serverTimestamp(),
-        updatedAt:        serverTimestamp(),
-      };
-      try {
-        await setDoc(doc(_db, 'users', _user.uid), profileData);
-        _userData = profileData;
-      } catch (healErr) {
-        console.error('[Wave live] Profile self-heal failed:', healErr.code, healErr.message);
-        _userData = { displayName: fallbackName, username: '' };
-      }
-    } else {
-      _userData = { displayName: _user.email?.split('@')[0] || 'Guest', username: '' };
-    }
+    _userData = snap.exists() ? snap.data() : { displayName: _user.email?.split('@')[0] || 'Guest', username: '' };
   } catch (_) {
-    _userData = { displayName: _user.displayName || _user.email?.split('@')[0] || 'Guest', username: '' };
+    _userData = { displayName: _user.email?.split('@')[0] || 'Guest', username: '' };
   }
-}
-
-/* ── Founder kill-switch: Firestore siteSettings/features.live_enabled ── */
-async function _checkLiveFeatureFlag() {
-  try {
-    const snap = await getDoc(doc(_db, 'siteSettings', 'features'));
-    if (snap.exists() && snap.data().live_enabled === false) {
-      _hideLoading();
-      document.body.innerHTML =
-        '<div style="min-height:100vh;background:#0B1F3A;display:flex;flex-direction:column;' +
-        'align-items:center;justify-content:center;padding:32px 24px;text-align:center;font-family:system-ui,sans-serif;">' +
-        '<div style="font-size:52px;margin-bottom:20px;">📡</div>' +
-        '<div style="font-size:22px;font-weight:700;color:#d8eeff;margin-bottom:12px;">Feature Temporarily Disabled</div>' +
-        '<div style="font-size:15px;color:#9bbdd8;max-width:380px;line-height:1.75;margin-bottom:28px;">' +
-        'Live streaming is currently unavailable.<br>Please check back soon — it will be back!</div>' +
-        '<a href="sfl-home.html" style="display:inline-block;padding:10px 28px;background:rgba(0,174,239,0.15);' +
-        'border:1px solid rgba(0,174,239,0.5);color:#00aeef;border-radius:24px;text-decoration:none;' +
-        'font-size:14px;font-weight:600;">← Back to Shadow Nexus Wave</a>' +
-        '</div>';
-      return false;
-    }
-  } catch (_e) {
-    // siteSettings unreachable — default to enabled
-  }
-  return true;
 }
 
 /* ── Decide mode from URL hash ── */
-async function _resolveMode() {
-  const hash   = location.hash;
-  const params = new URLSearchParams(location.search);
+async function _resolveMode(autostart = false) {
+  const hash = location.hash;
   localStorage.removeItem('snx_live_intent');
 
-  // Check Firestore kill-switch before any live setup
-  const enabled = await _checkLiveFeatureFlag();
-  if (!enabled) return;
-
-  // Viewer entry via hash:  live.html#watch=<roomId>  (Share/Join links)
-  // Viewer entry via query: live.html?room=<roomId>   (home/search/notifications/profile cards)
-  const watchRoomId = hash.startsWith('#watch=')
-    ? hash.slice(7)
-    : (params.get('room') || null);
-
-  if (watchRoomId) {
-    _roomId = watchRoomId;
+  if (hash.startsWith('#watch=')) {
+    _roomId = hash.slice(7);   // roomId is plain [a-zA-Z0-9_] — no decoding needed
     _mode   = 'viewer';
     document.body.classList.add('is-viewer');
     await _startViewer();
   } else {
     _mode = 'creator';
     document.body.classList.add('is-creator');
-    await _startCreatorSetup();
+    await _startCreatorSetup(autostart);
   }
 }
 
 /* ═══════════════════════════════════════════════════
    CREATOR SETUP
    ═══════════════════════════════════════════════════ */
-async function _startCreatorSetup() {
+async function _startCreatorSetup(autostart = false) {
   _hideLoading();
-  if (D.setup) D.setup.style.display = 'block';
+  // In autostart (iframe) mode the setup UI is hidden — live engine runs silently.
+  if (!autostart && D.setup) D.setup.style.display = 'block';
+
+  // Pre-fill title when arriving from 24-Hour Studio Go Live
+  try {
+    const _studioTitle = localStorage.getItem('snx_studio_title');
+    if (_studioTitle && D.setupTitle) { D.setupTitle.value = _studioTitle; }
+    localStorage.removeItem('snx_studio_title');
+  } catch(_) {}
 
   try {
     _localStream = await navigator.mediaDevices.getUserMedia({
@@ -489,7 +599,7 @@ async function _startCreatorSetup() {
       },
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-    if (D.setupPreview) {
+    if (!autostart && D.setupPreview) {
       D.setupPreview.srcObject = _localStream;
       D.setupPreview.play().catch(() => {});
     }
@@ -499,10 +609,21 @@ async function _startCreatorSetup() {
       _localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
       _camOn = false;
       _updateSetupPreviewState(false);
-      toast('Camera is audio only');
+      if (!autostart) toast('Camera is audio only');
     } catch (e) {
-      _showSetupPermError('Camera & mic access denied. Allow Camera + Microphone in your browser settings, then refresh.');
+      if (!autostart) _showSetupPermError('Camera & mic access denied. Allow Camera + Microphone in your browser settings, then refresh.');
+      // In autostart mode, notify parent that camera failed
+      if (autostart) {
+        try { window.parent.postMessage({ type: 'snx_live_cam_error' }, '*'); } catch(_) {}
+      }
+      return;
     }
+  }
+
+  // ── Autostart: immediately start the live session without user interaction ──
+  if (autostart) {
+    // Small delay to ensure stream is fully initialised before WebRTC setup
+    setTimeout(() => startLive(), 400);
   }
 }
 
@@ -629,16 +750,15 @@ async function startLive() {
   // Sanitize uid — strip any chars forbidden in RTDB keys (. # $ / [ ])
   const _safeUid = _user.uid.replace(/[.#$/\[\]]/g, '_');
   _roomId = `${_safeUid}_${Date.now().toString(36)}`;
-
   _roomHostId = _user.uid;   // creator is always their own host
 
   const creatorData = {
     roomId:       _roomId,
     hostId:       _user.uid,
-    hostName:     snxGetDisplayName(_userData, _user),
+    hostName:     _userData.displayName || _user.email?.split('@')[0] || 'Creator',
     hostUsername: _userData.username || '',
     hostAvatar:   _userData.avatar || _userData.profilePicture || '',
-    title:        titleVal || 'Shadow Nexus Wave',
+    title:        titleVal || 'Shadow Nexus LIVE',
     status:       'live',
     isLive:       true,
     viewers:      0,
@@ -695,9 +815,14 @@ async function startLive() {
         _localStream = fresh;
         // Re-attach to stage
         if (D.liveVideo) { D.liveVideo.srcObject = fresh; D.liveVideo.play().catch(() => {}); }
+        // Reconnect new mic to audio mixer
+        if (_audioMixer) _audioMixer.reconnectMic(fresh);
         // Replace tracks in all active viewer PCs
-        const newVid = fresh.getVideoTracks()[0];
-        const newAud = fresh.getAudioTracks()[0];
+        // Video track: replace with new camera track
+        // Audio track: use mixed audio if mixer is active, otherwise raw mic
+        const newVid  = fresh.getVideoTracks()[0];
+        const mixedAud = _audioMixer?.mixedAudioTrack || null;
+        const newAud  = mixedAud || fresh.getAudioTracks()[0];
         for (const { pc } of Object.values(_hostViewerPeers)) {
           if (newVid) { const s = pc.getSenders().find(s => s.track?.kind === 'video'); if (s) s.replaceTrack(newVid).catch(() => {}); }
           if (newAud) { const s = pc.getSenders().find(s => s.track?.kind === 'audio'); if (s) s.replaceTrack(newAud).catch(() => {}); }
@@ -713,6 +838,10 @@ async function startLive() {
   _showStage();
   _attachLocalVideoToStage();
   _populateCreatorInfo(creatorData);
+
+  /* ── Initialise the audio mixer BEFORE WebRTC so peer connections
+        pick up the mixed audio track rather than the raw mic track.   ── */
+  await _initAudioMixer();
 
   await _startCreatorWebRTC();
 
@@ -881,22 +1010,12 @@ function _subscribeViewerCount() {
     }
   });
 
-  // ── Host-side likes listener ──
-  // Viewers write to liveRooms/{roomId}/likes; the host listens here so the
-  // like count and heart animation appear on the host's screen in real time.
-  let _lastLikes = 0;
-  _likesRef  = ref(_liveDB, `liveRooms/${_roomId}/likes`);
-  _likesUnsub = onValue(_likesRef, snap => {
-    const likes = snap.val() || 0;
-    if (D.likeCount) D.likeCount.textContent = '❤️ ' + likes;
-    // Spawn heart burst animation for every new like that comes in after the first
-    if (likes > _lastLikes && _lastLikes > 0) {
-      const delta = likes - _lastLikes;
-      for (let i = 0; i < Math.min(delta, 5); i++) {
-        setTimeout(() => _spawnHeartBurst(), i * 120);
-      }
-    }
-    _lastLikes = likes;
+  // FIX 1: Host like-count listener — update D.likeCount in real time as viewers send likes.
+  if (_hostLikeCountRef) { try { off(_hostLikeCountRef); } catch(_) {} }
+  _hostLikeCountRef   = ref(_liveDB, `liveRooms/${_roomId}/likes`);
+  _hostLikeCountUnsub = onValue(_hostLikeCountRef, snap => {
+    const l = snap.val() || 0;
+    if (D.likeCount) D.likeCount.textContent = '❤️ ' + l;
   });
 }
 
@@ -948,6 +1067,11 @@ async function flipLiveCamera() {
           hostVid.play().catch(() => {});
         }
       }
+    }
+
+    // ── Reconnect the new mic track to the audio mixer so it stays in the mix ──
+    if (_audioMixer) {
+      _audioMixer.reconnectMic(newStream);
     }
 
     // ── Replace video track in the main viewer WebRTC connection ──
@@ -1022,13 +1146,17 @@ async function endLive() {
   _hostTeardownAllRelayPeers();
   if (_chatUnsub)        { _chatUnsub();         _chatUnsub        = null; }
   if (_viewerCountUnsub) { try { _viewerCountUnsub(); } catch(_) {} _viewerCountRef = null; _viewerCountUnsub = null; }
-  if (_likesUnsub)       { try { _likesUnsub();       } catch(_) {} _likesRef       = null; _likesUnsub       = null; }
+  if (_hostLikeCountRef) { try { off(_hostLikeCountRef); } catch(_) {} _hostLikeCountRef = null; _hostLikeCountUnsub = null; }
 
   /* ── Remove WebRTC signaling from LIVE RTDB ── */
   if (_roomId) {
     try { await remove(ref(_liveDB, `liveConnections/${_roomId}`)); } catch (_) {}
     try { await remove(ref(_liveDB, `guestViewerSignaling/${_roomId}`)); } catch (_) {}
   }
+
+  // ── Tear down audio mixer ──
+  if (_audioMixer) { try { _audioMixer.stop(); } catch(_) {} _audioMixer = null; }
+  _csMusicPlaying = false;
 
   if (_localStream) { _localStream.getTracks().forEach(t => t.stop()); _localStream = null; }
 
@@ -1097,6 +1225,192 @@ async function endLive() {
 }
 
 /* ═══════════════════════════════════════════════════
+   AUDIO MIXER — creator-side Web Audio API mixing
+   Mixes mic + Cloud Stream music into the outgoing
+   WebRTC audio track so viewers hear both sources.
+   ═══════════════════════════════════════════════════ */
+
+/**
+ * Initialise the SNXAudioMixer with the current _localStream.
+ * Must be called after _localStream is ready and BEFORE the
+ * first RTCPeerConnection is created (in startLive).
+ */
+async function _initAudioMixer() {
+  if (!_localStream) return;
+  if (_audioMixer) { try { _audioMixer.stop(); } catch(_) {} _audioMixer = null; }
+
+  _audioMixer = new SNXAudioMixer();
+  await _audioMixer.init(_localStream);
+  _audioMixer.setMusicVolume(_csMusicVolume / 100);
+  _audioMixer.setMicVolume(_csMicVolume   / 100);
+
+  // When a music track ends naturally, auto-advance to the next track
+  _audioMixer.on('ended', () => {
+    if (!_csQueue.length) return;
+    _csQueueIndex = (_csQueueIndex + 1) % _csQueue.length;
+    _mixerPlayCurrentTrack();
+    _renderLiveMusicPanel();
+    // Tell the Studio dashboard (parent frame) that we auto-advanced
+    try {
+      window.parent.postMessage({
+        type:  'snx_music_auto_advanced',
+        index: _csQueueIndex,
+        track: _csQueue[_csQueueIndex] || null,
+      }, '*');
+    } catch(_) {}
+  });
+
+  console.log('[SNXAudioMixer] Mixer ready — mixedAudioTrack:', !!_audioMixer.mixedAudioTrack);
+}
+
+/**
+ * Start playing the track at _csQueueIndex through the mixer.
+ * Replaces the audio track in all active viewer peer connections.
+ */
+async function _mixerPlayCurrentTrack() {
+  if (!_audioMixer || !_csQueue.length) return;
+  const track = _csQueue[_csQueueIndex];
+  if (!track || !track.url) return;
+
+  await _audioMixer.setMusicTrack(track.url, _csMusicVolume / 100);
+  _csMusicPlaying = true;
+
+  // Replace the audio sender on all active viewer peer connections
+  _replaceAudioInAllPeers();
+}
+
+/**
+ * Replace the audio track in every active host→viewer peer connection
+ * with the mixer's combined output track.
+ * Call this once after the mixer is ready and whenever the music starts.
+ */
+function _replaceAudioInAllPeers() {
+  const mixedTrack = _audioMixer?.mixedAudioTrack;
+  if (!mixedTrack) return;
+  for (const [uid, peer] of Object.entries(_hostViewerPeers)) {
+    if (!peer.pc) continue;
+    const sender = peer.pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+    if (sender && sender.track !== mixedTrack) {
+      sender.replaceTrack(mixedTrack).catch(e => {
+        console.warn(`[SNXAudioMixer] replaceTrack failed for viewer ${uid}:`, e.message);
+      });
+    }
+  }
+}
+
+/**
+ * Render the compact Now-Playing bar inside live.html for the creator.
+ * Creates the element on first call; updates it on subsequent calls.
+ */
+function _renderLiveMusicPanel() {
+  if (_mode !== 'creator') return;
+
+  let panel = document.getElementById('_snxLiveMusicPanel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = '_snxLiveMusicPanel';
+    panel.style.cssText = [
+      'position:absolute', 'bottom:72px', 'left:50%', 'transform:translateX(-50%)',
+      'z-index:48', 'max-width:calc(100vw - 16px)', 'width:380px',
+      'background:rgba(0,8,24,0.92)',
+      'border:1px solid rgba(0,174,239,0.45)',
+      'border-radius:12px', 'padding:8px 10px',
+      'display:flex', 'flex-direction:column', 'gap:6px',
+      'backdrop-filter:blur(6px)',
+      'pointer-events:auto',
+    ].join(';');
+    const stage = document.getElementById('liveStage');
+    const wrap  = stage?.querySelector('.live-video-wrap');
+    (wrap || stage || document.body).appendChild(panel);
+  }
+
+  if (!_csQueue.length) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'flex';
+
+  const cur = _csQueue[_csQueueIndex] || {};
+  const titleText  = cur.title  || 'Untitled';
+  const artistText = cur.artist || '';
+  const playIcon   = _csMusicPlaying ? '⏸' : '▶';
+
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+      <span style="font-size:14px;flex-shrink:0;">🎵</span>
+      <div style="flex:1;min-width:0;overflow:hidden;">
+        <div style="font-size:12px;font-weight:700;color:#00AEEF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escHtml(titleText)}</div>
+        ${artistText ? `<div style="font-size:10px;color:#5a8ab0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_escHtml(artistText)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0;">
+        <button id="_snxLiveMusicPrev" style="padding:4px 8px;border-radius:6px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.3);color:#00AEEF;font-size:13px;cursor:pointer;">⏮</button>
+        <button id="_snxLiveMusicPlay" style="padding:4px 10px;border-radius:6px;background:rgba(0,174,239,0.18);border:1px solid rgba(0,174,239,0.5);color:#00AEEF;font-size:14px;font-weight:700;cursor:pointer;">${playIcon}</button>
+        <button id="_snxLiveMusicNext" style="padding:4px 8px;border-radius:6px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.3);color:#00AEEF;font-size:13px;cursor:pointer;">⏭</button>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:10px;color:#4a7a9a;flex-shrink:0;width:20px;">🎵</span>
+      <input type="range" min="0" max="100" value="${_csMusicVolume}" id="_snxLiveMusicVol"
+        style="flex:1;accent-color:#00AEEF;height:3px;cursor:pointer;">
+      <span style="font-size:10px;color:#4a7a9a;flex-shrink:0;width:28px;text-align:right;">${_csMusicVolume}%</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:10px;color:#4a7a9a;flex-shrink:0;width:20px;">🎤</span>
+      <input type="range" min="0" max="100" value="${_csMicVolume}" id="_snxLiveMicVol"
+        style="flex:1;accent-color:#8855ff;height:3px;cursor:pointer;">
+      <span style="font-size:10px;color:#4a7a9a;flex-shrink:0;width:28px;text-align:right;">${_csMicVolume}%</span>
+    </div>
+  `;
+
+  // Wire button events (re-wire each time the panel is re-rendered)
+  const prevBtn = panel.querySelector('#_snxLiveMusicPrev');
+  const playBtn = panel.querySelector('#_snxLiveMusicPlay');
+  const nextBtn = panel.querySelector('#_snxLiveMusicNext');
+  const musicVol = panel.querySelector('#_snxLiveMusicVol');
+  const micVol   = panel.querySelector('#_snxLiveMicVol');
+
+  if (prevBtn) prevBtn.onclick = () => {
+    _csQueueIndex = (_csQueueIndex - 1 + _csQueue.length) % _csQueue.length;
+    _mixerPlayCurrentTrack();
+    _renderLiveMusicPanel();
+  };
+  if (playBtn) playBtn.onclick = () => {
+    if (_csMusicPlaying) {
+      if (_audioMixer) _audioMixer.pause();
+      _csMusicPlaying = false;
+    } else {
+      if (_audioMixer) _audioMixer.resume();
+      _csMusicPlaying = true;
+    }
+    _renderLiveMusicPanel();
+  };
+  if (nextBtn) nextBtn.onclick = () => {
+    _csQueueIndex = (_csQueueIndex + 1) % _csQueue.length;
+    _mixerPlayCurrentTrack();
+    _renderLiveMusicPanel();
+  };
+  if (musicVol) musicVol.oninput = () => {
+    _csMusicVolume = parseInt(musicVol.value, 10);
+    if (_audioMixer) _audioMixer.setMusicVolume(_csMusicVolume / 100);
+    // Update the label inline
+    const lbl = musicVol.nextElementSibling;
+    if (lbl) lbl.textContent = _csMusicVolume + '%';
+  };
+  if (micVol) micVol.oninput = () => {
+    _csMicVolume = parseInt(micVol.value, 10);
+    if (_audioMixer) _audioMixer.setMicVolume(_csMicVolume / 100);
+    const lbl = micVol.nextElementSibling;
+    if (lbl) lbl.textContent = _csMicVolume + '%';
+  };
+}
+
+function _escHtml(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* ═══════════════════════════════════════════════════
    LIVE FEED POST — Firestore 'posts' collection
    ═══════════════════════════════════════════════════ */
 async function _createLiveFeedPost(creatorData) {
@@ -1111,8 +1425,8 @@ async function _createLiveFeedPost(creatorData) {
       authorAvatar:  creatorData.hostAvatar   || '',
       liveRoomId:    _roomId,
       isLive:        true,
-      title:         creatorData.title        || 'Shadow Nexus Wave',
-      text:          creatorData.hostName + ' is Live now 🔴',
+      title:         creatorData.title        || 'Shadow Nexus LIVE',
+      text:          (creatorData.hostName || 'Someone') + ' is Live now 🔴',
       timestamp:     Date.now(),
       createdAt:     Date.now(),
       likes:         0,
@@ -1141,7 +1455,7 @@ async function _createLiveStory(creatorData) {
       authorAvatar: creatorData.hostAvatar   || '',
       type:         'live',
       liveRoomId:   _roomId,
-      title:        creatorData.title        || 'Shadow Nexus Wave',
+      title:        creatorData.title        || 'Shadow Nexus LIVE',
       createdAt:    now,
       expiresAt,
     });
@@ -1173,9 +1487,9 @@ async function _notifyFollowersLive(creatorData) {
       fromName:   creatorData.hostName    || '',
       fromAvatar: creatorData.hostAvatar  || '',
       roomId:     _roomId,
-      roomTitle:  creatorData.title       || 'Shadow Nexus Wave',
-      title:      '🔴 ' + creatorData.hostName + ' is Live',
-      body:       `${creatorData.hostName} is live: ${creatorData.title || 'Shadow Nexus Wave'}`,
+      roomTitle:  creatorData.title       || 'Shadow Nexus LIVE',
+      title:      '🔴 ' + (creatorData.hostName || 'Someone') + ' is Live',
+      body:       `${creatorData.hostName || 'Someone'} is live: ${creatorData.title || 'Shadow Nexus LIVE'}`,
       url:        'live.html#watch=' + _roomId,
       ts:         Date.now(),
       read:       false,
@@ -1195,56 +1509,6 @@ async function _notifyFollowersLive(creatorData) {
    ═══════════════════════════════════════════════════ */
 async function _startViewer() {
   let roomData = null;
-
-  /* ── Resolve the real RTDB roomId ──────────────────────────────────────────
-     Live cards on the home/search/index pages pass the Firestore doc key,
-     which is the creator's UID (e.g. "abc123").  The RTDB room lives at
-     liveRooms/<safeUid>_<timestamp36> — the composite key stored in the
-     `roomId` field of that same Firestore doc.
-     Share/Join links already use the composite key via #watch=<roomId>, so
-     they arrive here correctly.
-     Strategy:
-       1. Try RTDB directly with whatever _roomId we received.
-       2. If nothing is found there, treat _roomId as a Firestore doc key and
-          read liveRooms/{_roomId} to get the real `roomId` field.
-       3. Retry step 1 with the resolved composite key.
-     This resolves both the UID-keyed case (cards) and the composite-key case
-     (Share/Join) without changing any creator code or database structure.
-  ── */
-  const _resolveRoomId = async () => {
-    // Fast path: try RTDB directly (works for Share/Join links)
-    try {
-      const snap = await get(ref(_liveDB, `liveRooms/${_roomId}`));
-      if (snap.exists()) return _roomId;   // composite key — already correct
-    } catch (_) {}
-
-    // Slow path: _roomId is a Firestore doc key (creator UID from live cards).
-    // Read the Firestore mirror doc to get the composite roomId field.
-    try {
-      const fsSnap = await getDoc(doc(_db, 'liveRooms', _roomId));
-      if (fsSnap.exists()) {
-        const data = fsSnap.data();
-        const compositeId = data.roomId || null;
-        if (compositeId && compositeId !== _roomId) {
-          // Verify the composite key actually exists in RTDB before committing
-          try {
-            const rtSnap = await get(ref(_liveDB, `liveRooms/${compositeId}`));
-            if (rtSnap.exists()) return compositeId;
-          } catch (_) {}
-          // RTDB not yet written — return the composite key anyway so the
-          // retry loop below can poll for it.
-          return compositeId;
-        }
-      }
-    } catch (_) {}
-
-    return _roomId;   // fallback: return unchanged
-  };
-
-  // Resolve the correct RTDB key before starting the retry loop.
-  // On first viewer open the creator may have just written the Firestore doc
-  // but not yet the RTDB node, so we allow one resolution retry.
-  _roomId = await _resolveRoomId();
 
   const _MAX_RETRIES = 8;
   const _RETRY_MS    = 2000;
@@ -1280,6 +1544,8 @@ async function _startViewer() {
   }
 
   _roomHostId = roomData.hostId || null;   // store real host uid for chat badge
+
+  window.dispatchEvent(new CustomEvent('snxLiveHostReady', { detail: { hostId: _roomHostId } }));
 
   _hideLoading();
   _showStage();
@@ -1463,6 +1729,11 @@ async function _viewerLeave() {
   // Fix: stop frozen video watchdog
   _stopFrozenVideoWatchdog();
 
+  // FIX 2: Cancel offer-arrival watcher so a stale callback cannot re-enter _startViewerWebRTC
+  // after the viewer has left. Without this, the listener fires after re-entry and launches a
+  // second concurrent WebRTC setup, causing a black screen.
+  if (_offerWaitUnsub) { try { _offerWaitUnsub(); } catch(_) {} _offerWaitUnsub = null; }
+
   if (_rtcPc) {
     _rtcPc.ontrack = null; _rtcPc.onconnectionstatechange = null;
     _rtcPc.oniceconnectionstatechange = null; _rtcPc.onicecandidate = null;
@@ -1497,71 +1768,9 @@ function _setupViewerControls(roomData) {
   if (D.profileBtn) {
     D.profileBtn.style.display = 'flex';
     D.profileBtn.onclick = () => {
-      window.location.href = 'sfl-profile.html?uid=' + roomData.hostId;
+      window.open('index.html#profile=' + roomData.hostId, '_blank');
     };
   }
-
-  // Follow button — shown to viewers who are not the host
-  const followBtn      = document.getElementById('btnFollowCreator');
-  const followLabel    = document.getElementById('btnFollowCreatorLabel');
-  const hostId         = roomData.hostId;
-  if (!followBtn || !followLabel || !hostId) return;
-  // Don't show follow button on your own stream
-  if (_user && _user.uid === hostId) return;
-
-  followBtn.style.display = 'flex';
-
-  // Check current follow state
-  let _liveFollowing = false;
-  if (_user && _userData && Array.isArray(_userData.following)) {
-    _liveFollowing = _userData.following.includes(hostId);
-  }
-  function _updateLiveFollowBtn() {
-    followLabel.textContent = _liveFollowing ? '✓ Following' : 'Follow';
-    followBtn.style.opacity = _liveFollowing ? '0.7' : '1';
-  }
-  _updateLiveFollowBtn();
-
-  followBtn.addEventListener('click', async () => {
-    if (!_user) { toast('Sign in to follow creators.'); return; }
-    if (!hostId || hostId === _user.uid) return;
-    followBtn.disabled = true;
-    try {
-      const creatorRef = doc(_db, 'users', hostId);
-      const myRef      = doc(_db, 'users', _user.uid);
-      if (_liveFollowing) {
-        await updateDoc(creatorRef, { followers: arrayRemove(_user.uid) });
-        await updateDoc(myRef,      { following: arrayRemove(hostId) });
-        _liveFollowing = false;
-        toast('Unfollowed.');
-      } else {
-        await updateDoc(creatorRef, { followers: arrayUnion(_user.uid) });
-        await updateDoc(myRef,      { following: arrayUnion(hostId) });
-        _liveFollowing = true;
-        toast('Following ' + (roomData.hostName || 'creator') + '!');
-
-        // Send follow notification
-        const myName   = snxGetDisplayName(_userData, _user);
-        const myAvatar = _userData?.avatar || _user.photoURL || '';
-        addDoc(collection(_db, 'notifications', hostId, 'items'), {
-          type:        'follow',
-          fromUid:     _user.uid,
-          fromName:    myName,
-          fromAvatar:  myAvatar,
-          fromProfile: 'sfl-profile.html?uid=' + _user.uid,
-          message:     myName + ' started following you.',
-          read:        false,
-          ts:          serverTimestamp(),
-          createdAt:   Date.now(),
-        }).catch(() => {});
-      }
-      _updateLiveFollowBtn();
-    } catch(e) {
-      toast('Error updating follow.');
-    } finally {
-      followBtn.disabled = false;
-    }
-  });
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1632,8 +1841,23 @@ async function _hostCreateViewerPeer(viewerUid) {
 
   const pc = new RTCPeerConnection(_ICE_SERVERS);
 
-  // Send our local stream to this viewer
-  _localStream.getTracks().forEach(track => pc.addTrack(track, _localStream));
+  // ── Send stream to viewer ──
+  // Video: always the raw camera track.
+  // Audio: use the mixer's combined output (mic + music) when available,
+  //        otherwise fall back to the raw mic track.
+  const mixedAudioTrack = _audioMixer?.mixedAudioTrack || null;
+  _localStream.getTracks().forEach(track => {
+    if (track.kind === 'audio' && mixedAudioTrack) {
+      // Replace raw mic with the mixed (mic + music) audio track
+      pc.addTrack(mixedAudioTrack, _localStream);
+    } else {
+      pc.addTrack(track, _localStream);
+    }
+  });
+  // If the raw stream had no audio at all but we have a mixer, add the mixed track
+  if (mixedAudioTrack && !_localStream.getAudioTracks().length) {
+    pc.addTrack(mixedAudioTrack, _localStream);
+  }
   pc.getTransceivers().forEach(tc => { tc.direction = 'sendonly'; });
 
   // Adaptive quality + reconnect on first connected PC
@@ -2125,7 +2349,10 @@ async function _startViewerWebRTC(roomData) {
   const sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   // Write viewer presence so the host knows to create a peer for this viewer.
-  try { await update(slotRef, { sessionId, viewerCandidates: {} }); }
+  // Use set() not update() — this clears any stale offer/answer/candidates from a
+  // previous session so the polling loop below never picks up an old offer and
+  // enters a renegotiation loop with the host.
+  try { await set(slotRef, { sessionId, viewerCandidates: {} }); }
   catch(e) { _showConnBanner('Waiting for stream…', ''); return; }
 
   // Poll for the host's offer (up to 15 s)
@@ -2139,10 +2366,13 @@ async function _startViewerWebRTC(roomData) {
 
   if (!slotSnap) {
     _showConnBanner('Waiting for stream…', '');
-    let _offerWaitUnsub;
+    // FIX 2: Use module-level _offerWaitUnsub so _viewerLeave() can cancel this listener
+    // and prevent a stale callback from re-starting WebRTC after the viewer has left.
+    if (_offerWaitUnsub) { try { _offerWaitUnsub(); } catch(_) {} _offerWaitUnsub = null; }
     _offerWaitUnsub = onValue(slotRef, async snap => {
       if (!snap.exists() || !snap.val().offer) return;
       if (_offerWaitUnsub) { try { _offerWaitUnsub(); } catch(_) {} _offerWaitUnsub = null; }
+      if (_viewerLeftFlag) return;  // viewer left while waiting — do not reconnect
       _startViewerWebRTC(roomData);
     });
     return;
@@ -2685,13 +2915,12 @@ async function sendLike() {
 
   _spawnHeartBurst();
 
-  // Use RTDB transactions-style increment via set with existing value
-  // For RTDB we still need a get, but fire-and-forget to keep UI instant
+  // Use RTDB runTransaction for an atomic increment — avoids lost updates
+  // when multiple viewers like concurrently.
   (async () => {
     try {
       const likesRef = ref(_liveDB, `liveRooms/${_roomId}/likes`);
-      const snap = await get(likesRef);
-      await set(likesRef, (snap.val() || 0) + 1);
+      await runTransaction(likesRef, current => (current || 0) + 1);
     } catch (_) {}
   })();
 
@@ -2795,7 +3024,7 @@ function _openShareModal() {
   if (old) old.remove();
 
   const url      = _buildLiveUrl();
-  const name     = snxGetDisplayName(_userData, _user);
+  const name     = _userData?.displayName || 'Someone';
   const shareMsg = `${name} is Live Now 🔴 — Watch: ${url}`;
 
   const modal = document.createElement('div');
@@ -2880,7 +3109,7 @@ function _openShareModal() {
     _closeShareModal();
     if (navigator.share) {
       navigator.share({
-        title: '🔴 Watch me live on Shadow Nexus Wave!',
+        title: '🔴 Watch me live on Shadow Nexus!',
         text:  shareMsg,
         url,
       }).catch(() => {});
@@ -4222,7 +4451,7 @@ function _addHostCellToGrid() {
 
   const nameEl = document.createElement('div');
   nameEl.className = 'guest-cell-name';
-  nameEl.textContent = snxGetDisplayName(_userData, _user) + ' (You)';
+  nameEl.textContent = (_userData?.displayName || 'Host') + ' (You)';
   cell.appendChild(nameEl);
 
   grid.insertBefore(cell, grid.firstChild);
@@ -5099,11 +5328,11 @@ let _shadowBotHourReset    = null;     // hourly counter reset timer
 let _shadowBotActive       = false;    // true only when live is running
 
 const _SHADOW_BOT_MESSAGES = [
-  'Welcome to Shadow Nexus Wave! 🔥',
+  'Welcome to Shadow Nexus Live! 🌑',
   'Thanks for being here — keep the chat positive! ✨',
-  'Great to see everyone here on Shadow Nexus Wave! 🔴',
+  'Great to see everyone here on Shadow Nexus Live! 🔴',
   "You're all amazing — thanks for watching! 🙌",
-  'This live is powered by the Shadow Nexus Wave community. Welcome! 💙',
+  'This live is powered by the Shadow Nexus community. Welcome! 💙',
   'Enjoying the stream? Share it with a friend! 📤',
 ];
 
