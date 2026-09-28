@@ -12705,285 +12705,37 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     };
   }
 
-  (function initLiveHub() { /* managed by live.js */ })();
+  // Live Hub — managed by live.js _renderHub() which watches RTDB liveRooms directly.
+  // No secondary hub watcher needed here.
+  (function initLiveHub() { /* managed by live.js via RTDB liveRooms */ })();
   // initFeedLiveBanner() is defined below and called after the module finishes parsing
 
-  /* DEAD_CODE_PLACEHOLDER_STALE_MS */
-  (function _deadLiveHubBody() {
-    const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
-
-    function _esc(s) {
-      return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
-
-    function _elapsed(ts) {
-      if (!ts) return '';
-      const ms = Date.now() - (ts.toMillis ? ts.toMillis() : ts);
-      if (ms < 0) return '';
-      const s = Math.floor(ms / 1000);
-      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-      return h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m` : '<1m');
-    }
-
-    function _buildHubCard(room) {
-      const name     = _esc(room.hostName || room.hostUsername || 'Creator');
-      const handle   = room.hostUsername ? _esc('@' + room.hostUsername) : '';
-      const title    = _esc(room.title || 'Shadow Nexus Social LIVE');
-      const category = room.category ? _esc(room.category) : '';
-      const viewers  = room.viewers || 0;
-      const roomId   = _esc(room.roomId || '');
-      const avatar   = room.hostAvatar || '';
-      const initial  = (room.hostName || room.hostUsername || '?')[0].toUpperCase();
-      const isStudioLive     = room.type === '24hour_studio_live';
-      const watchUrl = 'live.html#watch=' + roomId;
-      const tsRaw    = room.createdAt ? (room.createdAt.toMillis ? room.createdAt.toMillis() : room.createdAt) : '';
-      const livePill = isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
-      const watchBtnLabel = isStudioLive ? '▶ Join Studio' : '▶ Watch Live';
-
-      const card = document.createElement('a');
-      // V2: use neon-border card class + is-live animation
-      card.className   = 'live-hub-card live-hub-card-v2 is-live';
-      card.href        = watchUrl;
-      card.target      = '_blank';
-      card.rel         = 'noopener';
-      card.dataset.rid = room.roomId;
-      card.dataset.hid = room.hostId || '';
-      card.setAttribute('aria-label', `Watch ${name} live`);
-
-      const avatarStyle = avatar ? `background-image:url('${_esc(avatar)}');` : '';
-
-      card.innerHTML = `
-        <div class="lhc-thumb">
-          <div class="lhc-avatar-large" style="${avatarStyle}">${avatar ? '' : initial}</div>
-          <div class="lhc-live-pill"><span class="lhc-live-dot"></span>${livePill}</div>
-          <div class="lhc-viewers" id="lhv-${roomId}">👁 ${viewers}</div>
-          <div class="lhc-elapsed" data-createdat="${tsRaw}">${_elapsed(room.createdAt)}</div>
-        </div>
-        <div class="lhc-body">
-          <div class="lhc-creator-row">
-            <div class="lhc-creator-badge">
-              <div class="lhc-creator-avatar" style="${avatarStyle}">${avatar ? '' : initial}</div>
-              <div class="lhc-creator-info">
-                <div class="lhc-name">${name}</div>
-                ${handle ? `<div class="lhc-handle">${handle}</div>` : ''}
-              </div>
-              <span class="lhc-online-dot"></span>
-            </div>
-          </div>
-          <div class="lhc-title">${title}</div>
-          ${category ? `<div class="lhc-category">🏷 ${category}</div>` : ''}
-          <button class="lhc-watch-btn"
-            onclick="event.preventDefault();event.stopPropagation();window.open('${watchUrl}','_blank')">
-            ${watchBtnLabel}
-          </button>
-        </div>`;
-
-      // Smooth enter transition
-      card.style.opacity = '0';
-      card.style.transform = 'translateY(10px) scale(0.97)';
-      requestAnimationFrame(() => {
-        card.style.transition = 'opacity .28s ease-out, transform .28s ease-out';
-        card.style.opacity = '1';
-        card.style.transform = 'translateY(0) scale(1)';
-      });
-
-      card.addEventListener('click', e => {
-        if (e.target.closest('.lhc-watch-btn')) return;
-        window.open(watchUrl, '_blank');
-        e.preventDefault();
-      });
-      return card;
-    }
-
-    // Animate a card out, then remove it from DOM
-    function _removeCard(card) {
-      if (card.classList.contains('lhc-removing')) return;
-      card.classList.add('lhc-removing');
-      setTimeout(() => card.remove(), 300);
-    }
-
-    let _hubUnsub    = null;
-    let _elapsedTimer = null;
-
-    function _tickElapsed() {
-      grid.querySelectorAll('.lhc-elapsed[data-createdat]').forEach(el => {
-        const ts = parseInt(el.dataset.createdat, 10);
-        if (!ts) return;
-        const s = Math.floor((Date.now() - ts) / 1000);
-        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
-        el.textContent = h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m` : '<1m');
-      });
-    }
-
-    // Auto-purge Firestore docs for streams started > STALE_MS ago
-    async function _purgeStale(rooms) {
-      const cutoff = Date.now() - STALE_MS;
-      for (const r of rooms) {
-        const ts = r.createdAt?.toMillis ? r.createdAt.toMillis() : (r.createdAt || 0);
-        if (ts && ts < cutoff) {
-          // r.id is the Firestore doc key (uid in new schema, roomId in legacy schema)
-          // also try deleting by roomId field in case it differs from the key
-          try { await deleteDoc(doc(db, 'liveRooms', r.id)); } catch(_) {}
-          if (r.roomId && r.roomId !== r.id) {
-            try { await deleteDoc(doc(db, 'liveRooms', r.roomId)); } catch(_) {}
-          }
-          if (r.hostId && r.hostId !== r.id) {
-            try { await deleteDoc(doc(db, 'liveRooms', r.hostId)); } catch(_) {}
-          }
-        }
-      }
-    }
-
-    function _renderHubRooms(rawDocs) {
-      // 1. Filter: only status=live or isLive=true, skip broken records
-      const valid = rawDocs.filter(r =>
-        (r.status === 'live' || r.isLive === true) &&
-        r.roomId && r.hostId
-      );
-
-      // 2. Deduplicate: one card per hostId (keep most recent)
-      const byHost = new Map();
-      valid.forEach(r => {
-        const existing = byHost.get(r.hostId);
-        const ts = r.createdAt?.toMillis ? r.createdAt.toMillis() : (r.createdAt || 0);
-        const exTs = existing
-          ? (existing.createdAt?.toMillis ? existing.createdAt.toMillis() : (existing.createdAt || 0))
-          : -1;
-        if (!existing || ts > exTs) byHost.set(r.hostId, r);
-      });
-
-      const rooms = [...byHost.values()].sort((a, b) => (b.viewers || 0) - (a.viewers || 0));
-
-      if (loadingEl) loadingEl.style.display = 'none';
-      const cnt = rooms.length;
-
-      if (countEl) { countEl.textContent = cnt + ' LIVE'; countEl.style.display = cnt > 0 ? '' : 'none'; }
-      if (navBadge) { navBadge.textContent = cnt; navBadge.style.display = cnt > 0 ? 'inline-flex' : 'none'; }
-
-      if (!cnt) {
-        if (emptyEl) emptyEl.style.display = '';
-        grid.querySelectorAll('.live-hub-card').forEach(c => _removeCard(c));
-        if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
-        // Purge stale docs from rawDocs
-        _purgeStale(rawDocs);
-        return;
-      }
-
-      if (emptyEl) emptyEl.style.display = 'none';
-
-      // Remove cards no longer in live set (with exit animation)
-      const liveRoomIds = new Set(rooms.map(r => r.roomId));
-      grid.querySelectorAll('.live-hub-card').forEach(c => {
-        if (!liveRoomIds.has(c.dataset.rid)) _removeCard(c);
-      });
-
-      // Add new cards / update existing
-      rooms.forEach((room, idx) => {
-        let card = grid.querySelector(`.live-hub-card[data-rid="${_esc(room.roomId)}"]`);
-        if (!card) {
-          card = _buildHubCard(room);
-          const existing = grid.querySelectorAll('.live-hub-card:not(.lhc-removing)');
-          if (idx < existing.length) grid.insertBefore(card, existing[idx]);
-          else grid.appendChild(card);
-        } else {
-          // Update viewer count in-place
-          const vEl = document.getElementById(`lhv-${_esc(room.roomId)}`);
-          if (vEl) vEl.textContent = '👁 ' + (room.viewers || 0);
-        }
-      });
-
-      if (!_elapsedTimer) _elapsedTimer = setInterval(_tickElapsed, 30000);
-      _purgeStale(rawDocs);
-    }
-
-    // ── Use canonical auth-ready queue instead of a second onAuthStateChanged ──
-    // This avoids a competing auth listener that runs in parallel with the canonical
-    // startup listener and adds unnecessary Firebase SDK overhead on cold start.
-    window._snxOnAuthReady(function() {
-      const user = window._snxCurrentUser;
-      if (!user || _hubUnsub) return;
-
-      // Merge rooms from liveRooms (SNS Live) and studioLiveRooms (Studio Live) into a single rendered list.
-      let _snapshotSns    = [];
-      let _snapshotStudio = [];
-      let _hubStudioUnsub = null;
-
-      function _mergeAndRender() {
-        _renderHubRooms(_snapshotSns.concat(_snapshotStudio));
-      }
-
-      function _attach(useSimple) {
-        try {
-          const q = useSimple
-            ? query(collection(db, 'liveRooms'), where('isLive', '==', true))
-            : query(collection(db, 'liveRooms'), where('status', '==', 'live'), orderBy('createdAt', 'desc'));
-
-          _hubUnsub = onSnapshot(q, snap => {
-            _snapshotSns = [];
-            snap.forEach(d => {
-              const r = d.data();
-              r.id     = d.id;
-              r.roomId = r.roomId || d.id;
-              _snapshotSns.push(r);
-            });
-            _mergeAndRender();
-          }, err => {
-            if (!useSimple) {
-              console.warn('[LiveHub] index not ready, using fallback:', err.message);
-              _hubUnsub = null;
-              _attach(true);
-            } else {
-              if (loadingEl) loadingEl.style.display = 'none';
-              if (emptyEl)   emptyEl.style.display   = '';
-            }
-          });
-        } catch(e) {
-          console.warn('[LiveHub] watcher error:', e.message);
-          if (loadingEl) loadingEl.style.display = 'none';
-          if (emptyEl)   emptyEl.style.display   = '';
-        }
-      }
-
-      // Studio Live rooms — always use simple isLive query (no compound index needed)
-      try {
-        const qStudio = query(collection(db, 'studioLiveRooms'), where('isLive', '==', true));
-        _hubStudioUnsub = onSnapshot(qStudio, snap => {
-          _snapshotStudio = [];
-          snap.forEach(d => {
-            const r = d.data();
-            r.id     = d.id;
-            r.roomId = r.roomId || d.id;
-            _snapshotStudio.push(r);
-          });
-          _mergeAndRender();
-        }, err => {
-          console.warn('[LiveHub] studioLiveRooms watcher error:', err.message);
-        });
-      } catch(e) {
-        console.warn('[LiveHub] studioLiveRooms watcher setup error:', e.message);
-      }
-
-      _attach(false);
-    });
-  // dead placeholder end
-  }); // _deadLiveHubBody NOT invoked
-
-  // ── Feed Live Banner — subscribes to RTDB liveRooms, shows active broadcasts at top of Feed ──
+  // ── Feed Live Banner — RTDB liveRooms watcher (SNS-2026-LIVE-001)
+  //    Source of truth: RTDB liveRooms/{roomId}  (written by live.js)
+  //    Schema fields used: roomId, status, hostName, hostAvatar, title, viewerCount
+  //    JOIN calls window.snxLiveOpenViewer(roomId) — the live.js in-app overlay.
+  //    Live Hub (livePage #snxLiveHubCards) is managed entirely by live.js _renderHub().
+  // ──────────────────────────────────────────────────────────────────────────────────
   function initFeedLiveBanner() {
-    const banner   = document.getElementById('snxFeedLiveBanner');
-    const cardsEl  = document.getElementById('snxFeedLiveCards');
-    const countEl  = document.getElementById('snxFeedLiveCount');
-    if (!banner || !cardsEl) return;
+    const _FLTAG  = '[FEED-LIVE]';
+    const banner  = document.getElementById('snxFeedLiveBanner');
+    const cardsEl = document.getElementById('snxFeedLiveCards');
+    const countEl = document.getElementById('snxFeedLiveCount');
+    if (!banner || !cardsEl) {
+      console.warn(_FLTAG, 'Banner DOM elements not found — aborting.');
+      return;
+    }
 
     function escL(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    // Build a Feed Live card for one RTDB room record.
+    // Schema from live.js _startLive(): roomId, hostName, hostAvatar, title, viewerCount
     function buildCard(room) {
       const name    = escL(room.hostName || 'Creator');
       const title   = escL(room.title   || 'Shadow Nexus Social LIVE');
-      // live.js stores viewerCount; normalise to viewers for display
-      const viewers = room.viewerCount || room.viewers || 0;
+      const viewers = room.viewerCount || 0;          // live.js writes viewerCount
       const roomId  = room.roomId || '';
       const avatar  = room.hostAvatar || '';
       const initial = (room.hostName || '?')[0].toUpperCase();
@@ -12993,9 +12745,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         : `<div class="flc-thumb-initial">${initial}</div>`;
 
       const card = document.createElement('div');
-      card.className       = 'feed-live-card feed-live-card-v2';
-      card.dataset.rid     = roomId;
-      card.setAttribute('aria-label', `Watch ${name} live`);
+      card.className   = 'feed-live-card feed-live-card-v2';
+      card.dataset.rid = roomId;
+      card.setAttribute('aria-label', 'Watch ' + name + ' live');
 
       card.innerHTML = `
         <div class="flc-thumb">
@@ -13011,9 +12763,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       `;
 
       function joinRoom() {
+        console.log(_FLTAG, 'JOIN LIVE clicked — roomId:', roomId);
         if (typeof window.snxLiveOpenViewer === 'function') {
           window.snxLiveOpenViewer(roomId);
         } else {
+          // live.js not loaded yet — navigate to Live Hub as fallback
           if (typeof realmNavTo === 'function') realmNavTo('livePage');
         }
       }
@@ -13024,67 +12778,100 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       });
       card.addEventListener('click', joinRoom);
 
+      console.log(_FLTAG, 'card rendered — roomId:', roomId);
       return card;
     }
 
+    // Diff-render: add new cards, remove ended cards, update viewer counts in-place.
     function _renderBannerRooms(rooms) {
-      rooms.sort((a, b) => (b.viewerCount || b.viewers || 0) - (a.viewerCount || a.viewers || 0));
+      rooms.sort((a, b) => (b.viewerCount || 0) - (a.viewerCount || 0));
       if (!rooms.length) {
         banner.style.display = 'none';
+        if (cardsEl.children.length) {
+          cardsEl.innerHTML = '';
+          console.log(_FLTAG, 'all cards removed — no live rooms');
+        }
         return;
       }
       banner.style.display = '';
       if (countEl) countEl.textContent = rooms.length;
+
+      // Remove cards no longer in the live set
       const liveIds = new Set(rooms.map(r => r.roomId));
       cardsEl.querySelectorAll('.feed-live-card').forEach(c => {
-        if (!liveIds.has(c.dataset.rid)) c.remove();
+        if (!liveIds.has(c.dataset.rid)) {
+          console.log(_FLTAG, 'room ended — card removed:', c.dataset.rid);
+          c.remove();
+        }
       });
+
+      // Add new cards / update existing
       rooms.forEach((room, idx) => {
-        let card = cardsEl.querySelector(`[data-rid="${escL(room.roomId)}"]`);
+        let card = cardsEl.querySelector('[data-rid="' + escL(room.roomId) + '"]');
         if (!card) {
           card = buildCard(room);
           const existing = cardsEl.querySelectorAll('.feed-live-card');
           if (idx < existing.length) cardsEl.insertBefore(card, existing[idx]);
           else                       cardsEl.appendChild(card);
         } else {
-          // Update viewer count in-place
+          // Update viewer count in-place without rebuilding DOM
           const vEl = card.querySelector('.flc-viewers');
-          if (vEl) vEl.textContent = '👁 ' + (room.viewerCount || room.viewers || 0);
+          if (vEl) vEl.textContent = '👁 ' + (room.viewerCount || 0);
         }
       });
     }
 
-    // ── Subscribe to RTDB liveRooms — this is where live.js writes active rooms ──
+    // RTDB watcher — subscribes to liveRooms, fires on every change.
     let _rtdbUnsub = null;
+    let _retryTimer = null;
 
     function _attachRtdbWatcher() {
+      if (_rtdbUnsub) return;    // already attached — guard against double-attach
+      if (_retryTimer) { clearTimeout(_retryTimer); _retryTimer = null; }
+
       const rtdb    = window._snxLiveDB;
       const rtdbApi = window._snxRtdbApi;
-      if (!rtdb || !rtdbApi) {
-        // RTDB not ready yet — retry shortly
-        setTimeout(_attachRtdbWatcher, 500);
+      if (!rtdb || !rtdbApi || typeof rtdbApi.ref !== 'function') {
+        // RTDB not ready yet — retry in 500 ms
+        _retryTimer = setTimeout(_attachRtdbWatcher, 500);
         return;
       }
 
+      console.log(_FLTAG, 'RTDB watcher attached — path: liveRooms');
+
       const roomsRef = rtdbApi.ref(rtdb, 'liveRooms');
-      _rtdbUnsub = rtdbApi.onValue(roomsRef, snap => {
-        if (!snap.exists()) {
-          _renderBannerRooms([]);
-          return;
+      _rtdbUnsub = rtdbApi.onValue(
+        roomsRef,
+        snap => {
+          if (!snap.exists()) {
+            _renderBannerRooms([]);
+            return;
+          }
+          const all  = snap.val() || {};
+          const live = Object.values(all).filter(r => r && r.status === 'live');
+          live.forEach(r => {
+            console.log(_FLTAG, 'room detected:', r.roomId, '| status:', r.status);
+          });
+          _renderBannerRooms(live);
+        },
+        err => {
+          // Surface permission-denied and any other RTDB errors exactly as specified
+          console.error(
+            _FLTAG,
+            'RTDB liveRooms watcher error |',
+            'path: liveRooms |',
+            'op: onValue |',
+            'code:', err.code || err.name || 'unknown',
+            '| message:', err.message
+          );
+          banner.style.display = 'none';
         }
-        const all  = snap.val() || {};
-        const live = Object.values(all).filter(r => r && r.status === 'live');
-        _renderBannerRooms(live);
-      }, err => {
-        console.warn('[FeedLive] RTDB liveRooms watcher error:', err.message);
-        banner.style.display = 'none';
-      });
+      );
     }
 
-    // ── Start watcher once auth resolves ──
+    // Start watcher once auth resolves and a user is present.
     window._snxOnAuthReady(function() {
       if (!window._snxCurrentUser) return;
-      if (_rtdbUnsub) return;
       _attachRtdbWatcher();
     });
   }
