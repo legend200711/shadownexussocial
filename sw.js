@@ -13,7 +13,7 @@
  * Build: SNX-LIVE-AVENORA-RESTORED-SNS-2026-09-29
  */
 
-const CACHE_VERSION = 'v78';
+const CACHE_VERSION = 'v79';
 const BUILD_ID      = 'SNX-LIVE-AVENORA-RESTORED-SNS-2026-09-29';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
