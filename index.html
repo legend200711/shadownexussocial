@@ -438,25 +438,6 @@ body::after {
     box-shadow: inset 2px 0 0 rgba(0,200,255,0.5);
 }
 .nav-item:active { background: rgba(0,110,255,0.18); }
-/* ── Go Live — single canonical creator button ── */
-.nav-item-go-live {
-    color: #ff5566;
-    background: rgba(255,30,60,0.07);
-    border-left: 3px solid rgba(255,50,80,0.60);
-    font-weight: 800;
-    letter-spacing: 0.3px;
-    animation: navGoLivePulse 2.4s ease-in-out infinite;
-}
-.nav-item-go-live:hover {
-    background: rgba(255,30,60,0.15) !important;
-    color: #ff2244 !important;
-    box-shadow: inset 3px 0 0 #ff3344, 0 0 12px rgba(255,30,60,0.18) !important;
-}
-.nav-item-go-live:active { background: rgba(255,30,60,0.22) !important; }
-@keyframes navGoLivePulse {
-    0%,100% { box-shadow: inset 3px 0 0 rgba(255,50,80,0.60); }
-    50%      { box-shadow: inset 3px 0 0 rgba(255,50,80,1), 0 0 10px rgba(255,30,60,0.25); }
-}
 .nav-item.active-nav {
     background: rgba(0,130,255,0.13);
     color: #00eeff;
@@ -4957,12 +4938,6 @@ input:focus, textarea:focus, select:focus {
     color: #031000 !important;
     box-shadow: 0 0 10px rgba(57,255,20,0.70) !important;
 }
-/* Go Live button — always red, overrides theme nav colour */
-.nav-item.nav-item-go-live { color: #ff5566 !important; animation: navGoLivePulse 2.4s ease-in-out infinite !important; }
-.nav-item.nav-item-go-live .nav-icon { color: #ff3344 !important; filter: drop-shadow(0 0 5px rgba(255,30,60,0.70)) !important; }
-.nav-item.nav-item-go-live:hover { background: rgba(255,30,60,0.15) !important; color: #ff2244 !important; }
-.nav-item.nav-item-go-live:hover .nav-icon { filter: drop-shadow(0 0 8px rgba(255,30,60,0.90)) !important; }
-
 /* ──────────────────────────────────────────
    4. MESSAGE BUBBLES
    Sent  → blue gradient
@@ -6024,180 +5999,6 @@ body.arcade-fs-ios body::after { display:none !important; }
     0%,100% { box-shadow: 0 0 0 3px rgba(255,30,60,0.55), 0 0 18px rgba(255,30,60,0.35); }
     50%     { box-shadow: 0 0 0 5px rgba(255,30,60,0.80), 0 0 32px rgba(255,30,60,0.60); }
 }
-/* ── Live Hub Page ── */
-.live-hub-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
-}
-.live-hub-title {
-    font-size: 22px; font-weight: 800; color: #fff;
-    display: flex; align-items: center; gap: 10px;
-}
-.live-hub-live-count {
-    font-size: 12px; font-weight: 700; padding: 3px 10px;
-    background: rgba(255,30,60,0.18); border: 1px solid rgba(255,30,60,0.55);
-    color: #ff5566; border-radius: 20px; letter-spacing: 0.5px;
-}
-.live-hub-empty {
-    text-align: center; padding: 60px 20px; color: #3a5a7a;
-}
-.live-hub-empty-icon { font-size: 52px; margin-bottom: 14px; }
-.live-hub-empty-text { font-size: 14px; line-height: 1.6; }
-.live-hub-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 16px;
-}
-.live-hub-card {
-    background: rgba(10, 16, 38, 0.95);
-    border: 1px solid rgba(255,40,70,0.35);
-    border-radius: 16px; overflow: hidden;
-    cursor: pointer; text-decoration: none; display: flex; flex-direction: column;
-    transition: border-color .2s, box-shadow .2s, transform .15s, opacity .25s;
-    box-shadow: 0 2px 18px rgba(255,30,60,0.08);
-    animation: lhcIn .28s ease-out both;
-}
-.live-hub-card:hover {
-    border-color: rgba(255,40,70,0.7);
-    box-shadow: 0 0 0 1px rgba(255,40,70,0.4), 0 4px 32px rgba(255,30,60,0.25);
-    transform: translateY(-2px);
-}
-.live-hub-card:active { transform: scale(0.97); }
-.live-hub-card.lhc-removing {
-    animation: lhcOut .28s ease-in forwards;
-    pointer-events: none;
-}
-/* ── V2 live hub card — neon animated border ── */
-.live-hub-card-v2 {
-    border: 2px solid rgba(0,174,239,0.5);
-    box-shadow: 0 2px 16px rgba(0,174,239,0.12);
-    background: #040c1e;
-}
-.live-hub-card-v2.is-live {
-    animation: lhcIn .28s ease-out both, lhcV2NeonBorder 3s ease-in-out 0.3s infinite;
-}
-@keyframes lhcV2NeonBorder {
-    0%,100% { border-color: rgba(0,174,239,0.55); box-shadow: 0 2px 16px rgba(0,174,239,0.2); }
-    50%      { border-color: rgba(57,255,20,0.65); box-shadow: 0 2px 22px rgba(57,255,20,0.35); }
-}
-.live-hub-card-v2:hover {
-    border-color: rgba(57,255,20,0.8) !important;
-    box-shadow: 0 6px 28px rgba(57,255,20,0.3) !important;
-    transform: translateY(-3px) !important;
-}
-/* V2 card creator row */
-.lhc-creator-row { padding: 8px 10px 4px; }
-.lhc-creator-badge {
-    display: flex; align-items: center; gap: 8px;
-    background: rgba(0,174,239,0.06); border: 1px solid rgba(0,174,239,0.18);
-    border-radius: 20px; padding: 4px 10px 4px 4px;
-}
-.lhc-creator-avatar {
-    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
-    background: rgba(0,40,100,0.7) center/cover no-repeat;
-    border: 2px solid rgba(0,174,239,0.65);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 800; color: #00AEEF;
-    box-shadow: 0 0 8px rgba(0,174,239,0.4);
-}
-.lhc-creator-info { flex: 1; min-width: 0; }
-.lhc-online-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: #39FF14; flex-shrink: 0;
-    box-shadow: 0 0 6px rgba(57,255,20,0.8);
-    animation: greenPulse 2s infinite;
-}
-/* V2 live-dot inside pill */
-.lhc-live-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: #fff; display: inline-block;
-    animation: feedLivePulse 1.2s ease-in-out infinite;
-    flex-shrink: 0;
-}
-@keyframes lhcIn {
-    from { opacity:0; transform: translateY(10px) scale(0.96); }
-    to   { opacity:1; transform: translateY(0) scale(1); }
-}
-@keyframes lhcOut {
-    from { opacity:1; transform: scale(1); }
-    to   { opacity:0; transform: scale(0.92); }
-}
-/* Category chip on live card */
-.lhc-category {
-    display: inline-flex; align-items: center;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
-    padding: 2px 8px; border-radius: 20px; margin-top: 4px;
-    background: rgba(0,174,239,0.14); border: 1px solid rgba(0,174,239,0.30);
-    color: #66ccff; width: fit-content;
-}
-.lhc-thumb {
-    width: 100%; height: 110px;
-    background: #060c1a; display: flex; align-items: center; justify-content: center;
-    position: relative; overflow: hidden;
-}
-.lhc-avatar-large {
-    width: 60px; height: 60px; border-radius: 50%; flex-shrink: 0;
-    background: rgba(0,40,100,0.7) center/cover no-repeat;
-    border: 3px solid rgba(255,30,60,0.7);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 24px; font-weight: 800; color: #00AEEF;
-    box-shadow: 0 0 0 4px rgba(255,30,60,0.25), 0 0 18px rgba(255,30,60,0.4);
-    animation: avatarLivePulse 1.4s ease-in-out infinite;
-}
-.lhc-live-pill {
-    position: absolute; top: 8px; left: 8px;
-    background: #ff2244; color: #fff;
-    font-size: 9px; font-weight: 800; letter-spacing: 1.2px;
-    padding: 2px 8px; border-radius: 6px;
-    text-transform: uppercase;
-    display: flex; align-items: center; gap: 4px;
-    box-shadow: 0 0 10px rgba(255,30,60,0.6);
-}
-.lhc-live-pill::before {
-    content: ''; width: 5px; height: 5px; border-radius: 50%;
-    background: #fff; animation: feedLivePulse 1.2s ease-in-out infinite;
-    display: inline-block;
-}
-.lhc-viewers {
-    position: absolute; bottom: 7px; right: 8px;
-    background: rgba(0,0,0,0.65); color: rgba(255,255,255,0.88);
-    font-size: 10px; padding: 2px 7px; border-radius: 10px;
-    backdrop-filter: blur(4px);
-    display: flex; align-items: center; gap: 3px;
-}
-.lhc-elapsed {
-    position: absolute; bottom: 7px; left: 8px;
-    background: rgba(0,0,0,0.65); color: rgba(255,255,255,0.6);
-    font-size: 10px; padding: 2px 7px; border-radius: 10px;
-    backdrop-filter: blur(4px);
-}
-.lhc-body {
-    padding: 12px 14px 14px; flex: 1; display: flex; flex-direction: column; gap: 4px;
-}
-.lhc-name {
-    font-size: 14px; font-weight: 800; color: #e8f4ff;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.lhc-handle {
-    font-size: 11px; color: #4a7a9a;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.lhc-title {
-    font-size: 12px; color: #8ab0cc; line-height: 1.4; margin-top: 2px;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-.lhc-watch-btn {
-    margin-top: 10px; width: 100%;
-    background: linear-gradient(135deg, #cc1133, #ff2244);
-    border: none; border-radius: 10px; color: #fff;
-    font-size: 13px; font-weight: 800; padding: 9px 0;
-    cursor: pointer; letter-spacing: 0.4px;
-    transition: filter .15s, transform .12s;
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-}
-.lhc-watch-btn:hover { filter: brightness(1.14); }
-.lhc-watch-btn:active { transform: scale(0.96); }
 
 .story-ring-inner {
     width: 60px; height: 60px; border-radius: 50%;
@@ -6620,16 +6421,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="sc-divider"></div>
 
-        <!-- Live Hub -->
-        <button class="sc-item sc-item-live" id="scNavLive" onclick="realmNavTo('liveHubPage')" aria-label="Live Hub" style="display:none;">
-            <span class="sc-item-icon">🔴</span>
-            <span class="sc-item-label">Live Hub</span>
-        </button>
-        <!-- Go Live -->
-        <button class="sc-item sc-item-live" id="scNavGoLive" onclick="goLiveOrWatch()" aria-label="Go Live" style="display:none;">
-            <span class="sc-item-icon">📡</span>
-            <span class="sc-item-label">Go Live</span>
-        </button>
         <!-- 24-HOUR TV — native SNS page -->
         <button class="sc-item" id="scNavNexus" onclick="realmNavTo('tvPage')" aria-label="24-Hour TV" style="color:#00AEEF;">
             <span class="sc-item-icon">📺</span>
@@ -6728,17 +6519,9 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="ncm-divider"></div>
 
-        <!-- ── CREATOR / LIVE ── -->
+        <!-- ── CREATOR / TV ── -->
         <span class="ncm-section-label">Creator</span>
 
-        <div class="ncm-item ncm-item-live" id="ncmLiveHub" onclick="mobileNavTo('liveHubPage')" style="display:none;">
-            <div class="ncm-icon-wrap">🔴</div>
-            <div class="ncm-label">Live Hub</div>
-        </div>
-        <div class="ncm-item ncm-item-live" id="ncmGoLive" onclick="mobileNavTo('_golive')" style="display:none;">
-            <div class="ncm-icon-wrap">📡</div>
-            <div class="ncm-label">Go Live</div>
-        </div>
         <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
             <div class="ncm-icon-wrap">📺</div>
             <div class="ncm-label">24-Hour TV</div>
@@ -6854,15 +6637,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="sidebar-divider"></div>
 
-        <!-- ── CREATOR / LIVE ── hidden by default; shown when Founder enables -->
-        <button class="nav-item" id="navLiveHub" onclick="realmNavTo('liveHubPage')" style="display:none;color:#ff4455;border-left:3px solid rgba(255,50,80,0.55);">
-            <span class="nav-icon">🔴</span> Live Hub
-            <span id="navLiveHubCount" class="nav-badge" style="display:none;background:#ff3344;"></span>
-        </button>
-        <button class="nav-item nav-item-go-live" id="navLive" onclick="goLiveOrWatch()" style="display:none;">
-            <span class="nav-icon">📡</span> Go Live
-            <span id="navLiveDot" class="nav-badge" style="display:none;background:#ff3344;"></span>
-        </button>
         <button class="nav-item" id="navNexus" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
             <span class="nav-icon">📺</span> 24-Hour TV
         </button>
@@ -6984,20 +6758,6 @@ body.arcade-fs-ios body::after { display:none !important; }
         </div>
     </div>
 
-    <!-- ── LIVE NOW banner — real-time live rooms popup strip ── -->
-    <div id="feedLiveBanner" style="display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;">
-            <span style="font-size:11px;font-weight:700;color:#ff4455;letter-spacing:1.2px;text-transform:uppercase;display:flex;align-items:center;gap:7px;">
-                <span class="feed-live-dot-pulse"></span> LIVE NOW
-                <span id="feedLiveCount" style="background:rgba(255,40,70,0.15);border:1px solid rgba(255,40,70,0.45);color:#ff6677;font-size:10px;padding:1px 7px;border-radius:20px;"></span>
-            </span>
-            <a href="live.html" style="font-size:11px;color:#3a6a9a;text-decoration:none;padding:3px 10px;border:1px solid rgba(0,174,239,0.22);border-radius:12px;transition:color .15s,border-color .15s;" onmouseover="this.style.color='#00aeef';this.style.borderColor='rgba(0,174,239,0.55)'" onmouseout="this.style.color='#3a6a9a';this.style.borderColor='rgba(0,174,239,0.22)'">See all →</a>
-        </div>
-        <div id="feedLiveCards" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;scrollbar-width:none;-webkit-overflow-scrolling:touch;">
-            <!-- Cards injected by JS -->
-        </div>
-    </div>
-
     <!-- Post composer -->
     <div class="section-card">
         <h3 style="margin:0 0 12px; font-size:14px; color:#00AEEF; text-shadow:0 0 8px rgba(0,174,239,0.35);">What's on your mind?</h3>
@@ -7086,10 +6846,6 @@ body.arcade-fs-ios body::after { display:none !important; }
                 <div id="profileOnlineBadge" style="display:none;" class="profile-online-badge">
                     <div class="profile-online-dot"></div> Online now
                 </div>
-                <!-- LIVE NOW badge — shown when the user is currently streaming -->
-                <a id="profileLiveBadge" href="live.html" class="profile-live-badge" style="display:none;" target="_blank" rel="noopener">
-                    <span class="profile-live-badge-dot"></span> LIVE NOW
-                </a>
                 <div class="profile-joined-text" id="profileJoinedText"></div>
 
                 <!-- Stats -->
@@ -7121,8 +6877,6 @@ body.arcade-fs-ios body::after { display:none !important; }
                     <button id="btnFollowAction">+ Follow</button>
                     <button id="btnMessageAction">💬 Message</button>
                     <button id="btnEditProfile" style="display:none;" onclick="openEditProfileModal()">✏️ Edit Profile</button>
-                    <!-- Watch Live — shown on OTHER user's profile when they are streaming -->
-                    <a id="btnWatchLive" href="live.html" target="_blank" rel="noopener" style="display:none;background:linear-gradient(135deg,#880020,#dd1133);border:1px solid rgba(255,34,68,0.7);color:#fff;font-weight:800;letter-spacing:0.5px;box-shadow:0 0 16px rgba(255,30,60,0.45);padding:7px 16px;border-radius:20px;font-size:13px;text-decoration:none;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#fff;display:inline-block;animation:snxLiveDot 1s ease-in-out infinite;flex-shrink:0;"></span>Watch Live</a>
                     <!-- Block / Report — shown on OTHER user's profile only -->
                     <button id="btnBlockUser" style="display:none;border-color:rgba(255,51,102,0.4);color:#ff5577;font-size:12px;padding:6px 12px;border-radius:20px;" onclick="snxToggleBlockUser()">🚫 Block</button>
                     <button id="btnReportUser" style="display:none;border-color:rgba(255,170,0,0.4);color:#ffaa44;font-size:12px;padding:6px 12px;border-radius:20px;" onclick="snxOpenReportModal('user',window.activeProfileUid,null,'this user')">🚨 Report</button>
@@ -8992,7 +8746,6 @@ body.arcade-fs-ios body::after { display:none !important; }
     <button class="admin-tab" onclick="switchAdminTab('appeals')">📩 Appeals</button>
     <button class="admin-tab" onclick="switchAdminTab('aisafety')">🤖 AI Safety</button>
     <button class="admin-tab" onclick="switchAdminTab('shadowbot')">🤖 Shadow Bot</button>
-    <button class="admin-tab" onclick="switchAdminTab('liverooms')">🔴 Live Rooms</button>
     <button class="admin-tab" onclick="switchAdminTab('pages')">👁 Pages &amp; Controls</button>
     <button class="admin-tab" onclick="switchAdminTab('r2storage');snxR2StatusOpen()">🗄️ R2 Storage</button>
     <button class="admin-tab" onclick="switchAdminTab('welcomemusic');snxwmOpen()">🎵 Welcome Music</button>
@@ -9335,7 +9088,7 @@ body.arcade-fs-ios body::after { display:none !important; }
             <option value="profilesEnabled">👤 Profiles</option>
             <option value="messagesEnabled">💬 Messages</option>
             <option value="radioEnabled">📻 24-Hour Radio</option>
-            <option value="liveEnabled">🔴 Live System</option>
+
             <option value="arcadeEnabled">🕹️ Arcade</option>
         </select>
         <div class="snx-maint-msg-form">
@@ -9933,23 +9686,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div><!-- end adminTab-shadowbot -->
 
 <!-- ══════════════════════════════════
-     TAB: LIVE ROOMS (Founder only)
-══════════════════════════════════ -->
-<div class="admin-tab-content" id="adminTab-liverooms">
-    <div class="section-card" style="margin-bottom:16px;border-color:rgba(255,34,68,0.35);background:linear-gradient(135deg,rgba(40,0,0,0.35),rgba(11,31,58,0.92));">
-        <h3 style="margin:0 0 8px;font-size:13px;color:#ff4455;text-transform:uppercase;letter-spacing:0.8px;">🔴 Live Room Manager</h3>
-        <p style="font-size:12px;color:#9bbdd8;margin:0 0 12px;line-height:1.6;">View all active live rooms. End any stream instantly or delete stale rooms. Changes take effect in real time.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-            <button onclick="window.adminLoadLiveRooms()" style="padding:8px 16px;border-radius:8px;background:rgba(0,174,239,0.12);border:1px solid rgba(0,174,239,0.4);color:#00AEEF;font-size:12px;font-weight:700;cursor:pointer;">↺ Refresh</button>
-            <button onclick="window.adminPurgeEndedRooms()" style="padding:8px 16px;border-radius:8px;background:rgba(255,34,68,0.10);border:1px solid rgba(255,34,68,0.35);color:#ff6677;font-size:12px;font-weight:700;cursor:pointer;">🗑 Delete All Ended Rooms</button>
-        </div>
-    </div>
-    <div id="adminLiveRoomsList" style="display:flex;flex-direction:column;gap:10px;">
-        <div style="color:#4a6a8a;font-size:13px;text-align:center;padding:20px 0;">Click Refresh to load live rooms.</div>
-    </div>
-</div>
-
-<!-- ══════════════════════════════════
      TAB: PAGE VISIBILITY CONTROLS
 ══════════════════════════════════ -->
 <div class="admin-tab-content" id="adminTab-pages">
@@ -10074,14 +9810,6 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="settings-row">
             <div class="settings-label">🤖 Shadow Bot<small>Bot posts &amp; welcome messages</small></div>
             <label class="notif-toggle-wrap"><input type="checkbox" id="esBot" class="notif-toggle-cb" checked onchange="emergencyToggle('shadowBotEnabled',this.checked,'Shadow Bot')"><span class="notif-toggle-slider"></span></label>
-        </div>
-        <div class="settings-row">
-            <div class="settings-label">📡 Go Live<small>Hide Go Live button &amp; live.html for all users</small></div>
-            <label class="notif-toggle-wrap"><input type="checkbox" id="esLive" class="notif-toggle-cb" checked onchange="toggleLiveFeature(this.checked)"><span class="notif-toggle-slider"></span></label>
-        </div>
-        <div class="settings-row" style="border-bottom:none;">
-            <div class="settings-label">🔴 Live Hub<small>Hide Live Hub button, page &amp; live feed cards</small></div>
-            <label class="notif-toggle-wrap"><input type="checkbox" id="esLiveHub" class="notif-toggle-cb" checked onchange="toggleLiveHubFeature(this.checked)"><span class="notif-toggle-slider"></span></label>
         </div>
     </div>
 
@@ -10951,35 +10679,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div>
 
 </div><!-- end administratorPage -->
-
-<!-- ══════════════════════════════════════════════════════════
-     LIVE HUB PAGE — shows all currently active live streams
-     ══════════════════════════════════════════════════════════ -->
-<div class="page" id="liveHubPage">
-
-  <div class="live-hub-header">
-    <div class="live-hub-title">
-      🔴 Live Hub
-      <span class="live-hub-live-count" id="liveHubCount" style="display:none;">0 LIVE</span>
-    </div>
-  </div>
-
-  <!-- Loading state -->
-  <div id="liveHubLoading" style="text-align:center;padding:40px 0;color:#3a5a7a;font-size:13px;">
-    <div style="width:32px;height:32px;border-radius:50%;border:2px solid rgba(255,30,60,0.25);border-top-color:#ff2244;animation:spin 0.7s linear infinite;margin:0 auto 12px;"></div>
-    Loading live streams…
-  </div>
-
-  <!-- Empty state (no one is live) -->
-  <div id="liveHubEmpty" class="live-hub-empty" style="display:none;">
-    <div class="live-hub-empty-icon">📡</div>
-    <div class="live-hub-empty-text">No creators are live right now.<br>Check back soon or be the first to go live.</div>
-  </div>
-
-  <!-- Live cards grid -->
-  <div class="live-hub-grid" id="liveHubGrid"></div>
-
-</div><!-- end liveHubPage -->
 
 
 <!-- studioPage retained as a non-visible redirect stub.
@@ -12945,46 +12644,18 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       }
   };
 
-  /* ── Go Live or Watch ── */
-  window.goLiveOrWatch = async function() {
-      // Blocked when Live feature is disabled — applies to ALL roles
-      if (window._snxLiveEnabled !== true) {
-          toastNotification('⛔ Live streaming is currently unavailable.');
-          return;
-      }
-      // Close sidebar / hamburger
-      const sidebar = document.getElementById('side');
-      const overlay = document.getElementById('sidebarOverlay');
-      if (sidebar)  sidebar.classList.remove('active');
-      if (overlay)  overlay.classList.remove('visible');
-
-      if (!currentUser) {
-          if (typeof realmNavTo === 'function') realmNavTo('login');
-          return;
-      }
-
-      // [OLD-LIVE] Phase 1: navigate directly to live.html — the standalone WebRTC engine.
-      // No Creator Channel adapter needed. live.html reads existing Firebase auth.
-      // Phase 2 will re-add the adapter bridge when Creator Channels reconnects.
-      console.log('[OLD-LIVE] goLiveOrWatch — navigating to live.html, uid:', currentUser.uid);
-      window.location.href = 'live.html';
+  /* ── Live Hub/Go Live removed ── */
+  window.goLiveOrWatch = function() {
+      toastNotification('⛔ Go Live is no longer available.');
   };
 
-  /* ═══════════════════════════════════════════════
-     LIVE HUB PAGE
-     Real-time page listing every active stream.
-     Cards include: avatar, username, LIVE badge,
-     title, viewer count, elapsed time, Watch button.
-   ═══════════════════════════════════════════════ */
-  (function initLiveHub() {
-    const grid      = document.getElementById('liveHubGrid');
-    const emptyEl   = document.getElementById('liveHubEmpty');
-    const loadingEl = document.getElementById('liveHubLoading');
-    const countEl   = document.getElementById('liveHubCount');
-    const navBadge  = document.getElementById('navLiveHubCount');
-    if (!grid) return;
+  /* (Live Hub and Feed Live Banner removed) */
+  (function initLiveHub() { /* removed */ })();
+  (function initFeedLiveBanner() { /* removed */ })();
 
-    const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours — auto-purge abandoned streams
+  /* DEAD_CODE_PLACEHOLDER_STALE_MS */
+  (function _deadLiveHubBody() {
+    const STALE_MS = 4 * 60 * 60 * 1000; // 4 hours
 
     function _esc(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -13239,19 +12910,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
       _attach(false);
     });
-  })();
+  // dead placeholder end
+  }); // _deadLiveHubBody NOT invoked
 
-  /* ═══════════════════════════════════════════════
-     FEED LIVE BANNER
-     Shows active live rooms as clickable cards at the
-     top of the feed — tap to join instantly, no login.
-   ═══════════════════════════════════════════════ */
-  (function initFeedLiveBanner() {
-    const banner    = document.getElementById('feedLiveBanner');
-    const cardsEl   = document.getElementById('feedLiveCards');
-    const countEl   = document.getElementById('feedLiveCount');
-    if (!banner || !cardsEl) return;
-
+  (function _deadFeedLiveBody() {
     function escL(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
@@ -13394,28 +13056,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
       _attachBannerQuery(false);
     });
-  })();
+  }); // _deadFeedLiveBody NOT invoked
 
   window.handleLogout = async () => {
       // ── Timing: logout initiated ──
       if (window.__snxT) { window.__snxT.LOGOUT_START = performance.now(); console.log('[SNX] LOGOUT_START +' + Math.round(window.__snxT.LOGOUT_START) + 'ms'); }
-      // ── Step 1: Creator Live cleanup — must happen before signOut so RTDB
-      //    writes still have auth. Use a tight timeout so a stalled cleanup
-      //    never blocks the sign-out.
-      // If the host is on live.html, the beforeunload handler there cleans up.
-      // This covers the case where they sign out without ending the broadcast.
-      try {
-          const uid = currentUser?.uid;
-          if (uid) {
-              const { endActiveBroadcast } = await import('./snx-live-adapter.js');
-              await Promise.race([
-                  endActiveBroadcast(uid),
-                  new Promise(r => setTimeout(r, 4000))   // 4 s hard cap
-              ]);
-          }
-      } catch (_liveErr) { /* live cleanup failed — proceed to sign out */ }
 
-      // ── Step 2: Presence cleanup — fire-and-forget (never blocks signOut) ──
+      // ── Step 1: Presence cleanup — fire-and-forget (never blocks signOut) ──
       if (currentUser) {
           updateDoc(doc(db, "users", currentUser.uid), { status: "offline", lastSeen: Date.now() }).catch(() => {});
           _rtdbSet(_rtdbRef(_presenceRtdb, 'users/' + currentUser.uid), { online: false, live: false, lastSeen: _rtdbServerTimestamp() }).catch(() => {});
@@ -13837,21 +13484,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                           // Remove the handler when the toast hides
                           setTimeout(() => { _t.removeEventListener('click', _handler); _t.style.cursor = ''; }, 3500);
                       }
-                  } else if (n.type === 'live' && n.roomId) {
-                      // Live notification — vibrate + tappable toast → open live room
-                      try { if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]); } catch(_) {}
-                      toastNotification('🔴 ' + (n.body || (n.fromName + ' is live!')));
-                      const _lt = document.getElementById('notification-toast');
-                      if (_lt) {
-                          _lt.style.cursor = 'pointer';
-                          const _lh = () => {
-                              _lt.removeEventListener('click', _lh);
-                              _lt.style.cursor = '';
-                              window.open('live.html#watch=' + encodeURIComponent(n.roomId), '_blank');
-                          };
-                          _lt.addEventListener('click', _lh);
-                          setTimeout(() => { _lt.removeEventListener('click', _lh); _lt.style.cursor = ''; }, 5000);
-                      }
                   } else {
                       toastNotification('🔔 ' + (n.body || n.title || 'New notification'));
                   }
@@ -14036,27 +13668,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       window._snxCfgMessagesTabEnabled = _msgEnabled; // persisted cache
       _syncMessagesTabUI(_msgEnabled);
 
-      // ── Live & Live Hub feature flags ──
-      // Must be explicitly true — default OFF globally until Founder enables them.
-      const _liveOn    = cfg.liveEnabled    === true;
-      const _liveHubOn = cfg.liveHubEnabled === true;
-      window._snxLiveEnabled    = _liveOn;
-      window._snxLiveHubEnabled = _liveHubOn;
-      // Sync control panel checkboxes if panel is open
-      const _cbLive    = document.getElementById('esLive');
-      const _cbLiveHub = document.getElementById('esLiveHub');
-      if (_cbLive)    _cbLive.checked    = _liveOn;
-      if (_cbLiveHub) _cbLiveHub.checked = _liveHubOn;
-      // Apply visibility immediately (only hides from non-founders)
-      if (typeof applyFeatureVisibility === 'function') applyFeatureVisibility();
-      // Write to localStorage so live-hub.html gate can read it instantly
-      try {
-          const _fc = JSON.parse(localStorage.getItem('founderFeatureControls') || '{}');
-          _fc.liveEnabled    = _liveOn;
-          _fc.liveHubEnabled = _liveHubOn;
-          localStorage.setItem('founderFeatureControls', JSON.stringify(_fc));
-      } catch(_) {}
-
   });
 
   /* ── Firebase connection loss detection + auto-reconnect ──────────────
@@ -14115,8 +13726,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (_visData && typeof _applyPageVisibility === 'function') {
           _applyPageVisibility(_visData);
       }
-      // Re-apply Live / Live Hub feature visibility after role is known
-      if (typeof applyFeatureVisibility === 'function') applyFeatureVisibility();
   };
 
   /* ── Sync maintenance status badge + toggle in Founder Controls ── */
@@ -14685,64 +14294,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                       div.addEventListener('animationend', () => div.classList.remove('snx-rt-new'), { once: true });
                   }
 
-                  // ── LIVE / LIVE_SHARE card ─────────────────────────────────────
-                  // Skip ended streams — only render active live cards
-                  if ((post.type === 'live' || post.type === 'live_share') && post.isLive === false) {
-                      return;   // do not add ended stream cards to the feed
-                  }
+                  // Skip live-type feed posts (Go Live removed)
                   if (post.type === 'live' || post.type === 'live_share') {
-                      const _lAvatar  = escFeed(post.authorAvatar || '');
-                      const _lName    = escFeed(post.authorName   || 'Someone');
-                      const _lHandle  = escFeed(post.authorHandle || '');
-                      const _lRoomId  = escFeed(post.liveRoomId   || '');
-                      const _lTitle   = escFeed(post.title        || 'Shadow Nexus Social LIVE');
-                      const _lWatchUrl = 'live.html#watch=' + encodeURIComponent(post.liveRoomId || '');
-                      const _lAvatarStyle = _lAvatar ? `background-image:url('${_lAvatar}');background-size:cover;background-position:center;` : '';
-                      const _lInitial = (_lName || '?')[0];
-                      const _lIsShare = post.type === 'live_share';
-                      const _lIsOwner = post.uid === currentUser.uid;
-                      // Share button copies link
-                      const _lShareBtnId = 'live-share-' + pDoc.id;
-                      div.innerHTML = `
-                        <div class="snx-feed-live-card" id="flc-${pDoc.id}">
-                          ${_lIsShare ? `<div style="font-size:11px;color:#ff6677;margin-bottom:8px;display:flex;align-items:center;gap:5px;">📣 Shared a live stream</div>` : ''}
-                          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-                            <div class="snx-flc-avatar${post.isLive !== false ? ' is-live' : ''}" style="${_lAvatarStyle}" onclick="viewProfile('${escFeed(post.uid || '')}')">${_lAvatar ? '' : _lInitial}</div>
-                            <div style="flex:1;min-width:0;">
-                              <div style="font-size:14px;font-weight:700;color:#fff;">${_lName} <span style="font-weight:400;color:#4a7a9a;">@${_lHandle}</span></div>
-                              <div style="font-size:12px;color:#ff4455;display:flex;align-items:center;gap:5px;margin-top:2px;">
-                                <span class="snx-live-dot-anim"></span>
-                                ${post.isLive !== false ? 'LIVE NOW' : 'Was Live'}
-                              </div>
-                            </div>
-                            <div style="font-size:11px;color:#4a7a9a;">${_postTimeAgo(post.createdAt || post.timestamp)}</div>
-                          </div>
-                          ${post.isLive !== false ? `
-                          <a href="${_lWatchUrl}" class="snx-flc-watch-btn" aria-label="Watch live">
-                            🔴 Watch Live — ${_lTitle}
-                          </a>` : `<div style="font-size:12px;color:#4a7a9a;padding:10px 0;">This stream has ended.</div>`}
-                          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
-                            ${post.isLive !== false ? `<button id="${_lShareBtnId}" class="react-btn" style="border-color:rgba(255,40,70,0.4);color:#ff6677;">📤 Share</button>` : ''}
-                            ${_lIsOwner ? `<button class="react-btn btn-del-post" onclick="window.deleteTimelinePost('${pDoc.id}')">🗑️ Delete</button>` : ''}
-                          </div>
-                        </div>`;
-                      // Wire share button
-                      if (post.isLive !== false) {
-                          const _sb = div.querySelector('#' + _lShareBtnId);
-                          if (_sb) {
-                              _sb.addEventListener('click', () => {
-                                  const _url = window.location.origin + window.location.pathname.replace('index.html','') + _lWatchUrl;
-                                  if (navigator.share) {
-                                      navigator.share({ title: '🔴 ' + _lName + ' is Live!', url: _url }).catch(() => {});
-                                  } else if (navigator.clipboard && window.isSecureContext) {
-                                      navigator.clipboard.writeText(_url).then(() => toastNotification('🔗 Live link copied!')).catch(() => window.prompt('Copy link:', _url));
-                                  } else {
-                                      window.prompt('Copy link:', _url);
-                                  }
-                              });
-                          }
-                      }
-                  } else {
+                      return;
+                  }
+                  {
                   // ── Normal post ───────────────────────────────────────────────
 
                   // Repost header — shown when this card is a repost
@@ -15439,9 +14995,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           type:    notif.type,
           fromUid: notif.fromUid || '',
           roomId:  notif.roomId  || '',
-          url:     notif.type === 'live' && notif.roomId
-                     ? 'live.html#watch=' + notif.roomId
-                     : '/'
+          url:     '/'
       }).catch(() => {});
   }
 
@@ -16517,12 +16071,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                navFn = `openArcadeHub();switchArcadeTab('invites',document.getElementById('ahTab-invites'))`;
           } else if (n.type === 'live') {
               icon = '🔴';
-              text = `<b>${escFeed(n.fromName)}</b> is live${n.roomTitle ? `: <i>"${escFeed(n.roomTitle)}"</i>` : ''}`;
-              actHtml = `<div class="notif-actions" style="margin-top:6px;">
-                  <button class="btn-accept" style="font-size:11px;" onclick="event.stopPropagation();window.open('live.html#watch=${escFeed(n.roomId||'')}','_blank')">🔴 Watch Live</button>
-                  <button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button>
-              </div>`;
-              navFn = n.roomId ? `window.open('live.html#watch=${escFeed(n.roomId)}','_blank')` : `goLiveOrWatch()`;
+              text = `<b>${escFeed(n.fromName)}</b> was live`;
+              actHtml = `<div class="notif-actions" style="margin-top:6px;"><button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button></div>`;
+              navFn = ``;
           } else if (n.type === 'creator_live') {
               // 🔴 Creator went LIVE on Shadow Nexus TV
               // Deep-link opens the actual live session — not just the channel page.
@@ -17183,88 +16734,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // Online badge
           const onlineBadge = document.getElementById("profileOnlineBadge");
           if (onlineBadge) onlineBadge.style.display = p.status === 'online' ? 'inline-flex' : 'none';
-
-          // ── LIVE NOW badge + Watch Live — check creatorChannels (new system) first,
-          // then fall back to legacy users.isLive / users.liveRoomId ──────────────────
-          const liveBadge   = document.getElementById("profileLiveBadge");
-          const btnWatchLive = document.getElementById("btnWatchLive");
-          const avatarEl2   = document.getElementById("profileAvatar");
-          const isSelf      = currentUser && uid === currentUser.uid;
-
-          // Async check against creatorChannels (authoritative for new Creator Live)
-          (async () => {
-            let isLiveNow = false;
-            let watchLiveAction = null; // function or null
-
-            try {
-              const _chSnap = await getDoc(doc(db, 'creatorChannels', uid));
-              if (_chSnap.exists()) {
-                const _ch = _chSnap.data();
-                if (_ch.status === 'live' && _ch.currentLiveId) {
-                  isLiveNow = true;
-                  // Watch Live: open inside the Creator Live viewer (no page navigation)
-                  const _liveId = _ch.currentLiveId;
-                  const _creatorUid = uid;
-                  watchLiveAction = async () => {
-                    try {
-                      const { loadCreatorChannel } = await import('./snx-creator-channels.js');
-                      const _viewerUser = window._snxCurrentUser;
-                      const _viewerData = window._snxUserData || null;
-                      const _creatorCh  = await loadCreatorChannel(_creatorUid);
-                      // Route through the adapter — opens old working viewer
-                      const { watchLive } = await import('./snx-live-adapter.js');
-                      await watchLive(_viewerUser, _viewerData, _creatorCh, _liveId);
-                    } catch (_wlErr) {
-                      console.error('[SNX Profile] Watch Live failed:', _wlErr);
-                      if (typeof toastNotification === 'function') toastNotification('⚠️ Could not open live stream.');
-                    }
-                  };
-                }
-              }
-            } catch (_) {}
-
-            // Fall back to legacy users.isLive if creatorChannels not live
-            if (!isLiveNow && p.isLive && p.liveRoomId) {
-              isLiveNow = true;
-              const _legacyUrl = `live.html#watch=${encodeURIComponent(p.liveRoomId)}`;
-              watchLiveAction = () => { window.open(_legacyUrl, '_blank', 'noopener'); };
-            }
-
-            // Apply LIVE badge
-            if (liveBadge) {
-              if (isLiveNow) {
-                liveBadge.removeAttribute('href');
-                liveBadge.style.cursor = 'pointer';
-                liveBadge.style.display = 'inline-flex';
-                liveBadge._snxWatchAction = watchLiveAction;
-                if (!liveBadge._snxWatchBound) {
-                  liveBadge._snxWatchBound = true;
-                  liveBadge.addEventListener('click', e => { e.preventDefault(); liveBadge._snxWatchAction?.(); });
-                }
-              } else {
-                liveBadge.style.display = 'none';
-              }
-            }
-
-            // Apply avatar live ring
-            if (avatarEl2) avatarEl2.classList.toggle('is-live', isLiveNow);
-
-            // Apply Watch Live button (other user only)
-            if (btnWatchLive) {
-              if (!isSelf && isLiveNow && watchLiveAction) {
-                btnWatchLive.removeAttribute('href');
-                btnWatchLive.style.cursor = 'pointer';
-                btnWatchLive.style.display = 'inline-flex';
-                btnWatchLive._snxWatchAction = watchLiveAction;
-                if (!btnWatchLive._snxWatchBound) {
-                  btnWatchLive._snxWatchBound = true;
-                  btnWatchLive.addEventListener('click', e => { e.preventDefault(); btnWatchLive._snxWatchAction?.(); });
-                }
-              } else {
-                btnWatchLive.style.display = 'none';
-              }
-            }
-          })();
 
           // Joined date
           const joinedEl = document.getElementById("profileJoinedText");
@@ -21255,8 +20724,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
            _set('esAI',           cfg.aiModerationEnabled !== false);
            _set('esBot',          cfg.shadowBotEnabled !== false);
            _set('esWelcomePopup', cfg.welcomePopupEnabled !== false);
-           _set('esLive',         cfg.liveEnabled    !== false);
-           _set('esLiveHub',      cfg.liveHubEnabled !== false);
           // Sync maintenance badge
           const emBadge = document.getElementById('emergencyMaintBadge');
           if (emBadge) {
@@ -21266,67 +20733,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           }
       } catch(e) {
           if (grid) grid.innerHTML = `<span style="color:#ff5566;font-size:12px;">Error loading status: ${e.message}</span>`;
-      }
-  };
-
-  /* ── Live & Live Hub feature toggles (Founder only) ──────────────────────── */
-
-  // applyFeatureVisibility — hides/shows Live and Live Hub nav buttons for ALL roles.
-  // liveEnabled / liveHubEnabled must be explicitly true to show — defaults OFF.
-  function applyFeatureVisibility() {
-      const liveOn    = window._snxLiveEnabled    === true;
-      const liveHubOn = window._snxLiveHubEnabled === true;
-
-      // Every nav area — sidebar, shadow core, mobile NCM
-      const liveIds    = ['navLive',    'scNavGoLive', 'ncmGoLive',  'liveSidebarButton'];
-      const liveHubIds = ['navLiveHub', 'scNavLive',   'ncmLiveHub', 'liveHubSidebarButton'];
-
-      liveIds.forEach(function(id) {
-          const el = document.getElementById(id);
-          if (!el) return;
-          el.style.display = liveOn ? '' : 'none';
-      });
-      liveHubIds.forEach(function(id) {
-          const el = document.getElementById(id);
-          if (!el) return;
-          el.style.display = liveHubOn ? '' : 'none';
-      });
-
-      // If user (any role) is currently on liveHubPage and it gets disabled → redirect to feed
-      if (!liveHubOn) {
-          const activePage = document.querySelector('.page.active');
-          if (activePage && activePage.id === 'liveHubPage') {
-              if (typeof navTo === 'function') navTo('feed');
-          }
-      }
-  }
-  window.applyFeatureVisibility = applyFeatureVisibility;
-
-  // toggleLiveFeature — called by esLive checkbox in Founder Control
-  window.toggleLiveFeature = async function(enabled) {
-      if (!founderOnly()) return;
-      try {
-          await setDoc(doc(db, 'siteSettings', 'config'), { liveEnabled: enabled }, { merge: true });
-          await adminAuditLog('FEATURE_TOGGLE', `Go Live: ${enabled ? 'ON' : 'OFF'}`);
-          toastNotification(`${enabled ? '✅' : '⛔'} Go Live ${enabled ? 'enabled' : 'disabled'} for all users.`);
-      } catch(e) {
-          toastNotification('Error: ' + e.message);
-          const cb = document.getElementById('esLive');
-          if (cb) cb.checked = !enabled;
-      }
-  };
-
-  // toggleLiveHubFeature — called by esLiveHub checkbox in Founder Control
-  window.toggleLiveHubFeature = async function(enabled) {
-      if (!founderOnly()) return;
-      try {
-          await setDoc(doc(db, 'siteSettings', 'config'), { liveHubEnabled: enabled }, { merge: true });
-          await adminAuditLog('FEATURE_TOGGLE', `Live Hub: ${enabled ? 'ON' : 'OFF'}`);
-          toastNotification(`${enabled ? '✅' : '⛔'} Live Hub ${enabled ? 'enabled' : 'disabled'} for all users.`);
-      } catch(e) {
-          toastNotification('Error: ' + e.message);
-          const cb = document.getElementById('esLiveHub');
-          if (cb) cb.checked = !enabled;
       }
   };
 
@@ -21664,42 +21070,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       const seenStories = _getSeenStories();
 
       sorted.forEach(([uid, stories]) => {
-          // Separate live story from regular stories for this user
-          const liveStory   = stories.find(s => s.type === 'live');
+          // Filter out live-type stories (Go Live removed)
           const regStories  = stories.filter(s => s.type !== 'live');
 
           const onlineUids = window._snxOnlineUids || new Set();
-
-          // ── LIVE bubble — always first, always before regular stories ──
-          if (liveStory) {
-              const lvBubble = document.createElement('div');
-              lvBubble.className = 'story-bubble' + (uid === myUid ? ' own-story' : '');
-              lvBubble.dataset.uid = uid;
-              lvBubble.dataset.liveRoomId = liveStory.liveRoomId || '';
-              const initial = (liveStory.authorName || '?')[0].toUpperCase();
-              const avatarStyle = liveStory.authorAvatar
-                  ? `background-image:url('${escFeed(liveStory.authorAvatar)}')`
-                  : '';
-              const isOnlineLive = onlineUids.has(uid);
-              lvBubble.innerHTML = `
-                  <span class="story-live-badge">LIVE</span>
-                  <div class="story-ring story-ring-live">
-                      <div class="story-ring-inner" style="${avatarStyle}">${liveStory.authorAvatar ? '' : escFeed(initial)}</div>
-                      ${isOnlineLive ? '<div class="story-online-dot"></div>' : ''}
-                  </div>
-                  <span class="story-label" style="color:#ff5566;">${escFeed(liveStory.authorName || 'Unknown')}</span>`;
-              lvBubble.addEventListener('click', () => {
-                  const rid = liveStory.liveRoomId;
-                  if (rid) window.location.href = 'live.html#watch=' + encodeURIComponent(rid);
-              });
-              // Insert live bubble right after the "Add Story" bubble at position 0
-              const addBubble = document.getElementById('storyAddBubble');
-              if (addBubble && addBubble.nextSibling) {
-                  bar.insertBefore(lvBubble, addBubble.nextSibling);
-              } else {
-                  bar.appendChild(lvBubble);
-              }
-          }
 
           // ── Regular story bubble (skip if no regular stories) ──
           if (!regStories.length) return;
@@ -22133,10 +21507,7 @@ function navTo(pageId) {
 
     // SNXPerf: tell performance system which context we're entering
     if (window.SNXPerf) {
-        // Leaving live hub = no longer in live context
-        if (pageId !== 'liveHubPage') {
-            SNXPerf.setLiveActive(false);
-        }
+        SNXPerf.setLiveActive(false);
     }
     show(pageId);
     // Scroll to top on every page navigation so Founder Panel content
@@ -22154,7 +21525,7 @@ function navTo(pageId) {
         moderatorPage:'navMod', administratorPage:'navAdminOfficer',
         communityPage:'navCommunity', supportRoomsPage:'navSupport',
         communityRulesPage:'navCommunityRules',
-        liveHubPage:'navLiveHub', inboxPage:'navInbox',
+        inboxPage:'navInbox',
         tvPage:'navNexus'
     };
     const navEl = document.getElementById(map[pageId]);
@@ -31001,162 +30372,12 @@ window.scbInit = async function(user, userDataArg) {
    Hook into existing admin tab switcher so the
    dashboard loads when the Shadow Bot tab opens.
    ══════════════════════════════════════════════ */
-/* ═══════════════════════════════════════════════════
-   ADMIN — LIVE ROOM MANAGER (Founder only)
-   ═══════════════════════════════════════════════════ */
-window.adminLoadLiveRooms = async function() {
-  const list = document.getElementById('adminLiveRoomsList');
-  if (!list) return;
-  list.innerHTML = '<div style="color:#4a6a8a;font-size:13px;text-align:center;padding:20px 0;">Loading…</div>';
-
-  // Load from RTDB (all rooms — active + ended)
-  const { getDatabase, ref: rtdbRef, get: rtdbGet } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js');
-  const rtdb = getDatabase(window._snxApp);
-  let rtdbRooms = {};
-  try {
-    const snap = await rtdbGet(rtdbRef(rtdb, 'liveRooms'));
-    rtdbRooms = snap.val() || {};
-  } catch (_) {}
-
-  // Load from Firestore (all liveRooms docs)
-  let fsRooms = {};
-  try {
-    const snap = await getDocs(collection(db, 'liveRooms'));
-    snap.forEach(d => { fsRooms[d.id] = d.data(); });
-  } catch (_) {}
-
-  const allIds = new Set([...Object.keys(rtdbRooms), ...Object.keys(fsRooms)]);
-
-  if (!allIds.size) {
-    list.innerHTML = '<div style="color:#4a6a8a;font-size:13px;text-align:center;padding:20px 0;">No live rooms found — database is clean.</div>';
-    return;
-  }
-
-  list.innerHTML = '';
-  allIds.forEach(roomId => {
-    const r = rtdbRooms[roomId] || fsRooms[roomId] || {};
-    const status   = r.status  || (r.isLive ? 'live' : 'ended');
-    const isActive = status === 'live';
-    const name     = r.hostName || r.hostUsername || roomId.slice(0, 12) + '…';
-    const title    = r.title    || 'Shadow Nexus Social LIVE';
-    const created  = r.createdAt ? new Date(r.createdAt).toLocaleString() : '—';
-    const ended    = r.endedAt   ? new Date(r.endedAt).toLocaleString()   : '—';
-
-    const card = document.createElement('div');
-    card.style.cssText = 'background:rgba(0,20,50,0.7);border:1px solid ' +
-      (isActive ? 'rgba(255,34,68,0.45)' : 'rgba(50,80,120,0.35)') +
-      ';border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;';
-    card.innerHTML = `
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:700;color:${isActive ? '#ff6677' : '#6a90b8'};margin-bottom:3px;">
-          ${isActive ? '🔴 LIVE' : '⚫ Ended'} &nbsp; <span style="color:#e0f0ff;">${escFeed(name)}</span>
-        </div>
-        <div style="font-size:11px;color:#4a7a9a;">${escFeed(title)}</div>
-        <div style="font-size:10px;color:#3a5a7a;margin-top:3px;">
-          ID: ${escFeed(roomId)} &nbsp;·&nbsp; Created: ${created}${!isActive ? ' &nbsp;·&nbsp; Ended: ' + ended : ''}
-        </div>
-      </div>
-      <div style="display:flex;gap:6px;flex-shrink:0;">
-        ${isActive ? `<button onclick="window.adminEndLiveRoom('${escFeed(roomId)}','${escFeed(r.hostId||'')}',this)" style="padding:6px 12px;border-radius:7px;background:rgba(255,34,68,0.12);border:1px solid rgba(255,34,68,0.4);color:#ff6677;font-size:11px;font-weight:700;cursor:pointer;">⛔ End Stream</button>` : ''}
-        <button onclick="window.adminDeleteLiveRoom('${escFeed(roomId)}','${escFeed(r.hostId||'')}',this)" style="padding:6px 12px;border-radius:7px;background:rgba(100,20,20,0.18);border:1px solid rgba(255,50,50,0.25);color:#cc5555;font-size:11px;font-weight:700;cursor:pointer;">🗑 Delete</button>
-      </div>
-    `;
-    list.appendChild(card);
-  });
-};
-
-window.adminEndLiveRoom = async function(roomId, hostId, btn) {
-  if (!founderOnly()) return;
-  if (!confirm('End this live stream? The creator will see "Stream ended".')) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Ending…'; }
-  try {
-    // RTDB
-    const { getDatabase, ref: rtdbRef, update: rtdbUpdate, remove: rtdbRemove } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js');
-    const rtdb = getDatabase(window._snxApp);
-    await rtdbUpdate(rtdbRef(rtdb, `liveRooms/${roomId}`), { status: 'ended', isLive: false, endedAt: Date.now() });
-    await rtdbRemove(rtdbRef(rtdb, `liveConnections/${roomId}`));
-    // Firestore
-    if (hostId) {
-      try { await updateDoc(doc(db, 'users', hostId), { isLive: deleteField(), liveRoomId: deleteField() }); } catch(_) {}
-      // Delete uid-keyed liveRooms doc (new schema)
-      try { await deleteDoc(doc(db, 'liveRooms', hostId)); } catch(_) {}
-    }
-    // Delete roomId-keyed liveRooms doc (legacy schema)
-    try { await deleteDoc(doc(db, 'liveRooms', roomId)); } catch(_) {}
-    // Delete any orphaned feed posts with this liveRoomId
-    try {
-      const q = query(collection(db,'posts'), where('liveRoomId','==',roomId), where('type','==','live'));
-      const s = await getDocs(q);
-      s.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
-    } catch(_) {}
-    toastNotification('Stream ended.');
-    window.adminLoadLiveRooms();
-  } catch(e) {
-    toastNotification('Could not end stream: ' + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = '⛔ End Stream'; }
-  }
-};
-
-window.adminDeleteLiveRoom = async function(roomId, hostId, btn) {
-  if (!founderOnly()) return;
-  if (!confirm('Permanently delete this room from the database?')) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
-  try {
-    const { getDatabase, ref: rtdbRef, remove: rtdbRemove } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js');
-    const rtdb = getDatabase(window._snxApp);
-    await rtdbRemove(rtdbRef(rtdb, `liveRooms/${roomId}`));
-    await rtdbRemove(rtdbRef(rtdb, `liveConnections/${roomId}`));
-    // Delete roomId-keyed liveRooms doc (legacy)
-    try { await deleteDoc(doc(db, 'liveRooms', roomId)); } catch(_) {}
-    if (hostId) {
-      try { await updateDoc(doc(db, 'users', hostId), { isLive: deleteField(), liveRoomId: deleteField() }); } catch(_) {}
-      // Delete uid-keyed liveRooms doc (new schema)
-      try { await deleteDoc(doc(db, 'liveRooms', hostId)); } catch(_) {}
-    }
-    toastNotification('Room deleted.');
-    window.adminLoadLiveRooms();
-  } catch(e) {
-    toastNotification('Could not delete room: ' + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = '🗑 Delete'; }
-  }
-};
-
-window.adminPurgeEndedRooms = async function() {
-  if (!founderOnly()) return;
-  if (!confirm('Delete ALL ended/inactive rooms from both RTDB and Firestore?')) return;
-  const { getDatabase, ref: rtdbRef, get: rtdbGet, remove: rtdbRemove } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js');
-  const rtdb = getDatabase(window._snxApp);
-  let deleted = 0;
-  try {
-    // RTDB
-    const snap = await rtdbGet(rtdbRef(rtdb, 'liveRooms'));
-    const rooms = snap.val() || {};
-    for (const [id, r] of Object.entries(rooms)) {
-      if (r.status === 'ended' || r.isLive === false) {
-        await rtdbRemove(rtdbRef(rtdb, `liveRooms/${id}`));
-        await rtdbRemove(rtdbRef(rtdb, `liveConnections/${id}`));
-        deleted++;
-      }
-    }
-    // Firestore
-    const fsSnap = await getDocs(query(collection(db,'liveRooms'), where('isLive','==',false)));
-    fsSnap.forEach(async d => { try { await deleteDoc(d.ref); deleted++; } catch(_) {} });
-    const fsSnap2 = await getDocs(query(collection(db,'liveRooms'), where('status','==','ended')));
-    fsSnap2.forEach(async d => { try { await deleteDoc(d.ref); } catch(_) {} });
-  } catch(e) {}
-  toastNotification(deleted > 0 ? `Purged ${deleted} ended room(s).` : 'No ended rooms found.');
-  window.adminLoadLiveRooms();
-};
-
 // Note: r2storage tab handling is in the primary switchAdminTab above.
 const _originalSwitchAdminTab = window.switchAdminTab;
 window.switchAdminTab = function(tab) {
   if (typeof _originalSwitchAdminTab === 'function') _originalSwitchAdminTab(tab);
   if (tab === 'shadowbot') {
     scbOpenDashboard();
-  }
-  if (tab === 'liverooms') {
-    window.adminLoadLiveRooms();
   }
 };
 
@@ -31735,7 +30956,6 @@ window.switchAdminTab = function(tab) {
         <span class="gp-nav-chip" data-topic="Let's talk about music I love">🎵 Music</span>
         <span class="gp-nav-chip" data-topic="Tell me a story or let's build one together">📜 Stories</span>
         <span class="gp-nav-chip" data-topic="I need support or someone to talk to">🫂 Support Rooms</span>
-        <span class="gp-nav-chip" data-topic="How do I go live on this site?">🔴 Go Live</span>
         <span class="gp-nav-chip" data-topic="What are Storm Rooms and how do I use them?">⚡ Storm Rooms</span>
         <span class="gp-nav-chip" data-topic="What is the Community Hub?">💙 Community</span>
         <span class="gp-nav-chip" data-topic="How do Settings and privacy work?">⚙️ Settings</span>
@@ -31909,18 +31129,6 @@ const GP_PAGES = {
         detail: "Notifications arrive in real time. The red badge on the bell icon in the sidebar shows how many unread notifications you have. Push notification preferences — which types send alerts to your phone — can be toggled in Settings → Notification Preferences.",
         action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('notificationsPage'); }
     },
-    live: {
-        label: '🔴 Go Live',
-        description: "Go Live lets you broadcast live video to the entire Shadow Nexus Social community. Tap Go Live in the sidebar to open the live streaming page. Your stream appears instantly in the Live Hub for everyone to watch, and a LIVE NOW badge shows on your profile. You can end the stream at any time.",
-        detail: "Live streams open in live.html. While live, viewers can watch your broadcast in real time. Your profile shows a LIVE NOW badge and a Watch Live button for other users. Live streams also appear as cards at the top of the Home Feed.",
-        action() { closeGrimPanel(); if (typeof goLiveOrWatch === 'function') goLiveOrWatch(); }
-    },
-    liveHubPage: {
-        label: '🔴 Live Hub',
-        description: "The Live Hub shows every user who is currently streaming live on Shadow Nexus Social. Browse live stream cards, tap one to watch, and see who is broadcasting right now. If nobody is live you will see an empty state — be the first to go live.",
-        detail: "Live Hub is accessible from the sidebar. Each card shows the streamer's name, avatar, and a Watch button. The count of active live streams appears in the header. Live cards also appear at the top of the Home Feed when someone is live.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('liveHubPage'); }
-    },
     stormRoomsPage: {
         label: '⚡ Storm Rooms',
         description: "Storm Rooms are live anonymous chat rooms where you can have real-time conversations with other members. Choose a display name, then join the Public Lobby (open to everyone, no code needed) or a Private Room using a room code. Private rooms can also be created fresh — you get a code to share with friends. Messages vanish after 10 minutes. No judgment.",
@@ -31976,8 +31184,6 @@ function gpDetectPage(text) {
     const t = text.toLowerCase();
     // Founder / admin — blocked, never map to a page
     if (/(founder control|founder panel|founder page|founder setting|founder tool|founder only|admin page\b|adminPage\b)/i.test(t)) return '_founder';
-    if (/(go live|start.*live|broadcast|stream\b|live stream)/i.test(t))         return 'live';
-    if (/(live hub|watch.*live|who.*live|see.*live|livestream hub)/i.test(t))     return 'liveHubPage';
     if (/(storm room|shadow room|anonymous.*chat|ephemeral.*chat|private room|public lobby)/i.test(t)) return 'stormRoomsPage';
     if (/(support room|peer support|someone to talk|need support|talk to someone|night owl|morning light|venting lounge|healing circle|grief garden|self.love club)/i.test(t)) return 'supportRoomsPage';
     if (/(community hub|community event|community goal|kindness badge|community pulse|quote of the day|daily challenge|anonymous.*board|support board)/i.test(t)) return 'communityPage';
@@ -32036,11 +31242,11 @@ function gpFallback(userText) {
 
     // ── Self-description ──────────────────────────────────────────────
     if (/(what can you|who are you|what are you|tell me about yourself|your name|what do you know)/i.test(t))
-        return { text: "I am Shadow Reaper — ancient guardian, keeper of quiet truths. I know every public corner of Shadow Nexus Social: the Feed, Profile, Search, Notifications, Settings, Storm Rooms, Support Rooms, Community Hub, Community Rules, Live Hub, Go Live, the Arcade, and Friends & Family. Ask me about any of them, or simply talk — I am here for both.", page: null };
+        return { text: "I am Shadow Reaper — ancient guardian, keeper of quiet truths. I know every public corner of Shadow Nexus Social: the Feed, Profile, Search, Notifications, Settings, Storm Rooms, Support Rooms, Community Hub, Community Rules, 24-Hour TV, the Arcade, and Friends & Family. Ask me about any of them, or simply talk — I am here for both.", page: null };
 
     // ── What's on this site? ──────────────────────────────────────────
     if (/(what.*site|what.*here|what.*platform|what.*shadow nexus|feature.*here|what.*can i do|show.*around|tour)/i.test(t))
-        return { text: "Shadow Nexus Social has: 🏠 Home Feed (posts, stories, reactions), 👤 Profile (customisable with themes & music), 🔍 Search (find users), 🔔 Notifications, ⚙️ Settings (privacy & preferences), ⚡ Storm Rooms (anonymous live chat), 🫂 Support Rooms (peer support), 💙 Community Hub (challenges, badges, anonymous board), 📜 Community Rules, 🔴 Live Hub & Go Live (streaming), 🕹️ Arcade (mini-games & challenges), and 🦋 Friends & Family. Ask me about any section and I will take you there.", page: null };
+        return { text: "Shadow Nexus Social has: 🏠 Home Feed (posts, stories, reactions), 👤 Profile (customisable with themes & music), 🔍 Search (find users), 🔔 Notifications, ⚙️ Settings (privacy & preferences), ⚡ Storm Rooms (anonymous live chat), 🫂 Support Rooms (peer support), 💙 Community Hub (challenges, badges, anonymous board), 📜 Community Rules, 📺 24-Hour TV, 🕹️ Arcade (mini-games & challenges), and 🦋 Friends & Family. Ask me about any section and I will take you there.", page: null };
 
     // ── Page-specific (site navigation) ──────────────────────────────
     const page = gpDetectPage(userText);
@@ -32080,9 +31286,9 @@ For crisis signals (suicide, self-harm, wanting to die), you immediately and gen
 
 SHADOW NEXUS SOCIAL — complete public knowledge:
 
-🏠 HOME FEED: The main social timeline. Posts (text, images, videos) from people you follow appear here in real time. You can create posts via the composer at the top, react with emoji, comment, repost, and view Stories (bubbles above the feed). A live banner shows who is currently streaming.
+🏠 HOME FEED: The main social timeline. Posts (text, images, videos) from people you follow appear here in real time. You can create posts via the composer at the top, react with emoji, comment, repost, and view Stories (bubbles above the feed).
 
-👤 PROFILE: Your personal space. Shows display name, handle, bio, avatar, cover photo, posts, followers, following, friends count, and photo album. Edit via the Edit Profile button — tabs: Basics (name/bio/handle), Mood (status), Media (avatar & cover), Style (custom theme colours), Sandbox (free-form decoration), Links (social links), Sections (toggle visibility). Others can follow, friend-request, or message you from your profile. A LIVE NOW badge appears when you are streaming.
+👤 PROFILE: Your personal space. Shows display name, handle, bio, avatar, cover photo, posts, followers, following, friends count, and photo album. Edit via the Edit Profile button — tabs: Basics (name/bio/handle), Mood (status), Media (avatar & cover), Style (custom theme colours), Sandbox (free-form decoration), Links (social links), Sections (toggle visibility). Others can follow, friend-request, or message you from your profile. Check others' profiles and content from here.
 
 🔍 SEARCH: Find any user by display name or handle. Type and press Search. From results you can view profiles, follow, or message. Your own visibility in search is controlled in Settings → Privacy → Who can find me in Search.
 
@@ -32096,11 +31302,7 @@ SHADOW NEXUS SOCIAL — complete public knowledge:
 
 💙 COMMUNITY HUB: Positive shared space. Sections: Quote of the Day (tap ↻ for a new one) · Daily Challenge (complete it for +50 XP, resets daily) · Community Goals (shared platform-wide targets) · Kindness Badges (earned by positive actions, shown on your profile) · Community Pulse (send silent emoji energy to everyone) · Anonymous Support Board (post feelings tagged as Just Sharing / Need Support / Venting / Grateful / Milestone — toggle anonymous on/off).
 
-📜 COMMUNITY RULES: Six prohibited behaviours: Bullying, Harassment, Threats, Hate Speech, Spam, Repeated Disruptive Behaviour. Applies to posts, stories, messages, and live streams. Safety flow: Rule broken → AI detects → Warning → Continued issue → Action taken → User can appeal → Founder reviews → Accept or deny. Appeals go through the Reports section — explain what happened in your own words.
-
-🔴 LIVE HUB: Browse everyone currently live. Each card shows the streamer and a Watch button. Count of active streams in the header. Also visible as cards at the top of the Home Feed.
-
-🔴 GO LIVE: Tap Go Live in the sidebar to start broadcasting. Your stream appears in the Live Hub and a LIVE NOW badge shows on your profile. Others can watch and you can end the stream anytime.
+📜 COMMUNITY RULES: Six prohibited behaviours: Bullying, Harassment, Threats, Hate Speech, Spam, Repeated Disruptive Behaviour. Applies to posts, stories, messages, and streams. Safety flow: Rule broken → AI detects → Warning → Continued issue → Action taken → User can appeal → Founder reviews → Accept or deny. Appeals go through the Reports section — explain what happened in your own words.
 
 🕹️ ARCADE: Built-in mini-game hub. Play solo or challenge friends from their profile page. Pending challenges in the Arcade Hub. Game invite privacy in Settings → Game Challenges.
 
@@ -32867,11 +32069,6 @@ window.realmNavTo = function(pageId) {
     if (pageId === 'studioPage') {
         pageId = 'tvPage';
     }
-    // Block Live Hub navigation when the feature is disabled (all roles)
-    if (pageId === 'liveHubPage' && window._snxLiveHubEnabled !== true) {
-        if (typeof toastNotification === 'function') toastNotification('⛔ Live Hub is currently unavailable.');
-        return;
-    }
     firePortalTransition(function() {
         if (typeof navTo === 'function') navTo(pageId);
     });
@@ -32912,7 +32109,6 @@ function updateShadowCoreActive(pageId) {
         'friendsPage':       ['navFriends', 'scNavFriends', 'ncmFriends'],
         'stormRoomsPage':    ['navStorm', 'scNavStorm', 'ncmStorm'],
         'supportRoomsPage':  ['navSupport', 'scNavSupport', 'ncmSupport'],
-        'liveHubPage':       ['navLiveHub', 'scNavLive', 'ncmLiveHub'],
         'moderatorPage':     ['navMod', 'scNavMod', 'ncmMod'],
         'administratorPage': ['navAdminOfficer', 'scNavAdm', 'ncmAdm'],
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
@@ -33018,10 +32214,6 @@ window.mobileNavTo = function(pageId) {
             if (typeof viewMyProfile === 'function') viewMyProfile();
         });
         updateShadowCoreActive('profile');
-        return;
-    }
-    if (pageId === '_golive') {
-        if (typeof goLiveOrWatch === 'function') goLiveOrWatch();
         return;
     }
     if (pageId === '_arcade') {
@@ -35169,7 +34361,6 @@ window.snxFounderPanelCleanup = (function() {
           <span>✓ Join Live Chat</span>
           <span>✓ Create Stories</span>
           <span>✓ Creator Channel</span>
-          <span>✓ Go Live</span>
           <span>✓ Notifications</span>
         </div>
       </div>
@@ -35229,7 +34420,6 @@ window.snxFounderPanelCleanup = (function() {
         <span>✓ Private Messages</span>
         <span>✓ Live Chat</span>
         <span>✓ Creator Channel</span>
-        <span>✓ Go Live</span>
         <span>✓ Notifications</span>
         <span>✓ Stories</span>
       </div>
@@ -35513,38 +34703,6 @@ window.snxFounderPanelCleanup = (function() {
             if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
             if (typeof openCreateStoryModal === 'function') openCreateStoryModal();
         });
-    }
-
-    /* ── Guard: Go Live ── */
-    function _hookGoLive() {
-        if (window._snxGuestGoLiveHooked) return;
-        const orig = window.goLiveOrWatch;
-        if (!orig) return;
-        window._snxGuestGoLiveHooked = true;
-        window.goLiveOrWatch = function() {
-            if (!_isAuthUser() && window.snxIsGuest()) {
-                // Show specific "ready to go live" message
-                const modal = document.getElementById('snxJoinModal');
-                if (modal) {
-                    const title = modal.querySelector('h2');
-                    if (title) title.textContent = '🔴 READY TO GO LIVE?';
-                    const desc = modal.querySelector('p');
-                    if (desc) desc.textContent = 'Create your Shadow Nexus account to get your own Creator Channel and start broadcasting.';
-                }
-                snxJoinOpen();
-                // Restore title for next use
-                setTimeout(() => {
-                    const modal2 = document.getElementById('snxJoinModal');
-                    if (!modal2) return;
-                    const title2 = modal2.querySelector('h2');
-                    if (title2) title2.textContent = '⚡ JOIN SHADOW NEXUS';
-                    const desc2 = modal2.querySelector('p');
-                    if (desc2) desc2.textContent = "You're exploring Shadow Nexus as a guest.\nCreate your free account to unlock the full Nexus.";
-                }, 500);
-                return;
-            }
-            orig.apply(this, arguments);
-        };
     }
 
     /* ── Guard: Navigation (inbox, notifications, my channel) — combined + idempotent ── */

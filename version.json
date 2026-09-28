@@ -1,9 +1,9 @@
 {
-  "buildId": "SNX-LIVE-AVENORA-RESTORED-SNS-2026-09-29",
-  "swVersion": "v78",
-  "deployedAt": "2026-09-29T06:00:00Z",
+  "buildId": "SNX-LIVE-REMOVED-2026-09-29",
+  "swVersion": "v80",
+  "deployedAt": "2026-09-29T14:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.1",
   "nexusVersion": "1.1.0",
-  "note": "SNX-LIVE-AVENORA-RESTORED-SNS-2026-09-29: Full engine replacement. Production live.js/html/css replaced with working Avenora engine. Firebase config replaced with SNS horr-a08f4. Engine identifier: AVENORA-RESTORED-SNS. SW v78 cache bust."
+  "note": "SNX-LIVE-REMOVED-2026-09-29: Removed Go Live / Live Hub / Live Room / WebRTC / cohost system. 24-Hour TV retained. SW v80 cache bust."
 }
