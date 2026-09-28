@@ -797,6 +797,21 @@ async function startLive() {
     });
   } catch (_) {}
 
+  /* ── Phase 3: notify Creator Channel adapter that broadcast has started.
+        Fire-and-forget — a Firestore failure here MUST NOT kill the WebRTC stream. ── */
+  ;(async () => {
+    try {
+      const { broadcastStarted } = await import('./snx-live-adapter.js');
+      await broadcastStarted(_user.uid, _roomId, {
+        displayName: _userData?.displayName || _user.email?.split('@')[0] || 'Creator',
+        username:    _userData?.username    || '',
+        avatar:      _userData?.avatar      || _userData?.profilePicture || null,
+      });
+    } catch (_adapterErr) {
+      console.warn('[OLD-LIVE] broadcastStarted adapter error (non-fatal):', _adapterErr?.message);
+    }
+  })();
+
   /* ── Guard: prevent accidental cleanup if page unloads during live ── */
   _creatorEndedFlag = false;
   window.addEventListener('beforeunload', _creatorBeforeUnload);
@@ -1277,7 +1292,16 @@ async function _doEndLive() {
   try { _iqOnLiveEnd(); }        catch(_) {}
   if (typeof window._cohostCleanup === 'function') { try { window._cohostCleanup(); } catch(_){} }
 
-  // 11: [PHASE-2-DISABLED] broadcastEnded() — restore in Phase 2
+  // 11: Phase 3 — notify Creator Channel adapter that broadcast has ended.
+  //     Fire-and-forget; capture uid + roomId NOW before state reset clears them.
+  ;(async (_uid, _rId) => {
+    try {
+      const { broadcastEnded } = await import('./snx-live-adapter.js');
+      await broadcastEnded(_uid, _rId);
+    } catch (_adapterErr) {
+      console.warn('[OLD-LIVE-END] broadcastEnded adapter error (non-fatal):', _adapterErr?.message);
+    }
+  })(_user?.uid, _endedRoomId);
 
   // 12: reset state
   console.log('[OLD-LIVE-END] STATE_RESET');
