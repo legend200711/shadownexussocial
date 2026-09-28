@@ -180,10 +180,9 @@ function _injectTabBar() {
   tabBar.className = 'snx-tn-tabs';
   tabBar.setAttribute('role', 'tablist');
   tabBar.setAttribute('aria-label', 'Shadow Nexus TV sections');
-  // [PHASE-2-DISABLED] LIVE NOW tab removed for Phase 1 standalone WebRTC reset.
-  // Restore the live-now button below in Phase 2 when reconnecting TV + Creator Live.
   tabBar.innerHTML = `
     <button class="snx-tn-tab active" data-tab="main-tv"    role="tab" aria-selected="true"  aria-controls="ax-hero ax-app">MAIN TV</button>
+    <button class="snx-tn-tab snx-tn-tab-live" data-tab="live-now" role="tab" aria-selected="false" aria-controls="snx-tn-live-now"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</button>
     <button class="snx-tn-tab"        data-tab="channels"   role="tab" aria-selected="false" aria-controls="snx-tn-channels">CHANNELS</button>
     <button class="snx-tn-tab"        data-tab="my-channel" role="tab" aria-selected="false" aria-controls="snx-tn-my-channel">MY CHANNEL</button>
   `;
@@ -246,7 +245,7 @@ function _switchTab(tab, silent = false) {
   if (myChannel) myChannel.style.display  = tab === 'my-channel' ? '' : 'none';
 
   // Render on demand
-  // [PHASE-2-DISABLED] live-now tab removed — _renderLiveNowSection not called
+  if (tab === 'live-now')   _renderLiveNowSection();
   if (tab === 'channels')   _renderChannelsSection();
   if (tab === 'my-channel') _renderMyChannelSection();
   // Update LIVE preview strip visibility when switching tabs
@@ -292,9 +291,6 @@ function _injectLivePreview() {
 function _updateLivePreview() {
   const el = document.getElementById('snx-tn-live-preview');
   if (!el) return;
-  // [PHASE-2-DISABLED] Live Now preview strip hidden — LIVE NOW disconnected for Phase 1.
-  el.style.display = 'none';
-  return;
   // Only show when on main-tv tab and there are live channels
   if (_activeTab !== 'main-tv' || !_liveChannels.length) {
     el.style.display = 'none';
@@ -377,13 +373,26 @@ export function showReturnToProgramming() {
 /* ════════════════════════════════════
    SUBSCRIPTIONS
 ════════════════════════════════════ */
+let _liveSubErrorShown = false;
+
 function _startSubscriptions() {
-  // [PHASE-2-DISABLED] subscribeLiveChannels — LIVE NOW subscription for TV.
-  // Disconnected for Phase 1 standalone WebRTC reset.
-  // Restore this block in Phase 2 when reconnecting TV + Creator Live.
-  //
-  // if (_liveUnsub) _liveUnsub();
-  // _liveUnsub = subscribeLiveChannels(channels => { ... });
+  // Subscribe to live channels — read-only discovery, no WebRTC involvement
+  if (_liveUnsub) _liveUnsub();
+  _liveSubErrorShown = false;
+  _liveUnsub = subscribeLiveChannels(
+    channels => {
+      _liveChannels = channels;
+      _liveSubErrorShown = false;
+      if (_activeTab === 'live-now') _renderLiveNowSection();
+      _updateLivePreview();
+      _updateLiveBadge();
+    },
+    err => {
+      console.error('[SNX TV] subscribeLiveChannels error:', err.code, err.message);
+      _liveSubErrorShown = true;
+      if (_activeTab === 'live-now') _renderLiveNowError();
+    },
+  );
 
   // Subscribe to full directory
   if (_dirUnsub) _dirUnsub();
@@ -423,8 +432,14 @@ function _startSubscriptions() {
 }
 
 function _updateLiveBadge() {
-  // [PHASE-2-DISABLED] LIVE NOW tab removed — no badge to update in Phase 1.
-  // The snx-tn-live-count element no longer exists in the tab bar.
+  // Update the LIVE NOW tab visual indicator dot (already present via snx-tn-tab-live class)
+  const liveTab = document.querySelector('.snx-tn-tab[data-tab="live-now"]');
+  if (!liveTab) return;
+  if (_liveChannels.length > 0) {
+    liveTab.classList.add('snx-tn-tab-has-live');
+  } else {
+    liveTab.classList.remove('snx-tn-tab-has-live');
+  }
 }
 
 /* ════════════════════════════════════
@@ -484,31 +499,102 @@ function _renderLiveNowSection() {
   const el = document.getElementById('snx-tn-live-now');
   if (!el) return;
 
+  if (_liveSubErrorShown) { _renderLiveNowError(); return; }
+
   if (!_liveChannels.length) {
     el.innerHTML = `
       <div class="snx-tn-page-header">
         <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
         <div class="snx-tn-page-sub">No creators are live right now</div>
       </div>
-      <div class="snx-tn-empty" role="status" aria-live="polite">
-        <div class="snx-tn-empty-icon" aria-hidden="true">📡</div>
-        <div class="snx-tn-empty-title">No creators are live right now.</div>
-        <div class="snx-tn-empty-sub">Shadow Nexus Main TV is still broadcasting 24/7.</div>
-        <button class="snx-tn-btn-primary" id="snx-tn-watch-main-tv-btn" style="margin-top:14px;">Watch Main TV</button>
+      <div class="snx-tn-live-now-empty" role="status" aria-live="polite">
+        <div class="snx-tn-live-now-empty-icon" aria-hidden="true">📡</div>
+        <div class="snx-tn-live-now-empty-title">THE NEXUS IS QUIET</div>
+        <div class="snx-tn-live-now-empty-sub">No creators are Live right now.</div>
+        <button class="snx-tn-btn-go-live snx-tn-live-now-go-live-btn" id="snx-tn-lnow-go-live-btn"
+                aria-label="Go Live — start your own broadcast">🔴 GO LIVE</button>
       </div>`;
-    el.querySelector('#snx-tn-watch-main-tv-btn')?.addEventListener('click', () => _switchTab('main-tv'));
+    document.getElementById('snx-tn-lnow-go-live-btn')?.addEventListener('click', () => {
+      // GO LIVE → existing working live.html (broadcaster unchanged)
+      window.location.href = 'live.html';
+    });
     return;
   }
 
-  const cards = _liveChannels.map(ch => _buildChannelCard(ch, true)).join('');
+  const cards = _liveChannels.map(ch => _buildLiveNowCard(ch)).join('');
   el.innerHTML = `
     <div class="snx-tn-page-header">
       <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
       <div class="snx-tn-page-sub">${_liveChannels.length} creator${_liveChannels.length !== 1 ? 's' : ''} broadcasting</div>
     </div>
-    <div class="snx-tn-card-grid" role="list" aria-label="Live channels">${cards}</div>`;
+    <div class="snx-tn-live-now-grid" role="list" aria-label="Live channels">${cards}</div>`;
 
-  _wireCardClicks(el, uid => _openLiveNowCard(uid));
+  el.querySelectorAll('.snx-tn-live-now-card').forEach(card => {
+    // WATCH LIVE button
+    card.querySelector('.snx-tn-live-now-watch-btn')?.addEventListener('click', async e => {
+      e.stopPropagation();
+      const uid = card.dataset.uid;
+      if (uid) await _openLiveNowCard(uid);
+    });
+    // Card body click → watch
+    card.addEventListener('click', async () => {
+      const uid = card.dataset.uid;
+      if (uid) await _openLiveNowCard(uid);
+    });
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const uid = card.dataset.uid; if (uid) _openLiveNowCard(uid); }
+    });
+  });
+}
+
+function _renderLiveNowError() {
+  const el = document.getElementById('snx-tn-live-now');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="snx-tn-page-header">
+      <div class="snx-tn-page-title"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW</div>
+    </div>
+    <div class="snx-tn-live-now-empty" role="alert" aria-live="assertive">
+      <div class="snx-tn-live-now-empty-icon" aria-hidden="true">⚡</div>
+      <div class="snx-tn-live-now-empty-title">LIVE SIGNAL UNAVAILABLE</div>
+      <div class="snx-tn-live-now-empty-sub">Could not reach the live discovery service.</div>
+      <button class="snx-tn-btn-primary snx-tn-live-now-retry-btn" id="snx-tn-lnow-retry-btn"
+              aria-label="Retry live discovery">Retry</button>
+    </div>`;
+  document.getElementById('snx-tn-lnow-retry-btn')?.addEventListener('click', () => {
+    _liveSubErrorShown = false;
+    _startSubscriptions();
+    _renderLiveNowSection();
+  });
+}
+
+/* Build a Shadow Nexus styled LIVE NOW creator card */
+function _buildLiveNowCard(ch) {
+  const uid = ch.id || ch.ownerUid;
+  const name = ch.channelName || 'Creator';
+  const avatarLetter = name.charAt(0).toUpperCase();
+  const viewers = ch.currentViewerCount > 0 ? ch.currentViewerCount : null;
+  return `
+    <div class="snx-tn-live-now-card" data-uid="${_esc(uid)}" role="listitem" tabindex="0"
+         aria-label="${_esc(name)} — Live${viewers ? ', ' + viewers + ' watching' : ''}">
+      <div class="snx-tn-live-now-avatar-wrap">
+        <div class="snx-tn-live-now-avatar">
+          ${ch.avatar
+            ? `<img src="${_esc(ch.avatar)}" alt="" loading="lazy"
+                    style="width:100%;height:100%;object-fit:cover;border-radius:50%;"
+                    onerror="this.style.display='none'">`
+            : `<span>${avatarLetter}</span>`}
+        </div>
+        <div class="snx-tn-live-now-live-badge" aria-hidden="true">LIVE</div>
+      </div>
+      <div class="snx-tn-live-now-info">
+        <div class="snx-tn-live-now-name">${_esc(name)}</div>
+        ${viewers !== null ? `<div class="snx-tn-live-now-viewers">👁 ${viewers} watching</div>` : ''}
+      </div>
+      <button class="snx-tn-live-now-watch-btn" aria-label="Watch ${_esc(name)} live">
+        WATCH LIVE
+      </button>
+    </div>`;
 }
 
 /* ════════════════════════════════════

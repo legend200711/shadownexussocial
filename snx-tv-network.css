@@ -1311,3 +1311,214 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
   #snx-crl-overlay { height: 100dvh; }
 }
 .crl-chat-panel { padding-bottom: env(keyboard-inset-height, 0px); }
+
+/* ═══════════════════════════════════════════════════════════════
+   LIVE NOW — 24-HOUR TV Phase 1
+   Discovery-only. No WebRTC. No camera. No mic.
+   Adapts to broadcasts created by the working old Live system.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── LIVE NOW tab pulse indicator when someone is broadcasting ── */
+.snx-tn-tab.snx-tn-tab-has-live .snx-tn-live-dot {
+  box-shadow: 0 0 0 0 rgba(255,51,68,0.7);
+  animation: snxLiveNowPulse 1.8s infinite;
+}
+@keyframes snxLiveNowPulse {
+  0%   { box-shadow: 0 0 0 0   rgba(255,51,68,0.7); }
+  70%  { box-shadow: 0 0 0 6px rgba(255,51,68,0);   }
+  100% { box-shadow: 0 0 0 0   rgba(255,51,68,0);   }
+}
+
+/* ── Live Now card grid ── */
+.snx-tn-live-now-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  padding: 4px 0 20px;
+}
+
+/* ── Individual LIVE NOW creator card ── */
+.snx-tn-live-now-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  background: var(--snx-surface);
+  border: 1px solid rgba(255,51,68,0.30);
+  border-radius: var(--snx-radius-lg);
+  padding: 20px 16px 16px;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s, transform 0.12s;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.snx-tn-live-now-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at top, rgba(255,51,68,0.07) 0%, transparent 70%);
+  pointer-events: none;
+}
+.snx-tn-live-now-card:hover,
+.snx-tn-live-now-card:focus-visible {
+  border-color: rgba(255,51,68,0.65);
+  background: var(--snx-surface-hi);
+  transform: translateY(-2px);
+  outline: none;
+}
+
+/* ── Avatar wrap with live ring ── */
+.snx-tn-live-now-avatar-wrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+}
+.snx-tn-live-now-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--snx-blue-dim);
+  border: 2.5px solid rgba(255,51,68,0.60);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--snx-blue);
+  overflow: hidden;
+  box-shadow: 0 0 0 3px rgba(255,51,68,0.18), 0 0 14px rgba(255,51,68,0.22);
+  animation: snxLiveAvatarPulse 2.4s ease-in-out infinite;
+}
+@keyframes snxLiveAvatarPulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(255,51,68,0.18), 0 0 14px rgba(255,51,68,0.22); }
+  50%       { box-shadow: 0 0 0 5px rgba(255,51,68,0.30), 0 0 22px rgba(255,51,68,0.36); }
+}
+
+/* ── 🔴 LIVE badge below avatar ── */
+.snx-tn-live-now-live-badge {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--snx-red);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+  box-shadow: 0 0 8px rgba(255,51,68,0.6);
+}
+.snx-tn-live-now-live-badge::before {
+  content: '● ';
+  font-size: 7px;
+  opacity: 0.9;
+  animation: snxLiveDotBlink 1.2s step-start infinite;
+}
+@keyframes snxLiveDotBlink {
+  0%, 100% { opacity: 0.9; }
+  50%      { opacity: 0.2; }
+}
+
+/* ── Info ── */
+.snx-tn-live-now-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  width: 100%;
+}
+.snx-tn-live-now-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--snx-text);
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.snx-tn-live-now-viewers {
+  font-size: 11px;
+  color: var(--snx-text-dim);
+  font-weight: 500;
+}
+
+/* ── WATCH LIVE button ── */
+.snx-tn-live-now-watch-btn {
+  width: 100%;
+  padding: 10px 0;
+  background: rgba(0,174,239,0.12);
+  border: 1.5px solid rgba(0,174,239,0.45);
+  border-radius: 8px;
+  color: var(--snx-blue);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s;
+  text-transform: uppercase;
+  touch-action: manipulation;
+  min-height: 44px;          /* accessible tap target */
+}
+.snx-tn-live-now-watch-btn:hover,
+.snx-tn-live-now-watch-btn:focus-visible {
+  background: rgba(0,174,239,0.25);
+  border-color: rgba(0,174,239,0.8);
+  color: #fff;
+  outline: none;
+}
+.snx-tn-live-now-watch-btn:active {
+  transform: scale(0.97);
+}
+
+/* ── Empty state — THE NEXUS IS QUIET ── */
+.snx-tn-live-now-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 24px 80px;
+  text-align: center;
+}
+.snx-tn-live-now-empty-icon {
+  font-size: 52px;
+  opacity: 0.55;
+  filter: grayscale(0.3);
+  margin-bottom: 4px;
+}
+.snx-tn-live-now-empty-title {
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-text);
+  text-transform: uppercase;
+}
+.snx-tn-live-now-empty-sub {
+  font-size: 13px;
+  color: var(--snx-text-muted);
+  max-width: 280px;
+  line-height: 1.6;
+}
+.snx-tn-live-now-go-live-btn {
+  margin-top: 8px;
+}
+
+/* ── Mobile — single column, larger touch targets ── */
+@media (max-width: 480px) {
+  .snx-tn-live-now-grid { grid-template-columns: 1fr; }
+  .snx-tn-live-now-card { flex-direction: row; align-items: center; text-align: left; padding: 14px 14px; gap: 14px; }
+  .snx-tn-live-now-avatar-wrap { flex-shrink: 0; }
+  .snx-tn-live-now-info { align-items: flex-start; }
+  .snx-tn-live-now-watch-btn { width: auto; min-width: 110px; padding: 10px 14px; flex-shrink: 0; }
+}
+
+/* ── Tablet — two columns ── */
+@media (min-width: 481px) and (max-width: 768px) {
+  .snx-tn-live-now-grid { grid-template-columns: repeat(2, 1fr); }
+}
