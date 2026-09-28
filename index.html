@@ -6827,6 +6827,17 @@ body.arcade-fs-ios body::after { display:none !important; }
         <button id="btnBroadcast" style="margin-top:10px; width:100%; border-radius:10px; padding:11px; background:linear-gradient(135deg,#003d99,#0077dd); border-color:rgba(0,174,239,0.65); color:#fff; font-size:14px; box-shadow:0 0 20px rgba(0,174,239,0.40);">⚡ Post to the Eclipse</button>
     </div>
 
+    <!-- ── Feed Live Banner — real-time active broadcasts (managed by JS, hidden when empty) ── -->
+    <div id="snxFeedLiveBanner" style="display:none;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:0 2px;">
+            <span style="font-size:11px;font-weight:700;color:#ff3355;letter-spacing:1px;text-transform:uppercase;display:flex;align-items:center;gap:5px;">
+                <span style="width:7px;height:7px;border-radius:50%;background:#ff3355;display:inline-block;animation:feedLivePulse 1.2s ease-in-out infinite;flex-shrink:0;"></span>
+                LIVE NOW <span id="snxFeedLiveCount" style="background:rgba(255,51,85,0.18);border:1px solid rgba(255,51,85,0.35);padding:1px 6px;border-radius:8px;font-size:10px;"></span>
+            </span>
+        </div>
+        <div id="snxFeedLiveCards" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;"></div>
+    </div>
+
     <!-- ── Real-time "New Posts" pill — shown when new posts arrive while scrolled down ── -->
     <div id="snxNewPostPill" role="button" tabindex="0" aria-label="New posts available — tap to view" onclick="snxScrollToNewPosts()"></div>
 
@@ -12695,7 +12706,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   }
 
   (function initLiveHub() { /* managed by live.js */ })();
-  (function initFeedLiveBanner() { /* removed */ })();
+  // initFeedLiveBanner() is defined below and called after the module finishes parsing
 
   /* DEAD_CODE_PLACEHOLDER_STALE_MS */
   (function _deadLiveHubBody() {
@@ -12957,68 +12968,67 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // dead placeholder end
   }); // _deadLiveHubBody NOT invoked
 
-  (function _deadFeedLiveBody() {
+  // ── Feed Live Banner — subscribes to RTDB liveRooms, shows active broadcasts at top of Feed ──
+  function initFeedLiveBanner() {
+    const banner   = document.getElementById('snxFeedLiveBanner');
+    const cardsEl  = document.getElementById('snxFeedLiveCards');
+    const countEl  = document.getElementById('snxFeedLiveCount');
+    if (!banner || !cardsEl) return;
+
     function escL(s) {
       return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     function buildCard(room) {
-      const name    = escL(room.hostName || room.hostUsername || 'Creator');
+      const name    = escL(room.hostName || 'Creator');
       const title   = escL(room.title   || 'Shadow Nexus Social LIVE');
-      const viewers = room.viewers || 0;
-      const roomId  = escL(room.roomId  || '');
-      const avatar  = room.hostAvatar   || '';
-      const initial = (room.hostName || room.hostUsername || '?')[0].toUpperCase();
+      // live.js stores viewerCount; normalise to viewers for display
+      const viewers = room.viewerCount || room.viewers || 0;
+      const roomId  = room.roomId || '';
+      const avatar  = room.hostAvatar || '';
+      const initial = (room.hostName || '?')[0].toUpperCase();
 
       const thumbHtml = avatar
-        ? `<img class="flc-thumb-img" src="${escL(avatar)}" alt="${name}" loading="lazy">`
+        ? `<img class="flc-thumb-img" src="${escL(avatar)}" alt="${escL(name)}" loading="lazy">`
         : `<div class="flc-thumb-initial">${initial}</div>`;
 
-      const isStudioLive  = room.type === '24hour_studio_live';
-      const watchUrl      = 'live.html#watch=' + roomId;
-
-      const card = document.createElement('a');
-      // V2: neon animated border on feed live cards
+      const card = document.createElement('div');
       card.className       = 'feed-live-card feed-live-card-v2';
-      card.href            = watchUrl;
-      card.dataset.rid     = room.roomId;
+      card.dataset.rid     = roomId;
       card.setAttribute('aria-label', `Watch ${name} live`);
-
-      const livePillLabel = isStudioLive ? '🎬 STUDIO LIVE' : 'LIVE';
-      const joinBtnLabel  = isStudioLive ? '▶ JOIN STUDIO' : '▶ JOIN LIVE';
 
       card.innerHTML = `
         <div class="flc-thumb">
           ${thumbHtml}
-          <div class="flc-live-pill"><span style="width:5px;height:5px;border-radius:50%;background:#fff;display:inline-block;animation:feedLivePulse 1.2s ease-in-out infinite;flex-shrink:0;"></span>${livePillLabel}</div>
-          <div class="flc-viewers" id="flcv-${roomId}">👁 ${viewers}</div>
+          <div class="flc-live-pill">🔴 LIVE</div>
+          <div class="flc-viewers" id="flcv-${escL(roomId)}">👁 ${viewers}</div>
         </div>
         <div class="flc-body">
           <div class="flc-name">${name}</div>
           <div class="flc-title">${title}</div>
-          <button class="flc-join-btn">${joinBtnLabel}</button>
+          <button class="flc-join-btn">▶ JOIN LIVE</button>
         </div>
       `;
 
+      function joinRoom() {
+        if (typeof window.snxLiveOpenViewer === 'function') {
+          window.snxLiveOpenViewer(roomId);
+        } else {
+          if (typeof realmNavTo === 'function') realmNavTo('livePage');
+        }
+      }
+
       card.querySelector('.flc-join-btn').addEventListener('click', e => {
-        e.preventDefault();
-        window.location.href = watchUrl;
+        e.stopPropagation();
+        joinRoom();
       });
-      card.addEventListener('click', e => {
-        if (e.target.closest('.flc-join-btn')) return;
-        window.location.href = watchUrl;
-      });
+      card.addEventListener('click', joinRoom);
 
       return card;
     }
 
-    // Start the real-time watcher once the user is authenticated.
-    // Tries status+createdAt compound query first; falls back to isLive==true
-    // if the composite index hasn't been built yet.
-    let _liveUnsub = null;
-
     function _renderBannerRooms(rooms) {
-      rooms.sort((a, b) => (b.viewers || 0) - (a.viewers || 0));
+      rooms.sort((a, b) => (b.viewerCount || b.viewers || 0) - (a.viewerCount || a.viewers || 0));
       if (!rooms.length) {
         banner.style.display = 'none';
         return;
@@ -13037,70 +13047,50 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           if (idx < existing.length) cardsEl.insertBefore(card, existing[idx]);
           else                       cardsEl.appendChild(card);
         } else {
+          // Update viewer count in-place
           const vEl = card.querySelector('.flc-viewers');
-          if (vEl) vEl.textContent = '👁 ' + (room.viewers || 0);
+          if (vEl) vEl.textContent = '👁 ' + (room.viewerCount || room.viewers || 0);
         }
       });
     }
 
-    let _bannerSnapshotSns    = [];
-    let _bannerSnapshotStudio = [];
-    let _bannerStudioUnsub    = null;
+    // ── Subscribe to RTDB liveRooms — this is where live.js writes active rooms ──
+    let _rtdbUnsub = null;
 
-    function _mergeBannerAndRender() {
-      _renderBannerRooms(_bannerSnapshotSns.concat(_bannerSnapshotStudio));
-    }
-
-    function _attachBannerQuery(useSimple) {
-      try {
-        const q = useSimple
-          ? query(collection(db, 'liveRooms'), where('isLive', '==', true))
-          : query(collection(db, 'liveRooms'), where('status', '==', 'live'), orderBy('createdAt', 'desc'));
-
-        _liveUnsub = onSnapshot(q, snap => {
-          _bannerSnapshotSns = [];
-          snap.forEach(d => { const r = d.data(); r.roomId = r.roomId || d.id; _bannerSnapshotSns.push(r); });
-          _mergeBannerAndRender();
-        }, err => {
-          if (!useSimple) {
-            console.warn('[FeedLive] compound query failed, using fallback:', err.message);
-            _liveUnsub = null;
-            _attachBannerQuery(true);
-          } else {
-            banner.style.display = 'none';
-          }
-        });
-      } catch(e) {
-        console.warn('[FeedLive] watcher failed:', e.message);
-        banner.style.display = 'none';
+    function _attachRtdbWatcher() {
+      const rtdb    = window._snxLiveDB;
+      const rtdbApi = window._snxRtdbApi;
+      if (!rtdb || !rtdbApi) {
+        // RTDB not ready yet — retry shortly
+        setTimeout(_attachRtdbWatcher, 500);
+        return;
       }
-    }
 
-    // ── Use canonical auth-ready queue instead of a second onAuthStateChanged ──
-    window._snxOnAuthReady(function() {
-      const user = window._snxCurrentUser;
-      if (!user)     return;
-      if (_liveUnsub) return;
-
-      // Studio Live rooms — subscribe in parallel, merge with SNS rooms
-      if (!_bannerStudioUnsub) {
-        try {
-          const qStudio = query(collection(db, 'studioLiveRooms'), where('isLive', '==', true));
-          _bannerStudioUnsub = onSnapshot(qStudio, snap => {
-            _bannerSnapshotStudio = [];
-            snap.forEach(d => { const r = d.data(); r.roomId = r.roomId || d.id; _bannerSnapshotStudio.push(r); });
-            _mergeBannerAndRender();
-          }, err => {
-            console.warn('[FeedLive] studioLiveRooms watcher error:', err.message);
-          });
-        } catch(e) {
-          console.warn('[FeedLive] studioLiveRooms watcher setup error:', e.message);
+      const roomsRef = rtdbApi.ref(rtdb, 'liveRooms');
+      _rtdbUnsub = rtdbApi.onValue(roomsRef, snap => {
+        if (!snap.exists()) {
+          _renderBannerRooms([]);
+          return;
         }
-      }
+        const all  = snap.val() || {};
+        const live = Object.values(all).filter(r => r && r.status === 'live');
+        _renderBannerRooms(live);
+      }, err => {
+        console.warn('[FeedLive] RTDB liveRooms watcher error:', err.message);
+        banner.style.display = 'none';
+      });
+    }
 
-      _attachBannerQuery(false);
+    // ── Start watcher once auth resolves ──
+    window._snxOnAuthReady(function() {
+      if (!window._snxCurrentUser) return;
+      if (_rtdbUnsub) return;
+      _attachRtdbWatcher();
     });
-  }); // _deadFeedLiveBody NOT invoked
+  }
+
+  // ── Invoke Feed Live Banner watcher (defined above) ──
+  initFeedLiveBanner();
 
   window.handleLogout = async () => {
       // ── Timing: logout initiated ──
@@ -14119,13 +14109,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               }
           }
 
-          // Filter out expired posts (48h TTL) and live-session posts.
-          // Live sessions are shown only in the story bar and Live Hub —
-          // they must never appear in the main feed scroll.
+          // Filter out expired posts (48h TTL).
+          // Active live broadcasts are shown via the dedicated Feed Live Banner (RTDB watcher),
+          // not as normal Firestore posts — legacy type=live/live_share posts in Firestore are skipped.
           const incomingIds = new Set();
           snapshot.forEach(pDoc => {
               const p = pDoc.data();
-              // Skip live/live_share posts — they belong in the Live Hub, not the feed
+              // Skip legacy live-type Firestore posts — live rooms come from RTDB via Feed Live Banner
               if (p.type === 'live' || p.type === 'live_share') return;
               // Legacy posts (no expiresAt) remain visible indefinitely
               if (p.expiresAt && p.expiresAt < nowMs) return;
@@ -14338,7 +14328,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                       div.addEventListener('animationend', () => div.classList.remove('snx-rt-new'), { once: true });
                   }
 
-                  // Skip live-type feed posts (Go Live removed)
+                  // Skip legacy live-type Firestore posts (live rooms are in RTDB, shown via Feed Live Banner)
                   if (post.type === 'live' || post.type === 'live_share') {
                       return;
                   }
@@ -21114,7 +21104,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       const seenStories = _getSeenStories();
 
       sorted.forEach(([uid, stories]) => {
-          // Filter out live-type stories (Go Live removed)
+          // Filter out live-type stories (live rooms handled by Feed Live Banner, not story bar)
           const regStories  = stories.filter(s => s.type !== 'live');
 
           const onlineUids = window._snxOnlineUids || new Set();
