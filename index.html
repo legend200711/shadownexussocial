@@ -12580,7 +12580,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 <script type="module" src="snx-ch-adapter.js"></script>
 
 <!-- ── Load SNX TV Network (Creator Channels) for index.html tvPage ── -->
-<link rel="stylesheet" href="snx-tv-network.css">
+<link rel="stylesheet" href="snx-tv-network.css?v=NATV-001">
 <!-- [PHASE-2-DISABLED] snx-creator-live.css removed — new creator-live UI not needed in Phase 1 -->
 <script type="module">
 /**
@@ -35416,7 +35416,7 @@ window.snxFounderPanelCleanup = (function() {
           <span>✓ Browse public posts</span>
           <span>✓ View public profiles</span>
           <span>✓ Search public content</span>
-          <span>✓ Watch Shadow Nexus TV</span>
+          <span>✓ Watch Nexus AfterDark TV</span>
           <span>✓ Watch public Live streams</span>
           <span>✓ Browse Creator Channels</span>
           <span>✓ Watch public Replays</span>
@@ -35952,13 +35952,38 @@ window.snxFounderPanelCleanup = (function() {
             window._snxGuestMyChannelHooked = true;
             const origOMC = window.openMyChannel;
             window.openMyChannel = function() {
-                if (!_isAuthUser() && window.snxIsGuest()) { snxJoinOpen(); return; }
+                if (!_isAuthUser() && window.snxIsGuest()) {
+                    _showGuestChannelBlock();
+                    return;
+                }
                 return origOMC.apply(this, arguments);
             };
         }
     }
 
-    function _showGuestChannelBlock() { snxJoinOpen(); }
+    /* Show a channel-specific JOIN prompt for guests — not a generic modal.
+       Called when a guest taps "My Channel" in index.html nav.
+       The TV Network's own _renderMyChannelSection handles the tvPage context. */
+    function _showGuestChannelBlock() {
+        // Customise the join modal title for the channel context
+        const modal = document.getElementById('snxJoinModal');
+        if (modal) {
+            const title = modal.querySelector('h2');
+            if (title) title.textContent = '📺 CREATE YOUR CHANNEL';
+            const desc = modal.querySelector('p');
+            if (desc) desc.textContent = 'Join Shadow Nexus to create your own Creator Channel and start broadcasting on Nexus AfterDark TV.';
+        }
+        snxJoinOpen();
+        // Restore default title after closing
+        setTimeout(function() {
+            const m2 = document.getElementById('snxJoinModal');
+            if (!m2) return;
+            const t2 = m2.querySelector('h2');
+            if (t2) t2.textContent = '⚡ JOIN SHADOW NEXUS';
+            const d2 = m2.querySelector('p');
+            if (d2) d2.textContent = "You're exploring Shadow Nexus as a guest.\nCreate your free account to unlock the full Nexus.";
+        }, 600);
+    }
 
     /* ── Guard: Live Chat write (ipcModalInput send button) ── */
     function _hookLiveChatInput() {

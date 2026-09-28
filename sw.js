@@ -10,8 +10,8 @@
  * shadownexussocial.online (/) and any local dev server (/).
  */
 
-const CACHE_VERSION = 'v72';
-const BUILD_ID      = 'SNS-2026-LIVE-BRIDGE-R2-001';
+const CACHE_VERSION = 'v73';
+const BUILD_ID      = 'SNS-2026-NATV-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 

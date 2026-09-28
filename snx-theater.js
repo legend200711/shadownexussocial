@@ -1,9 +1,10 @@
 /**
- * SNX THEATER — Nexus On-Air Theater
+ * NEXUS AFTERDARK TV — Theater Presentation Layer
  * snx-theater.js
  *
- * Lightweight presentation layer for the Nexus On-Air Theater upgrade.
- * Adds: cinematic frame, theater header, now-playing skin, progress display,
+ * Lightweight presentation layer for the Nexus AfterDark TV Main Signal.
+ * Adds: cinematic frame, theater header (NEXUS AFTERDARK TV branding),
+ *       network bug watermark, now-playing skin, progress display,
  *       up-next strip, broadcast ticker, signal-interrupted overlay, entry
  *       signal transition.
  *
@@ -12,6 +13,7 @@
  *   - Create a second video/audio element
  *   - Create duplicate setInterval timers (reuses existing tick via DOM reads)
  *   - Modify WebRTC, Live, or Firebase
+ *   - Burn anything into uploaded media (watermark is presentation-only)
  *
  * The module observes:
  *   #ax-np-panel-title    — current program title (set by broadcast engine)
@@ -56,9 +58,9 @@ function _injectTheaterHeader() {
   header.className = 'snx-theater-header';
   header.innerHTML = `
     <div class="snx-theater-brand">
-      <div class="snx-theater-network-name">Shadow Nexus Social</div>
-      <div class="snx-theater-title">NEXUS ON-AIR THEATER</div>
-      <div class="snx-theater-sub">24/7 Broadcast Network</div>
+      <div class="snx-theater-network-name">Powered by Shadow Nexus Social</div>
+      <div class="snx-theater-title">NEXUS AFTERDARK TV</div>
+      <div class="snx-theater-sub">THE MAIN SIGNAL · 24/7 · LIVE · CREATOR CHANNELS</div>
     </div>
     <div class="snx-theater-on-air" id="snx-theater-status" aria-live="polite" aria-atomic="true">
       <div class="snx-theater-on-air-dot" aria-hidden="true"></div>
@@ -88,6 +90,14 @@ function _wrapPlayerInFrame() {
   glow.setAttribute('aria-hidden', 'true');
   frame.appendChild(glow);
 
+  // Network bug watermark — presentation only, does not affect video controls
+  // Bottom-left corner, fades on hover so controls remain accessible
+  const bug = document.createElement('div');
+  bug.className = 'snx-network-bug';
+  bug.setAttribute('aria-hidden', 'true');
+  bug.innerHTML = `<span class="snx-network-bug-top">NEXUS</span><span class="snx-network-bug-bottom">AFTERDARK</span>`;
+  frame.appendChild(bug);
+
   // Move the entire .ax-player-wrap into the frame
   playerWrap.parentNode.insertBefore(frame, playerWrap);
   frame.appendChild(playerWrap);
@@ -102,7 +112,7 @@ function _wrapPlayerInFrame() {
     lost.innerHTML = `
       <div class="snx-theater-signal-lost-icon" aria-hidden="true">📡</div>
       <div class="snx-theater-signal-lost-title" id="snx-signal-lost-title">SIGNAL INTERRUPTED</div>
-      <div class="snx-theater-signal-lost-sub" id="snx-signal-lost-sub">RECONNECTING...</div>`;
+      <div class="snx-theater-signal-lost-sub" id="snx-signal-lost-sub">RECONNECTING TO NEXUS AFTERDARK TV…</div>`;
     mediaArea.appendChild(lost);
   }
 }
@@ -191,7 +201,7 @@ function _injectTicker() {
   ticker.className = 'snx-theater-ticker';
   ticker.setAttribute('aria-label', 'Broadcast ticker');
   ticker.innerHTML = `
-    <div class="snx-theater-ticker-label" aria-hidden="true">SNX TV</div>
+    <div class="snx-theater-ticker-label" aria-hidden="true">NATV</div>
     <div class="snx-theater-ticker-track">
       <div class="snx-theater-ticker-inner" id="snx-ticker-inner" aria-live="off">
         <!-- populated by _updateTicker() -->
@@ -309,7 +319,7 @@ function _updateStatusBadge() {
   }
 
   badge.className = 'snx-theater-on-air' + (state !== 'on-air' ? ` ${state}` : '');
-  badgeTxt.textContent = state === 'on-air' ? 'ON AIR'
+  badgeTxt.textContent = state === 'on-air' ? '● ON AIR'
     : state === 'connecting' ? 'CONNECTING'
     : 'OFF AIR';
 }

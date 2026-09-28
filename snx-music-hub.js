@@ -1775,7 +1775,12 @@ window.snxMH2Init = function() {
     _s.user      = _user();
     _s.isFounder = _isFounder();
 
-    if (!_s.user) {
+    // PUBLIC ACCESS — authenticated members AND guests can explore Music Hub.
+    // Only write-actions (upload, manage, queue editing) require member auth,
+    // and those are guarded individually at the point of action.
+    // snxIsGuest() returns true for active guest sessions.
+    var isGuest = !!(window.snxIsGuest && window.snxIsGuest());
+    if (!_s.user && !isGuest) {
       var el = document.getElementById('snxMH2Container');
       if (el) el.innerHTML = '<div class="mh2-empty" style="padding:40px;"><div class="mh2-empty-icon">&#128274;</div>Sign in to access Music Hub.</div>';
       return;

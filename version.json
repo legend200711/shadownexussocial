@@ -1,9 +1,9 @@
 {
-  "buildId": "SNS-2026-LIVE-BRIDGE-R2-001",
-  "swVersion": "v72",
-  "deployedAt": "2026-10-05T12:00:00Z",
+  "buildId": "SNS-2026-NATV-001",
+  "swVersion": "v73",
+  "deployedAt": "2026-10-05T14:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.1",
-  "nexusVersion": "1.0.1",
-  "note": "LIVE-BRIDGE-R2-001: (1) SNX Live social bridge repair — broadcastStarted/broadcastEnded no longer silently swallow errors, full [LIVE-BRIDGE] diagnostics, broadcastEnded now awaited before UI reset, _roomId cleared after endLive, fallback direct Firestore write on adapter failure. (2) Music Hub R2 audit — confirmed R2 already authoritative, added upload step phases (Uploading→Saving→Published), featured/recently-added tracks now playable from Home tab without opening Library first, _snxInjectAndPlay helper. SW v72 to flush stale JS."
+  "nexusVersion": "1.0.2",
+  "note": "NATV-001: Nexus AfterDark TV cosmetic identity update — NATV branding, network bug watermark, My Station card redesign, Channel Universe section, guest public live/music-hub access, _refreshStudioTab founder gate, CSS cache-bust v=NATV-001. SW v73 to flush stale snx-tv-network.css."
 }

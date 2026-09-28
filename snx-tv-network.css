@@ -1,7 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════
-   SNX TV NETWORK — Creator Channels UI
-   Shadow Nexus design language:
-     black / deep navy · electric blue · neon green accents
+   NEXUS AFTERDARK TV — Creator Channels UI
+   A Shadow Nexus Social Network
+   Brand palette: deep black · midnight navy · electric blue · neon green
+   RED reserved for: 🔴 LIVE only
    ═══════════════════════════════════════════════════════════════ */
 
 /* ── Shared colour tokens ── */
@@ -30,7 +31,7 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   MAIN TV — SNX Shell Overrides
+   MAIN TV — Nexus AfterDark TV Shell
    Classes injected by snx-ch-adapter.js into #snxTvApp
    ═══════════════════════════════════════════════════════════════ */
 
@@ -299,6 +300,8 @@
 
 /* ═══════════════════════════════════════════════════════════════
    NETWORK WRAPPER + SECTIONS
+   Broadcast-style tab transition: short signal-fade (200-350ms).
+   Uses CSS opacity animation — no JavaScript animation loops.
    ═══════════════════════════════════════════════════════════════ */
 
 #snx-tn-wrapper { width: 100%; }
@@ -308,6 +311,15 @@
   max-width: 1100px;
   margin: 0 auto;
   padding: 20px 16px 80px;
+  /* Broadcast entry: quick fade-in so tab switching feels instant but polished */
+  animation: snxSectionIn 280ms ease-out both;
+}
+@keyframes snxSectionIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-tn-section { animation: none !important; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1723,13 +1735,15 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
   flex-direction: column;
   gap: 2px;
 }
+/* "Powered by Shadow Nexus Social" above the main title */
 .snx-theater-network-name {
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 3.5px;
-  color: var(--snx-blue);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  color: var(--snx-text-muted);
   text-transform: uppercase;
 }
+/* NEXUS AFTERDARK TV — primary network name */
 .snx-theater-title {
   font-size: clamp(18px, 4vw, 26px);
   font-weight: 900;
@@ -1738,13 +1752,16 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
   text-transform: uppercase;
   line-height: 1.1;
 }
+/* THE MAIN SIGNAL tagline */
 .snx-theater-sub {
   font-size: 9px;
   letter-spacing: 2.5px;
-  color: var(--snx-text-muted);
+  color: var(--snx-blue);
   text-transform: uppercase;
   margin-top: 3px;
+  opacity: 0.75;
 }
+/* ● ON AIR status badge */
 .snx-theater-on-air {
   display: flex;
   align-items: center;
@@ -1769,8 +1786,56 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
 }
 .snx-theater-on-air.connecting  { color: var(--snx-text-dim); border-color: rgba(138,155,192,0.25); background: none; }
 .snx-theater-on-air.connecting .snx-theater-on-air-dot  { background: var(--snx-text-dim); box-shadow: none; animation: none; }
+.snx-theater-on-air.reconnecting { color: var(--snx-blue); border-color: rgba(0,174,239,0.28); background: rgba(0,174,239,0.04); }
+.snx-theater-on-air.reconnecting .snx-theater-on-air-dot { background: var(--snx-blue); box-shadow: 0 0 8px rgba(0,174,239,0.7); }
 .snx-theater-on-air.off-air     { color: var(--snx-text-muted); border-color: rgba(138,155,192,0.15); background: none; }
 .snx-theater-on-air.off-air .snx-theater-on-air-dot { background: var(--snx-text-muted); box-shadow: none; animation: none; }
+
+/* ════════════════════════════════════════════════════════════
+   NETWORK BUG / WATERMARK
+   Subtle corner watermark over the Main TV player.
+   Presentation only — does not affect video controls.
+   Position: bottom-left of the theater frame.
+   ════════════════════════════════════════════════════════════ */
+.snx-network-bug {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 10;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.1;
+  user-select: none;
+  /* Subtle: dimmed by default, no interference with controls */
+  opacity: 0.28;
+  transition: opacity 0.3s ease;
+}
+/* Slightly more visible when not hovering the player */
+.snx-theater-frame:not(:hover) .snx-network-bug { opacity: 0.32; }
+.snx-theater-frame:hover .snx-network-bug        { opacity: 0.15; }
+.snx-network-bug-top {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2.5px;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+.snx-network-bug-bottom {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: var(--snx-blue);
+  text-transform: uppercase;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+@media (max-width: 480px) {
+  .snx-network-bug-top    { font-size: 8px; letter-spacing: 2px; }
+  .snx-network-bug-bottom { font-size: 7px; letter-spacing: 1.5px; }
+  .snx-network-bug        { bottom: 9px; left: 9px; }
+}
 
 /* ── Cinematic player frame ── */
 .snx-theater-frame {
@@ -2171,4 +2236,805 @@ img.snx-tn-avatar-img:not([src]) { display: none; }
   .snx-theater-now-playing,
   .snx-theater-up-next,
   .snx-theater-ticker { max-width: 960px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MY STATION — Personal Creator Station
+   Powered by Nexus AfterDark TV · A Shadow Nexus Social Network
+   Visual identity for the creator's own channel page.
+   Layered on existing functional styles — no engine changes.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Station card root ── */
+.snx-station-card {
+  max-width: 760px;
+  margin: 0 auto;
+  /* No overflow hidden here — the avatar must escape the cover cleanly */
+  overflow: visible;
+  position: relative;
+}
+
+/* ── Network identity badge above the card ── */
+.snx-station-network-badge {
+  max-width: 760px;
+  margin: 0 auto 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+}
+.snx-station-network-label {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+}
+.snx-station-network-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0,174,239,0.18), transparent);
+}
+
+/* ── Cover container — clipped independently ── */
+.snx-station-cover-wrap {
+  width: 100%;
+  height: 180px;
+  border-radius: 10px 10px 0 0;
+  /* ONLY the cover image is clipped here */
+  overflow: hidden;
+  position: relative;
+  background: linear-gradient(135deg,
+    #03060f 0%,
+    #060e20 40%,
+    #030915 70%,
+    #050d1a 100%);
+  flex-shrink: 0;
+}
+.snx-station-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+/* Fallback cover — cosmic gradient with subtle text */
+.snx-station-cover-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.snx-station-cover-fallback-text {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 5px;
+  color: rgba(0,174,239,0.10);
+  text-transform: uppercase;
+  user-select: none;
+}
+/* Bottom gradient — improves avatar readability over photo covers */
+.snx-station-cover-gradient {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 70%;
+  background: linear-gradient(to top,
+    rgba(5,9,26,0.85) 0%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+/* ── Avatar scaffold — sits below the cover, avatar overlaps upward ── */
+/*
+   Architecture:
+     .snx-station-cover-wrap   (overflow:hidden — clips cover image only)
+     .snx-station-identity     (overflow:visible — avatar can escape upward)
+       .snx-station-avatar-anchor  (positions the avatar at the cover seam)
+         .snx-station-avatar      (the circle — never clipped)
+       .snx-station-info          (channel name, handle, status, desc)
+       .snx-station-actions       (buttons)
+*/
+.snx-station-identity {
+  /* overflow MUST remain visible so the avatar is not clipped */
+  overflow: visible;
+  padding: 0 18px 16px;
+  /* Pull up: half the avatar height so it overlaps the cover bottom */
+  margin-top: -44px;
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.snx-station-avatar-anchor {
+  /* Contains ONLY the avatar — never clipped by siblings */
+  flex-shrink: 0;
+  /* Extra padding-top ensures the full avatar top is always visible */
+  padding-top: 0;
+  position: relative;
+  z-index: 3;
+  /* Spacer so identity row doesn't collapse below cover */
+  margin-top: 0;
+}
+.snx-station-avatar {
+  width: 88px;
+  height: 88px;
+  min-width: 88px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: var(--snx-surface-hi);
+  /* Thick panel-color border separates from cover image */
+  border: 4px solid var(--snx-panel, #080f1e);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 900;
+  color: var(--snx-blue);
+  /* Only the image inside is clipped to the circle */
+  overflow: hidden;
+  position: relative;
+  /* Default ring: electric blue */
+  outline: 2px solid rgba(0,174,239,0.35);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px rgba(0,174,239,0.10),
+              0 4px 16px rgba(0,0,0,0.6);
+}
+/* OFF AIR ring */
+.snx-station-avatar.off-air {
+  outline-color: rgba(0,174,239,0.28);
+}
+/* LIVE ring — animated blue→green energy */
+.snx-station-avatar.live {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(57,255,20,0.55),
+    0 0 0 5px rgba(0,174,239,0.20),
+    0 0 18px rgba(57,255,20,0.25),
+    0 4px 16px rgba(0,0,0,0.6);
+  animation: snxAvatarLiveRing 2.4s ease-in-out infinite;
+}
+@keyframes snxAvatarLiveRing {
+  0%, 100% {
+    box-shadow:
+      0 0 0 3px rgba(57,255,20,0.55),
+      0 0 0 5px rgba(0,174,239,0.20),
+      0 0 18px rgba(57,255,20,0.25),
+      0 4px 16px rgba(0,0,0,0.6);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(0,174,239,0.65),
+      0 0 0 5px rgba(57,255,20,0.15),
+      0 0 18px rgba(0,174,239,0.22),
+      0 4px 16px rgba(0,0,0,0.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-station-avatar.live { animation: none !important; }
+}
+.snx-station-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  border-radius: 50%;
+  display: block;
+}
+
+/* ── Info block — channel name, handle, status, description ── */
+.snx-station-info {
+  flex: 1;
+  min-width: 0;
+  /* Push content below the cover overlap so it reads under the avatar */
+  padding-top: 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.snx-station-name {
+  font-size: clamp(16px, 3.5vw, 22px);
+  font-weight: 900;
+  color: #dde3f5;
+  letter-spacing: 0.3px;
+  word-break: break-word;
+  line-height: 1.15;
+}
+.snx-station-handle {
+  font-size: 12px;
+  color: var(--snx-text-muted);
+  margin-top: 1px;
+}
+.snx-station-status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.snx-station-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.snx-station-status.live {
+  background: rgba(57,255,20,0.07);
+  border: 1px solid rgba(57,255,20,0.30);
+  color: #39FF14;
+}
+.snx-station-status-dot-live {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #39FF14;
+  box-shadow: 0 0 6px rgba(57,255,20,0.8);
+  animation: snxStationLiveDot 2s ease-in-out infinite;
+}
+@keyframes snxStationLiveDot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-station-status-dot-live { animation: none !important; }
+}
+.snx-station-status.off-air {
+  background: rgba(138,155,192,0.05);
+  border: 1px solid rgba(138,155,192,0.15);
+  color: var(--snx-text-muted);
+}
+.snx-station-followers {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--snx-text-dim);
+}
+.snx-station-desc {
+  font-size: 12px;
+  color: var(--snx-text-muted);
+  line-height: 1.6;
+  margin-top: 4px;
+  max-width: 460px;
+  word-break: break-word;
+}
+
+/* ── Actions — aligned top-right of identity row ── */
+.snx-station-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: flex-end;
+  flex-shrink: 0;
+  padding-top: 50px;
+}
+
+/* ── Live stats bar ── */
+.snx-station-live-stats {
+  display: flex;
+  border-top: 1px solid rgba(57,255,20,0.18);
+  border-bottom: 1px solid rgba(57,255,20,0.18);
+  background: rgba(57,255,20,0.03);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.snx-station-live-stats::-webkit-scrollbar { display: none; }
+.snx-station-live-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 18px;
+  flex: 1;
+  border-right: 1px solid rgba(57,255,20,0.12);
+  min-width: 70px;
+}
+.snx-station-live-stat:last-child { border-right: none; }
+.snx-station-live-stat-label {
+  font-size: 8px; font-weight: 900; letter-spacing: 1.5px;
+  color: var(--snx-text-muted); text-transform: uppercase;
+}
+.snx-station-live-stat-value {
+  font-size: 13px; font-weight: 800; color: var(--snx-text);
+}
+.snx-station-live-stat-value.live {
+  color: #39FF14;
+}
+
+/* ── Broadcast actions bar ── */
+.snx-station-broadcast-bar {
+  padding: 12px 18px;
+  border-top: 1px solid var(--snx-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: rgba(2,4,10,0.4);
+}
+
+/* Buttons */
+.snx-station-btn-go-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  min-height: 44px;
+  background: rgba(255,51,68,0.16);
+  border: 1px solid rgba(255,51,68,0.55);
+  border-radius: 6px;
+  color: #ff3344;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.snx-station-btn-go-live:hover {
+  background: rgba(255,51,68,0.26);
+  border-color: rgba(255,51,68,0.75);
+}
+.snx-station-btn-go-live:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.snx-station-btn-watch-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  min-height: 44px;
+  background: rgba(255,51,68,0.16);
+  border: 1px solid rgba(255,51,68,0.50);
+  border-radius: 6px;
+  color: #ff3344;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.snx-station-btn-watch-live:hover { background: rgba(255,51,68,0.26); }
+
+.snx-station-btn-manage-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 16px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid rgba(255,51,68,0.35);
+  border-radius: 6px;
+  color: var(--snx-red);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.snx-station-btn-manage-live:hover { background: rgba(255,51,68,0.10); }
+
+.snx-station-btn-end-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 14px;
+  min-height: 44px;
+  background: none;
+  border: 1px solid rgba(255,51,68,0.25);
+  border-radius: 6px;
+  color: var(--snx-red);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  opacity: 0.75;
+  transition: background 0.15s, opacity 0.15s;
+}
+.snx-station-btn-end-live:hover { background: rgba(255,51,68,0.08); opacity: 1; }
+
+.snx-station-btn-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  min-height: 38px;
+  background: none;
+  border: 1px solid rgba(0,174,239,0.25);
+  border-radius: 6px;
+  color: var(--snx-blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.snx-station-btn-edit:hover {
+  background: rgba(0,174,239,0.10);
+  border-color: rgba(0,174,239,0.45);
+}
+
+/* ── Inner tabs ── */
+.snx-station-tabs {
+  display: flex;
+  border-top: 1px solid var(--snx-border);
+  border-bottom: 1px solid var(--snx-border);
+  padding: 0 18px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: rgba(2,4,10,0.25);
+}
+.snx-station-tabs::-webkit-scrollbar { display: none; }
+.snx-station-tab {
+  flex-shrink: 0;
+  padding: 11px 18px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--snx-text-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+  min-height: 44px;
+}
+.snx-station-tab:hover { color: var(--snx-blue); }
+.snx-station-tab.active {
+  color: var(--snx-blue);
+  border-bottom-color: var(--snx-blue);
+}
+.snx-station-tab:focus-visible {
+  outline: 2px solid var(--snx-blue);
+  outline-offset: -2px;
+}
+
+/* ── Tab content area ── */
+.snx-station-content {
+  padding: 18px 18px 32px;
+}
+
+/* ── Live hero (home tab when live) ── */
+.snx-station-live-hero {
+  background: rgba(57,255,20,0.04);
+  border: 1px solid rgba(57,255,20,0.18);
+  border-radius: 8px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.snx-station-live-hero-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #39FF14;
+  text-transform: uppercase;
+  flex: 1;
+  min-width: 0;
+}
+.snx-station-live-hero-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #39FF14;
+  box-shadow: 0 0 8px rgba(57,255,20,0.9);
+  flex-shrink: 0;
+  animation: snxStationLiveDot 2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .snx-station-live-hero-dot { animation: none !important; }
+}
+.snx-station-live-hero-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--snx-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 2;
+  min-width: 0;
+}
+
+/* ── Off Air display ── */
+.snx-station-off-air {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 16px;
+  color: var(--snx-text-muted);
+  text-align: center;
+}
+.snx-station-off-air-icon {
+  font-size: 28px;
+  opacity: 0.25;
+}
+.snx-station-off-air-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+}
+.snx-station-off-air-sub {
+  font-size: 11px;
+  color: rgba(90,128,168,0.6);
+  max-width: 280px;
+  line-height: 1.6;
+}
+
+/* ── Section label ── */
+.snx-station-section-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 2.5px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* ── About tab ── */
+.snx-station-about-block {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.snx-station-about-desc {
+  font-size: 13px;
+  color: var(--snx-text-dim);
+  line-height: 1.7;
+  max-width: 520px;
+  word-break: break-word;
+}
+.snx-station-about-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.snx-station-about-row {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+}
+.snx-station-about-row-label {
+  font-weight: 700;
+  color: var(--snx-text-muted);
+  min-width: 90px;
+  flex-shrink: 0;
+}
+.snx-station-about-row-value {
+  color: var(--snx-text-dim);
+  word-break: break-word;
+}
+
+/* ── Edit modal — station style ── */
+.snx-station-modal-title {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 2.5px;
+  color: #dde3f5;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+/* ── Background for the My Channel section ── */
+#snx-tn-my-channel.snx-tn-section {
+  background: transparent;
+}
+/* Give the card a subtle station feel */
+.snx-station-card-body {
+  background: var(--snx-panel);
+  border: 1px solid var(--snx-border);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  overflow: visible;
+}
+
+/* ── Mobile — all sizes must show full avatar ── */
+@media (max-width: 480px) {
+  .snx-station-cover-wrap  { height: 120px; border-radius: 8px 8px 0 0; }
+  .snx-station-avatar      { width: 72px; height: 72px; min-width: 72px; font-size: 24px; border-width: 3px; }
+  .snx-station-identity    { margin-top: -36px; padding: 0 12px 14px; gap: 10px; }
+  .snx-station-info        { padding-top: 40px; }
+  .snx-station-actions     { padding-top: 42px; }
+  .snx-station-name        { font-size: 15px; }
+  .snx-station-broadcast-bar { padding: 10px 12px; }
+  .snx-station-tabs        { padding: 0 10px; }
+  .snx-station-tab         { padding: 10px 12px; font-size: 9px; letter-spacing: 1.5px; }
+  .snx-station-content     { padding: 14px 12px 28px; }
+  .snx-station-network-badge { padding: 0 2px; }
+}
+@media (max-width: 360px) {
+  .snx-station-cover-wrap  { height: 100px; }
+  .snx-station-avatar      { width: 60px; height: 60px; min-width: 60px; font-size: 20px; border-width: 3px; }
+  .snx-station-identity    { margin-top: -30px; }
+  .snx-station-info        { padding-top: 34px; }
+  .snx-station-actions     { padding-top: 36px; flex-direction: row; align-items: center; }
+  .snx-station-name        { font-size: 13px; }
+  .snx-station-tab         { padding: 10px 10px; font-size: 8px; }
+}
+
+/* ── Desktop ── */
+@media (min-width: 900px) {
+  .snx-station-card        { max-width: 860px; }
+  .snx-station-network-badge { max-width: 860px; }
+  .snx-station-cover-wrap  { height: 220px; }
+  .snx-station-avatar      { width: 100px; height: 100px; min-width: 100px; font-size: 34px; }
+  .snx-station-identity    { margin-top: -50px; padding: 0 24px 18px; gap: 20px; }
+  .snx-station-info        { padding-top: 56px; }
+  .snx-station-actions     { padding-top: 58px; }
+  .snx-station-name        { font-size: 22px; }
+}
+@media (min-width: 1200px) {
+  .snx-station-card        { max-width: 920px; }
+  .snx-station-network-badge { max-width: 920px; }
+  .snx-station-cover-wrap  { height: 240px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   THE CREATOR NETWORK — Channels section header
+   Nexus AfterDark TV · Creator Network
+   ═══════════════════════════════════════════════════════════════ */
+
+.snx-cu-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(0,174,239,0.10);
+}
+.snx-cu-header-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+/* "NEXUS AFTERDARK TV" network eyebrow */
+.snx-cu-header-network {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: var(--snx-blue);
+  text-transform: uppercase;
+}
+/* "THE CREATOR NETWORK" main heading */
+.snx-cu-header-title {
+  font-size: clamp(18px, 4vw, 28px);
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #dde3f5;
+  text-transform: uppercase;
+  line-height: 1.05;
+}
+/* sub: "Explore channels across Nexus AfterDark TV" */
+.snx-cu-header-sub {
+  font-size: 10px;
+  color: var(--snx-text-muted);
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+.snx-cu-header-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.snx-cu-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.snx-cu-stat-value {
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--snx-text);
+  line-height: 1;
+}
+.snx-cu-stat-label {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+}
+.snx-cu-stat-live {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255,51,68,0.30);
+  border-radius: 6px;
+  background: rgba(255,51,68,0.04);
+}
+.snx-cu-stat-live .snx-cu-stat-value { color: var(--snx-red); font-size: 15px; }
+.snx-cu-stat-live .snx-cu-stat-label { margin-top: 0; }
+.snx-cu-stat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--snx-red);
+  box-shadow: 0 0 6px rgba(255,51,68,0.7);
+  animation: snxTnLivePulse 1.8s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) { .snx-cu-stat-dot { animation: none !important; } }
+
+/* Section labels (BROADCASTING NOW / ALL STATIONS) */
+.snx-cu-section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--snx-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.snx-cu-section-label-mt { margin-top: 26px; }
+.snx-cu-section-label-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--snx-red);
+  box-shadow: 0 0 6px rgba(255,51,68,0.7);
+  flex-shrink: 0;
+  animation: snxTnLivePulse 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .snx-cu-section-label-dot { animation: none !important; } }
+.snx-cu-section-label-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  background: rgba(0,174,239,0.12);
+  border: 1px solid rgba(0,174,239,0.22);
+  color: var(--snx-blue);
+  font-size: 9px;
+  font-weight: 900;
+  border-radius: 8px;
+}
+
+/* ── Mobile overrides for Channel Universe ── */
+@media (max-width: 480px) {
+  .snx-cu-header { margin-bottom: 14px; }
+  .snx-cu-header-title { font-size: 16px; letter-spacing: 2px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   👑 TV STUDIO TAB — NETWORK CONTROL
+   Nexus AfterDark TV · Founder-only · Network Control
+   Gold crown accent marks this as the network operator tab.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Gold accent for the Studio tab — visible nav label: 👑 TV STUDIO */
+.snx-tn-tab.snx-tn-tab-studio {
+  color: rgba(212, 175, 55, 0.65);
+}
+.snx-tn-tab.snx-tn-tab-studio:hover {
+  color: #d4af37;
+}
+.snx-tn-tab.snx-tn-tab-studio.active {
+  color: #d4af37;
+  border-bottom-color: #d4af37;
 }
