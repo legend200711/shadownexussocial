@@ -314,10 +314,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   D.endedBackBtn && D.endedBackBtn.addEventListener('click', () => {
-    // Requirement 12: after END LIVE the host returns to their Creator Channel.
-    // Do NOT logout, do NOT close the website.
-    // channel.html loads 24-Hour TV which includes MY CHANNEL tab.
-    window.location.href = 'channel.html';
+    // [OLD-LIVE] END: return host to Shadow Nexus Social (standalone Live reset).
+    // Do NOT route through 24-Hour TV or Creator Channels during Phase 1.
+    window.location.href = 'index.html';
   });
 
   document.getElementById('liveCloseBtn') &&
@@ -1003,43 +1002,14 @@ async function startLive() {
     await updateDoc(doc(_db, 'users', _user.uid), { isLive: true, liveRoomId: _roomId });
   } catch (_) {}
 
-  // ── Adapter bridge: notify the social layer that this broadcast is live.
-  //    broadcastStarted() writes creatorChannels status=live, currentLiveId=roomId
-  //    so the creator appears in Live Now / Creator Channel on the main website.
-  //    Fire-and-forget — the RTDB room and Live Hub work even if this write fails.
-  //    All errors are now surfaced (no silent catch) so root cause is visible in console. ──
-  ;(async () => {
-    console.log('[LIVE-BRIDGE] IMPORT_START — importing snx-live-adapter.js');
-    console.log('[LIVE-BRIDGE] UID:', _user.uid);
-    console.log('[LIVE-BRIDGE] ROOM_ID:', _roomId);
-    let _adapterMod;
-    try {
-      _adapterMod = await import('./snx-live-adapter.js');
-      console.log('[LIVE-BRIDGE] IMPORT_SUCCESS — adapter module loaded');
-    } catch (_importErr) {
-      console.error('[LIVE-BRIDGE] IMPORT_FAILED — could not load snx-live-adapter.js',
-        'code:', _importErr.code, 'message:', _importErr.message, _importErr);
-      return;
-    }
-    try {
-      const { broadcastStarted } = _adapterMod;
-      console.log('[LIVE-BRIDGE] BROADCAST_STARTED_CALL — uid:', _user.uid, 'roomId:', _roomId);
-      await broadcastStarted(_user.uid, _roomId, {
-        displayName: _userData?.displayName || _user.email?.split('@')[0] || 'Creator',
-        username:    _userData?.username || '',
-        avatar:      _userData?.avatar   || _userData?.profilePicture || null,
-      });
-      console.log('[LIVE-BRIDGE] BROADCAST_STARTED_SUCCESS — creatorChannels status:live currentLiveId:', _roomId);
-      console.log('[LIVE-BRIDGE] CREATOR NOW VISIBLE IN LIVE NOW');
-    } catch (_bridgeErr) {
-      console.error('[LIVE-BRIDGE] BROADCAST_STARTED_FAILED — creator will NOT appear in Live Now!',
-        '\n  code:', _bridgeErr.code,
-        '\n  message:', _bridgeErr.message,
-        '\n  Firebase project: horr-a08f4',
-        '\n  document path: creatorChannels/' + _user.uid,
-        '\n  full error:', _bridgeErr);
-    }
-  })();
+  // [PHASE-2-DISABLED] broadcastStarted() — Creator Channels / Live Now integration.
+  // Disconnected for Phase 1 standalone WebRTC reset.
+  // Restore this block in Phase 2 when reconnecting Creator Channels + Live Now.
+  //
+  // ;(async () => {
+  //   const { broadcastStarted } = await import('./snx-live-adapter.js');
+  //   await broadcastStarted(_user.uid, _roomId, { ... });
+  // })();
 
   // ── RTDB users/{uid} presence: mark as live ──
   try {
@@ -1438,38 +1408,15 @@ async function endLive() {
 
   // ── Adapter bridge: notify the social layer that the broadcast has ended.
   //    broadcastEnded() clears creatorChannels status → offline so creator leaves Live Now.
-  //    CRITICAL: this is awaited (not fire-and-forget) so the creator channel is guaranteed
-  //    offline BEFORE the ended overlay is shown. Failure is logged, not silently swallowed. ──
-  console.log('[END-LIVE] ADAPTER_OFFLINE_START — clearing creatorChannels');
-  console.log('[LIVE-BRIDGE] BROADCAST_ENDED_CALL — uid:', _user?.uid, 'endedRoomId:', _endedRoomId);
-  if (_user) {
-    try {
-      console.log('[LIVE-BRIDGE] OFFLINE_WRITE_START — importing adapter');
-      const { broadcastEnded } = await import('./snx-live-adapter.js');
-      await broadcastEnded(_user.uid, _endedRoomId);
-      console.log('[LIVE-BRIDGE] OFFLINE_WRITE_SUCCESS — creatorChannels status:offline ✓');
-      console.log('[END-LIVE] ADAPTER_OFFLINE_DONE — creatorChannels status:offline ✓');
-    } catch (_bridgeErr) {
-      console.error('[LIVE-BRIDGE] OFFLINE_WRITE_FAILED — creator may still appear in Live Now!',
-        '\n  code:', _bridgeErr.code,
-        '\n  message:', _bridgeErr.message,
-        '\n  document path: creatorChannels/' + _user.uid);
-      console.error('[END-LIVE] ADAPTER_OFFLINE_FAILED — creator may still appear in Live Now!',
-        'code:', _bridgeErr.code, 'message:', _bridgeErr.message);
-      // Best-effort fallback: try direct Firestore write without the adapter module overhead
-      try {
-        const { updateDoc: _ud, doc: _d, serverTimestamp: _st } =
-          await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
-        await _ud(_d(_db, 'creatorChannels', _user.uid), {
-          status: 'offline', currentLiveId: null, currentStartedAt: null,
-          updatedAt: _st(),
-        });
-        console.log('[END-LIVE] ADAPTER_OFFLINE_DONE (fallback direct write) ✓');
-      } catch (_fbErr) {
-        console.error('[END-LIVE] ADAPTER_OFFLINE_FALLBACK ALSO FAILED:', _fbErr.message);
-      }
-    }
-  }
+  //    [PHASE-2-DISABLED] broadcastEnded() — Creator Channels / Live Now integration.
+  //    Disconnected for Phase 1 standalone WebRTC reset.
+  //    Restore this block in Phase 2 when reconnecting Creator Channels + Live Now.
+  //
+  // if (_user) {
+  //   const { broadcastEnded } = await import('./snx-live-adapter.js');
+  //   await broadcastEnded(_user.uid, _endedRoomId);
+  // }
+  console.log('[END-LIVE] PHASE1 — skipping creatorChannels bridge (disconnected for Phase 1)');
 
   // ── Reset local live state so host UI stops showing LIVE ──
   _roomId     = null;

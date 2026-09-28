@@ -12581,7 +12581,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 <!-- ── Load SNX TV Network (Creator Channels) for index.html tvPage ── -->
 <link rel="stylesheet" href="snx-tv-network.css">
-<link rel="stylesheet" href="snx-creator-live.css">
+<!-- [PHASE-2-DISABLED] snx-creator-live.css removed — new creator-live UI not needed in Phase 1 -->
 <script type="module">
 /**
  * SNX TV Network — index.html integration
@@ -13215,18 +13215,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           return;
       }
 
-      // Navigate to the working live.html broadcast engine.
-      // live.html + live.js handles ALL camera/mic/WebRTC.
-      // live.js calls broadcastStarted() which writes creatorChannels status=live,
-      // so the host automatically appears in 24-Hour TV → LIVE NOW.
-      try {
-          const { goLive } = await import('./snx-live-adapter.js');
-          goLive(currentUser);
-      } catch (err) {
-          console.error('[goLiveOrWatch] Failed to navigate to live.html:', err);
-          // Fallback: navigate directly if adapter import fails
-          window.location.href = 'live.html';
-      }
+      // [OLD-LIVE] Phase 1: navigate directly to live.html — the standalone WebRTC engine.
+      // No Creator Channel adapter needed. live.html reads existing Firebase auth.
+      // Phase 2 will re-add the adapter bridge when Creator Channels reconnects.
+      console.log('[OLD-LIVE] goLiveOrWatch — navigating to live.html, uid:', currentUser.uid);
+      window.location.href = 'live.html';
   };
 
   /* ═══════════════════════════════════════════════

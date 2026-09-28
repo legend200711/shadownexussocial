@@ -113,22 +113,12 @@ export function initTvNetwork(user) {
   }
 
   if (deepLiveUid && deepLiveId && user) {
-    // Open viewer stage after a short delay (let auth + subscriptions settle)
-    setTimeout(async () => {
-      try {
-        const ch = await import('./snx-creator-channels.js').then(m => m.loadCreatorChannel(deepLiveUid));
-        let userData = null;
-        try {
-          const { getDoc: gd, doc: d } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
-          const snap = await gd(d(snsDb, 'users', user.uid));
-          userData = snap.exists() ? snap.data() : null;
-        } catch (_) {}
-        // Route through adapter — opens old working viewer
-        const { watchLive } = await import('./snx-live-adapter.js');
-        await watchLive(user, userData, ch, deepLiveId);
-      } catch (e) { console.warn('[SNX TV] deep-link open failed:', e.message); }
+    // [OLD-LIVE] Phase 1: deep-link opens live.html#watch=roomId directly.
+    // live-now tab is disabled for Phase 1, so we navigate to live.html.
+    setTimeout(() => {
+      window.location.href = 'live.html#watch=' + encodeURIComponent(deepLiveId);
     }, 600);
-    _switchTab('live-now', true);
+    _switchTab('main-tv', true);
     return;
   }
 
@@ -190,9 +180,10 @@ function _injectTabBar() {
   tabBar.className = 'snx-tn-tabs';
   tabBar.setAttribute('role', 'tablist');
   tabBar.setAttribute('aria-label', 'Shadow Nexus TV sections');
+  // [PHASE-2-DISABLED] LIVE NOW tab removed for Phase 1 standalone WebRTC reset.
+  // Restore the live-now button below in Phase 2 when reconnecting TV + Creator Live.
   tabBar.innerHTML = `
     <button class="snx-tn-tab active" data-tab="main-tv"    role="tab" aria-selected="true"  aria-controls="ax-hero ax-app">MAIN TV</button>
-    <button class="snx-tn-tab"        data-tab="live-now"   role="tab" aria-selected="false" aria-controls="snx-tn-live-now"><span class="snx-tn-live-dot" aria-hidden="true"></span> LIVE NOW <span class="snx-tn-live-count" id="snx-tn-live-count" aria-label="live channels" style="display:none;"></span></button>
     <button class="snx-tn-tab"        data-tab="channels"   role="tab" aria-selected="false" aria-controls="snx-tn-channels">CHANNELS</button>
     <button class="snx-tn-tab"        data-tab="my-channel" role="tab" aria-selected="false" aria-controls="snx-tn-my-channel">MY CHANNEL</button>
   `;
@@ -255,7 +246,7 @@ function _switchTab(tab, silent = false) {
   if (myChannel) myChannel.style.display  = tab === 'my-channel' ? '' : 'none';
 
   // Render on demand
-  if (tab === 'live-now')   _renderLiveNowSection();
+  // [PHASE-2-DISABLED] live-now tab removed — _renderLiveNowSection not called
   if (tab === 'channels')   _renderChannelsSection();
   if (tab === 'my-channel') _renderMyChannelSection();
   // Update LIVE preview strip visibility when switching tabs
@@ -301,6 +292,9 @@ function _injectLivePreview() {
 function _updateLivePreview() {
   const el = document.getElementById('snx-tn-live-preview');
   if (!el) return;
+  // [PHASE-2-DISABLED] Live Now preview strip hidden — LIVE NOW disconnected for Phase 1.
+  el.style.display = 'none';
+  return;
   // Only show when on main-tv tab and there are live channels
   if (_activeTab !== 'main-tv' || !_liveChannels.length) {
     el.style.display = 'none';
@@ -384,22 +378,12 @@ export function showReturnToProgramming() {
    SUBSCRIPTIONS
 ════════════════════════════════════ */
 function _startSubscriptions() {
-  // Subscribe to live channels (for LIVE NOW badge + section)
-  if (_liveUnsub) _liveUnsub();
-  _liveUnsub = subscribeLiveChannels(
-    channels => {
-      _liveChannels = channels;
-      // Expose live count for Network Status panel in snx-ch-adapter.js
-      window._snxLiveChannelCount = channels.length;
-      _updateLiveBadge();
-      _updateLivePreview();
-      if (_activeTab === 'live-now') _renderLiveNowSection();
-    },
-    err => {
-      // Visible error handler — surfaces permission-denied / index failures
-      console.error('[SNX TV] subscribeLiveChannels FAILED:', err.code, err.message);
-    }
-  );
+  // [PHASE-2-DISABLED] subscribeLiveChannels — LIVE NOW subscription for TV.
+  // Disconnected for Phase 1 standalone WebRTC reset.
+  // Restore this block in Phase 2 when reconnecting TV + Creator Live.
+  //
+  // if (_liveUnsub) _liveUnsub();
+  // _liveUnsub = subscribeLiveChannels(channels => { ... });
 
   // Subscribe to full directory
   if (_dirUnsub) _dirUnsub();
@@ -408,16 +392,13 @@ function _startSubscriptions() {
     if (_activeTab === 'channels') _renderChannelsSection();
   });
 
-  // Subscribe to Main TV state for the LIVE NOW featured label
-  if (!_mainTvUnsub) {
-    import('./snx-main-tv-feature.js').then(({ subscribeMainTvState }) => {
-      if (_mainTvUnsub) return; // double-check
-      _mainTvUnsub = subscribeMainTvState(st => {
-        _mainTvState = st;
-        if (_activeTab === 'live-now') _renderLiveNowSection();
-      });
-    }).catch(() => {}); // non-critical — Live Now still works without it
-  }
+  // [PHASE-2-DISABLED] subscribeMainTvState — Main TV featured-live subscription.
+  // Disconnected for Phase 1 standalone WebRTC reset.
+  // Restore this block in Phase 2 when reconnecting TV + Creator Live.
+  //
+  // if (!_mainTvUnsub) {
+  //   import('./snx-main-tv-feature.js').then(({ subscribeMainTvState }) => { ... });
+  // }
 
   // Handle snx:switchTvTab events from the adapter/broadcast Network Status panel.
   // Use a named handler stored on window so repeated initTvNetwork calls don't
@@ -442,18 +423,8 @@ function _startSubscriptions() {
 }
 
 function _updateLiveBadge() {
-  const countEl = document.getElementById('snx-tn-live-count');
-  if (!countEl) return;
-  const n = _liveChannels.length;
-  if (n > 0) {
-    countEl.textContent = String(n);
-    countEl.style.display = '';
-  } else {
-    countEl.style.display = 'none';
-  }
-  // Pulse the dot on the LIVE NOW tab when channels are live
-  const liveTab = document.querySelector('.snx-tn-tab[data-tab="live-now"]');
-  if (liveTab) liveTab.classList.toggle('snx-tn-tab-live', n > 0);
+  // [PHASE-2-DISABLED] LIVE NOW tab removed — no badge to update in Phase 1.
+  // The snx-tn-live-count element no longer exists in the tab bar.
 }
 
 /* ════════════════════════════════════
@@ -929,14 +900,9 @@ function _showGoLiveDialog(ch) {
     }
   } catch (_) {}
 
-  // Navigate to the working live.html broadcast engine.
-  // live.js handles ALL camera/mic/WebRTC and calls broadcastStarted()
-  // so the creator appears in Live Now automatically.
-  import('./snx-live-adapter.js').then(({ goLive }) => {
-    goLive(_user, ch?.channelName);
-  }).catch(() => {
-    window.location.href = 'live.html';
-  });
+  // [OLD-LIVE] Phase 1: navigate directly to live.html — standalone WebRTC engine.
+  // No Creator Channel adapter needed for Phase 1.
+  window.location.href = 'live.html';
 }
 
 /* ════════════════════════════════════
