@@ -466,6 +466,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  console.log('[SNX-LIVE] Firebase initialized — project: horr-a08f4');
+
   onAuthStateChanged(_auth, user => {
     const isFirstCallback = !_authInitialized;
     _authInitialized = true;
@@ -525,8 +527,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // User is authenticated — cancel any pending redirect guard.
     _authRedirectScheduled = false;
 
+    console.log('[SNX-LIVE] Auth resolved — UID:', user.uid, 'anonymous:', user.isAnonymous);
+
     _user = user;
     _loadUserData().then(() => {
+      console.log('[SNX-LIVE] UID resolved —', user.uid);
+      console.log('[SNX-LIVE] Role resolved —', _userData?.role || '(no role field)');
       if (D.goLiveBtn) { D.goLiveBtn.disabled = false; }
       // ── ?action=end: creator came from Studio Control Room End Live button ──
       const _urlParams  = new URLSearchParams(location.search);
@@ -705,17 +711,68 @@ async function flipSetupCamera() {
    START LIVE (creator)
    ═══════════════════════════════════════════════════ */
 async function startLive() {
+  console.log('[SNX-LIVE] Go Live pressed');
+
+  // ── Auth guard ──
   if (!_user) {
+    console.warn('[SNX-LIVE] FAILED — no _user at press time');
     toast('Please wait…');
     return;
   }
   if (_user.isAnonymous) {
+    console.warn('[SNX-LIVE] FAILED — user is anonymous');
     toast('Sign in to go live.');
     return;
   }
   if (!_localStream || !_localStream.getTracks().length) {
+    console.warn('[SNX-LIVE] FAILED — no local stream');
     toast('Camera or mic not available. Check permissions and refresh.');
     return;
+  }
+
+  console.log('[SNX-LIVE] Camera ready —',
+    'video tracks:', _localStream.getVideoTracks().length,
+    'audio tracks:', _localStream.getAudioTracks().length);
+
+  // ── Verify auth.currentUser is truly resolved ──
+  console.log('[SNX-LIVE] Auth state checking');
+  const _currentUser = _auth.currentUser;
+  if (!_currentUser) {
+    console.error('[SNX-LIVE] FAILED — auth.currentUser is null (session not fully restored)');
+    toast('Session not ready. Please wait a moment and try again.');
+    return;
+  }
+  console.log('[SNX-LIVE] Auth resolved: UID', _currentUser.uid,
+    '| provider:', _currentUser.providerData?.[0]?.providerId || 'unknown');
+
+  // ── Arm 10-second timeout — button MUST never spin forever ──
+  let _goLiveCompleted = false;
+  const _goLiveTimeout = setTimeout(() => {
+    if (_goLiveCompleted) return;
+    console.error('[SNX-LIVE] TIMEOUT — Go Live sequence did not complete within 10 s');
+    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
+    toast('Could not start Live. Please try again.');
+  }, 10000);
+
+  // ── Top-level error handler — any unhandled throw restores the button ──
+  const _failGoLive = (label, service, operation, path, err) => {
+    _goLiveCompleted = true;
+    clearTimeout(_goLiveTimeout);
+    const code = err?.code || err?.name || 'unknown';
+    const msg  = err?.message || String(err);
+    console.error(
+      `[SNX-LIVE] FAILED\n  Step: ${label}\n  Service: ${service}\n  Operation: ${operation}\n  Path: ${path}\n  Code: ${code}\n  Error: ${msg}`,
+      err
+    );
+    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
+    toast('Could not start Live. Please try again.');
+  };
+
+  // Ensure creator mode is set — supports second broadcast after endLive() without page reload
+  _mode = 'creator';
+  if (!document.body.classList.contains('is-creator')) {
+    document.body.classList.add('is-creator');
+    document.body.classList.remove('is-viewer');
   }
 
   // ── Kill any previous stuck live session for this user ──
@@ -767,24 +824,58 @@ async function startLive() {
   };
 
   /* ── Write room to LIVE Realtime Database ── */
+  console.log('[SNX-LIVE] Creating RTDB liveRoom — path: liveRooms/' + _roomId);
   try {
     await set(ref(_liveDB, `liveRooms/${_roomId}`), creatorData);
+    console.log('[SNX-LIVE] RTDB liveRoom created ✓ — path: liveRooms/' + _roomId);
   } catch (e) {
-    toast('Could not start live. Please try again.');
-    if (D.goLiveBtn) { D.goLiveBtn.disabled = false; D.goLiveBtn.textContent = 'Start Live'; }
+    _failGoLive('RTDB liveRoom create', 'Realtime Database', 'set',
+      'liveRooms/' + _roomId, e);
     return;
   }
 
   /* ── Mirror room to Firestore so Live Hub can query it.
         Keyed by uid so only ONE doc per user ever exists —
         reconnecting simply overwrites the previous entry.   ── */
+  console.log('[SNX-LIVE] Creating Firestore liveRoom — path: liveRooms/' + _user.uid);
   try {
     await setDoc(doc(_db, 'liveRooms', _user.uid), {
       ...creatorData,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-  } catch (_) {}
+    console.log('[SNX-LIVE] Firestore liveRoom created ✓ — path: liveRooms/' + _user.uid);
+  } catch (fsErr) {
+    // Non-fatal: RTDB is the authoritative room store; Firestore mirror failure
+    // should NOT kill the broadcast — log it and continue.
+    const code = fsErr?.code || fsErr?.name || 'unknown';
+    console.error(
+      '[SNX-LIVE] Firestore liveRoom write FAILED (non-fatal, continuing)\n' +
+      '  Service: Firestore\n  Operation: setDoc\n  Path: liveRooms/' + _user.uid + '\n' +
+      '  Code: ' + code + '\n  Error: ' + (fsErr?.message || fsErr)
+    );
+  }
+
+  /* ── Phase 3: notify Creator Channel adapter that broadcast has started.
+        Fire-and-forget — a Firestore failure here MUST NOT kill the WebRTC stream. ── */
+  console.log('[SNX-LIVE] Publishing host state — creatorChannels/' + _user.uid);
+  ;(async () => {
+    try {
+      const { broadcastStarted } = await import('./snx-live-adapter.js');
+      await broadcastStarted(_user.uid, _roomId, {
+        displayName: _userData?.displayName || _user.email?.split('@')[0] || 'Creator',
+        username:    _userData?.username    || '',
+        avatar:      _userData?.avatar      || _userData?.profilePicture || null,
+      });
+      console.log('[SNX-LIVE] Host state published ✓ — creatorChannels/' + _user.uid);
+    } catch (_adapterErr) {
+      console.warn('[SNX-LIVE] creatorChannels publish failed (non-fatal):\n' +
+        '  Service: Firestore\n  Operation: setDoc/updateDoc\n' +
+        '  Path: creatorChannels/' + _user.uid + '\n' +
+        '  Code: ' + (_adapterErr?.code || _adapterErr?.name || 'unknown') + '\n' +
+        '  Error: ' + (_adapterErr?.message || _adapterErr));
+    }
+  })();
 
   /* ── Guard: prevent accidental cleanup if page unloads during live ── */
   _creatorEndedFlag = false;
@@ -834,6 +925,10 @@ async function startLive() {
     }
   });
 
+  console.log('[SNX-LIVE] Opening live room — roomId:', _roomId);
+  console.log('[OLD-LIVE] LIVE_STAGE_SHOW — hiding setup, showing stage');
+  console.log('[OLD-LIVE] LOCAL_STREAM_BEFORE_STAGE — stream:', !!_localStream,
+    'tracks:', _localStream?.getTracks().map(t => t.kind + ':' + t.readyState).join(', '));
   if (D.setup) D.setup.style.display = 'none';
   _showStage();
   _attachLocalVideoToStage();
@@ -841,9 +936,21 @@ async function startLive() {
 
   /* ── Initialise the audio mixer BEFORE WebRTC so peer connections
         pick up the mixed audio track rather than the raw mic track.   ── */
-  await _initAudioMixer();
+  try {
+    await _initAudioMixer();
+  } catch (_mixerErr) {
+    console.warn('[SNX-LIVE] AudioMixer init failed (non-fatal):', _mixerErr?.message || _mixerErr);
+  }
 
-  await _startCreatorWebRTC();
+  console.log('[SNX-LIVE] Creating signaling state — liveConnections/' + _roomId);
+  try {
+    await _startCreatorWebRTC();
+    console.log('[SNX-LIVE] Signaling state ready ✓');
+  } catch (_rtcErr) {
+    _failGoLive('startCreatorWebRTC', 'Realtime Database', 'onValue/onDisconnect',
+      'liveConnections/' + _roomId + '/viewers', _rtcErr);
+    return;
+  }
 
   _subscribeChat();
   _subscribeViewerCount();
@@ -875,6 +982,12 @@ async function startLive() {
     try { onDisconnect(ref(_liveDB, `liveGuests/${_roomId}`)).remove(); } catch(_) {}
   } catch (_) {}
 
+  // ── Go Live completed successfully — disarm timeout and guards ──
+  _goLiveCompleted = true;
+  clearTimeout(_goLiveTimeout);
+
+  console.log('[SNX-LIVE] LIVE STARTED ✓ — roomId:', _roomId, '| uid:', _user?.uid);
+  console.log('[OLD-LIVE] LIVE_ACTIVE — 🔴 roomId:', _roomId, 'uid:', _user?.uid);
   toast('🔴 You are LIVE!');
 
   // ── Notify add-on modules (co-host, etc.) that live has started ──
