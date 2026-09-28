@@ -113,12 +113,22 @@ export function initTvNetwork(user) {
   }
 
   if (deepLiveUid && deepLiveId && user) {
-    // [OLD-LIVE] Phase 1: deep-link opens live.html#watch=roomId directly.
-    // live-now tab is disabled for Phase 1, so we navigate to live.html.
-    setTimeout(() => {
-      window.location.href = 'live.html#watch=' + encodeURIComponent(deepLiveId);
+    // Phase 2: deep-link opens the native TV Live View shell
+    setTimeout(async () => {
+      try {
+        _ensureTvLiveViewCss();
+        const { openTvLiveView } = await import('./snx-tv-live-view.js');
+        // Build a minimal channel stub from the URL params
+        const chStub = { ownerUid: deepLiveUid, channelName: '', currentLiveId: deepLiveId };
+        openTvLiveView(chStub, deepLiveId, {
+          onClose: () => { if (_activeTab !== 'live-now') _switchTab('live-now'); },
+        });
+      } catch (_) {
+        // Fallback: navigate to old viewer if shell fails to load
+        window.location.href = 'live.html#watch=' + encodeURIComponent(deepLiveId);
+      }
     }, 600);
-    _switchTab('main-tv', true);
+    _switchTab('live-now', true);
     return;
   }
 
@@ -600,22 +610,38 @@ function _buildLiveNowCard(ch) {
 /* ════════════════════════════════════
    LIVE NOW CARD CLICK — open viewer
 ════════════════════════════════════ */
+/* Ensure snx-tv-live-view.css is loaded (once) before showing the shell */
+function _ensureTvLiveViewCss() {
+  if (document.getElementById('snx-tv-live-view-css')) return;
+  const link = document.createElement('link');
+  link.id   = 'snx-tv-live-view-css';
+  link.rel  = 'stylesheet';
+  link.href = 'snx-tv-live-view.css';
+  document.head.appendChild(link);
+}
+
 async function _openLiveNowCard(uid) {
-  // Find the channel's current liveId
+  // Find the channel in the live list
   const ch = _liveChannels.find(c => (c.id || c.ownerUid) === uid);
   if (!ch) { _openChannelView(uid); return; }
-  const liveId = ch.currentLiveId;
-  if (!liveId) { _openChannelView(uid); return; }
+
+  // currentLiveId is the RTDB roomId (set by broadcastStarted in snx-live-adapter.js)
+  const roomId = ch.currentLiveId;
+  if (!roomId) { _openChannelView(uid); return; }
+
   if (!_user) { _toast('Sign in to watch'); return; }
-  let userData = null;
-  try {
-    const { getDoc: gd, doc: d } = await import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js');
-    const snap = await gd(d(snsDb, 'users', _user.uid));
-    userData = snap.exists() ? snap.data() : null;
-  } catch (_) {}
-  // Route through adapter — opens old working viewer (live.html#watch=rtdbRoomId)
-  const { watchLive } = await import('./snx-live-adapter.js');
-  await watchLive(_user, userData, ch, liveId);
+
+  // Load CSS and shell module together
+  _ensureTvLiveViewCss();
+  const { openTvLiveView } = await import('./snx-tv-live-view.js');
+
+  // Open the native TV Live View shell — wraps live.html#watch=roomId (exact same roomId)
+  openTvLiveView(ch, roomId, {
+    onClose: () => {
+      // Return to live-now tab (shell already dispatches snx:switchTvTab, but guard here too)
+      if (_activeTab !== 'live-now') _switchTab('live-now');
+    },
+  });
 }
 
 /* ════════════════════════════════════

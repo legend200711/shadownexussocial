@@ -1,0 +1,336 @@
+/* ═══════════════════════════════════════════════════════════════
+   SNX TV LIVE VIEW — Phase 2
+   Shadow Nexus presentation shell around live.html viewer iframe.
+
+   Design: black / deep navy / electric blue / neon green
+   Video is the hero. Chrome is minimal and non-distracting.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Full-screen overlay shell ── */
+#snx-tv-live-view {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Contain the iframe to prevent it controlling the outer document */
+  contain: layout style;
+}
+
+/* ── Top header bar ── */
+.snx-tlv-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 8px;
+  background: rgba(2, 4, 10, 0.95);
+  border-bottom: 1px solid rgba(0, 174, 239, 0.14);
+  flex-shrink: 0;
+  z-index: 10;
+  position: relative;
+}
+
+.snx-tlv-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 12px;
+  background: rgba(0, 174, 239, 0.09);
+  border: 1px solid rgba(0, 174, 239, 0.30);
+  border-radius: 6px;
+  color: #00AEEF;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+  touch-action: manipulation;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+.snx-tlv-back-btn:hover,
+.snx-tlv-back-btn:focus-visible {
+  background: rgba(0, 174, 239, 0.20);
+  border-color: rgba(0, 174, 239, 0.60);
+  outline: none;
+}
+
+.snx-tlv-header-brand {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #8a9bc0;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-tlv-header-logo {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* 🔴 LIVE pill in header */
+.snx-tlv-live-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: rgba(255, 51, 68, 0.12);
+  border: 1px solid rgba(255, 51, 68, 0.45);
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+  color: #ff3344;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.snx-tlv-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff3344;
+  box-shadow: 0 0 6px rgba(255, 51, 68, 0.7);
+  animation: snxTlvDotBlink 1.4s step-start infinite;
+  flex-shrink: 0;
+}
+@keyframes snxTlvDotBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+
+/* ── Body: frame + info ── */
+.snx-tlv-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── iframe wrapper — takes remaining height ── */
+.snx-tlv-frame-wrap {
+  flex: 1;
+  position: relative;
+  background: #000;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.snx-tlv-iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #000;
+  display: block;
+}
+
+/* ── Loading spinner ── */
+.snx-tlv-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  z-index: 5;
+}
+.snx-tlv-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(0, 174, 239, 0.18);
+  border-top-color: #00AEEF;
+  border-radius: 50%;
+  animation: snxTlvSpin 0.8s linear infinite;
+}
+@keyframes snxTlvSpin {
+  to { transform: rotate(360deg); }
+}
+.snx-tlv-loading-text {
+  font-size: 12px;
+  color: #5a80a8;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+
+/* ── LIVE HAS ENDED screen ── */
+.snx-tlv-ended {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(2, 4, 10, 0.97);
+  z-index: 10;
+  text-align: center;
+  padding: 24px;
+  animation: snxTlvEndedFadeIn 0.35s ease;
+}
+.snx-tlv-ended.visible {
+  display: flex;
+}
+@keyframes snxTlvEndedFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.snx-tlv-ended-icon {
+  font-size: 56px;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+.snx-tlv-ended-title {
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: #c8d0e8;
+  text-transform: uppercase;
+}
+.snx-tlv-ended-sub {
+  font-size: 13px;
+  color: #5a80a8;
+  max-width: 260px;
+  line-height: 1.65;
+}
+.snx-tlv-ended-back-btn {
+  margin-top: 8px;
+  padding: 11px 24px;
+  background: rgba(0, 174, 239, 0.12);
+  border: 1.5px solid rgba(0, 174, 239, 0.45);
+  border-radius: 8px;
+  color: #00AEEF;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.18s, border-color 0.18s;
+  touch-action: manipulation;
+  min-height: 44px;
+}
+.snx-tlv-ended-back-btn:hover,
+.snx-tlv-ended-back-btn:focus-visible {
+  background: rgba(0, 174, 239, 0.25);
+  border-color: rgba(0, 174, 239, 0.8);
+  outline: none;
+}
+
+/* ── Creator info bar ── */
+.snx-tlv-info-bar {
+  padding: 10px 14px 12px;
+  background: rgba(5, 9, 26, 0.97);
+  border-top: 1px solid rgba(0, 174, 239, 0.10);
+  flex-shrink: 0;
+}
+.snx-tlv-creator-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.snx-tlv-creator-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(0, 174, 239, 0.10);
+  border: 1.5px solid rgba(255, 51, 68, 0.50);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+  color: #00AEEF;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.snx-tlv-creator-meta {
+  flex: 1;
+  min-width: 0;
+}
+.snx-tlv-creator-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #c8d0e8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-tlv-broadcast-title {
+  font-size: 11px;
+  color: #5a80a8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DESKTOP — video fills left, chat fills right (live.html handles
+   chat internally, so we let the iframe take full height)
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  .snx-tlv-header {
+    padding: 10px 20px 8px;
+  }
+  .snx-tlv-info-bar {
+    padding: 10px 20px 12px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PORTRAIT MOBILE — full-screen stack
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  .snx-tlv-header {
+    padding: 8px 10px 6px;
+  }
+  .snx-tlv-back-btn {
+    padding: 6px 10px;
+    font-size: 10px;
+  }
+  .snx-tlv-header-brand {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+  }
+  .snx-tlv-info-bar {
+    padding: 8px 12px 10px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LANDSCAPE MOBILE — maximize video height, collapse info bar
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-height: 500px) and (orientation: landscape) {
+  .snx-tlv-info-bar {
+    display: none;
+  }
+  .snx-tlv-header {
+    padding: 6px 10px 4px;
+  }
+  .snx-tlv-back-btn {
+    padding: 4px 8px;
+    min-height: 28px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SAFE AREA (iPhone notch / home indicator)
+   ═══════════════════════════════════════════════════════════════ */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .snx-tlv-info-bar {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}
