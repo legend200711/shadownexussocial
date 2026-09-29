@@ -331,8 +331,12 @@ const _S = {
   hostCountTimer:null,
   hostStartedAt: null,
   hostEnded:     false,
-  hostReqUnsub:  null,   // RTDB guestRequests listener unsub (host side)
-  hostShownReqs: null,   // Set of viewer UIDs whose card has been shown
+  hostReqUnsub:    null,  // Firebase listener unsub (host side)
+  hostShownReqs:   null,  // legacy — no longer used
+  hostPendingReqs: null,  // Map uid → {uid,name,avatar,onAccept,onDecline} — active pending requests
+  hostPresUnsub:   null,  // RTDB livePresence watcher unsub (for invite tab)
+  hostViewers:     null,  // Map uid → {uid,name,avatar} — current viewers (for invite)
+  hostSentInvites: null,  // Set of viewer uids already invited this session
   /* viewer */
   viewRoomId:    null,
   viewSessId:    null,
@@ -340,7 +344,8 @@ const _S = {
   viewPresRef:   null,
   viewUnsubs:    [],
   viewConnTimeout: null,   // 30-second connection watchdog
-  viewReqUnsub:  null,   // Firestore boxRequest status listener unsub (viewer side)
+  viewReqUnsub:    null, // Firestore boxRequest status listener unsub (viewer side)
+  viewInviteUnsub: null, // Firestore boxInvite status listener unsub (viewer side)
   /* hub */
   hubRef:        null,
   hubCb:         null,
@@ -823,8 +828,8 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   _S.hostCountTimer = setInterval(() => {
     const timerEl = _el('snxLiveTimer');
     if (!timerEl) return;
-    const el = Math.floor((Date.now() - _S.hostStartedAt) / 1000);
-    const h = Math.floor(el/3600), m = Math.floor((el%3600)/60), s = el%60;
+    const elapsed = Math.floor((Date.now() - _S.hostStartedAt) / 1000);
+    const h = Math.floor(elapsed/3600), m = Math.floor((elapsed%3600)/60), s = elapsed%60;
     timerEl.textContent = h > 0
       ? h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0')
       : String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
@@ -838,34 +843,92 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
     try { set(ref(db, 'liveRooms/' + roomId + '/viewerCount'), count); } catch (_) {}
   });
 
-  const camBtn = _el('snxLiveHostCamBtn');
-  if (camBtn) camBtn.addEventListener('click', () => {
-    _S.hostCamOn = !_S.hostCamOn;
-    if (_S.hostStream) _S.hostStream.getVideoTracks().forEach(t => { t.enabled = _S.hostCamOn; });
-    camBtn.classList.toggle('off', !_S.hostCamOn);
-    camBtn.textContent = _S.hostCamOn ? '📷' : '🚫';
+  // ── Camera toggle (bottom bar button) ──
+  function _syncCamUI() {
+    const btn = _el('snxLiveHostCamBtn');
+    if (btn) { btn.classList.toggle('off', !_S.hostCamOn); btn.textContent = _S.hostCamOn ? '📷' : '🚫'; }
     const co = _el('snxLiveStageCamOff');
     if (co) co.classList.toggle('show', !_S.hostCamOn);
-  });
-
-  const micBtn = _el('snxLiveHostMicBtn');
-  if (micBtn) micBtn.addEventListener('click', () => {
+    // Keep settings toggle in sync
+    const st = _el('snxSettingsCamToggle');
+    if (st) { st.dataset.on = String(_S.hostCamOn); st.textContent = _S.hostCamOn ? 'ON' : 'OFF'; st.classList.toggle('on', _S.hostCamOn); }
+  }
+  function _syncMicUI() {
+    const btn = _el('snxLiveHostMicBtn');
+    if (btn) { btn.classList.toggle('off', !_S.hostMicOn); btn.textContent = _S.hostMicOn ? '🎤' : '🔇'; }
+    const st = _el('snxSettingsMicToggle');
+    if (st) { st.dataset.on = String(_S.hostMicOn); st.textContent = _S.hostMicOn ? 'ON' : 'OFF'; st.classList.toggle('on', _S.hostMicOn); }
+  }
+  function _toggleCam() {
+    _S.hostCamOn = !_S.hostCamOn;
+    if (_S.hostStream) _S.hostStream.getVideoTracks().forEach(t => { t.enabled = _S.hostCamOn; });
+    _syncCamUI();
+  }
+  function _toggleMic() {
     _S.hostMicOn = !_S.hostMicOn;
     if (_S.hostStream) _S.hostStream.getAudioTracks().forEach(t => { t.enabled = _S.hostMicOn; });
-    micBtn.classList.toggle('off', !_S.hostMicOn);
-    micBtn.textContent = _S.hostMicOn ? '🎤' : '🔇';
-  });
+    _syncMicUI();
+  }
 
-  // ── Requests button toggles the request queue panel scroll-into-view ──
+  const camBtn = _el('snxLiveHostCamBtn');
+  if (camBtn) camBtn.addEventListener('click', _toggleCam);
+
+  const micBtn = _el('snxLiveHostMicBtn');
+  if (micBtn) micBtn.addEventListener('click', _toggleMic);
+
+  // ── Requests button toggles the host request manager panel ──
   const reqsBtn = _el('snxLiveReqsBtn');
-  if (reqsBtn) reqsBtn.addEventListener('click', () => {
-    const q = _el('snxLiveReqQueue');
-    if (q) q.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (reqsBtn) reqsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close settings if open
+    const sp = _el('snxLiveSettingsPanel');
+    if (sp) sp.classList.remove('open');
+    _toggleHostReqPanel();
   });
 
+  // ── Global click-outside handler (closes req panel + settings) ──
+  document.addEventListener('click', (e) => {
+    const reqPanel = _el('snxLiveReqPanel');
+    if (reqPanel && reqPanel.classList.contains('open') &&
+        !reqPanel.contains(e.target) && e.target.id !== 'snxLiveReqsBtn') {
+      reqPanel.classList.remove('open');
+    }
+    const settingsPanel = _el('snxLiveSettingsPanel');
+    if (settingsPanel && settingsPanel.classList.contains('open') &&
+        !settingsPanel.contains(e.target) && e.target.id !== 'snxLiveSettingsBtn') {
+      settingsPanel.classList.remove('open');
+    }
+  });
+
+  // ── Settings button ──
+  const settingsBtn = _el('snxLiveSettingsBtn');
+  if (settingsBtn) settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Close req panel if open
+    const rp = _el('snxLiveReqPanel');
+    if (rp) rp.classList.remove('open');
+    _openHostSettingsPanel();
+  });
+  const settingsClose = _el('snxLiveSettingsClose');
+  if (settingsClose) settingsClose.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const sp = _el('snxLiveSettingsPanel');
+    if (sp) sp.classList.remove('open');
+  });
+
+  // Settings panel — cam/mic toggles mirror bottom bar
+  const settingsCamToggle = _el('snxSettingsCamToggle');
+  if (settingsCamToggle) settingsCamToggle.addEventListener('click', _toggleCam);
+  const settingsMicToggle = _el('snxSettingsMicToggle');
+  if (settingsMicToggle) settingsMicToggle.addEventListener('click', _toggleMic);
+
+  // ── End Live button (now a compact ✕ circle) ──
   const endBtn  = _el('snxLiveEndBtn');
   const confirm = _el('snxLiveEndConfirm');
-  if (endBtn && confirm) endBtn.addEventListener('click', () => confirm.classList.add('show'));
+  if (endBtn && confirm) endBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    confirm.classList.add('show');
+  });
   const confirmEnd = _el('snxLiveConfirmEnd');
   if (confirmEnd) confirmEnd.addEventListener('click', () => _endLive(user, roomId, db, presRef, presCb));
   const confirmCancel = _el('snxLiveConfirmCancel');
@@ -874,11 +937,51 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   _initChat(user, roomId, db, true, null);
   _watchLikes(roomId, db);
 
-  // ── Start host-side request listener ──
+  // ── Start host-side request listener + viewer presence list (for Invite tab) ──
   _startHostRequestListener(roomId, user.uid, db);
+  _startHostPresenceWatcher(roomId, db);
 
-  // ── Shadow Chat Bot AI moderation panel (host only) ──
+  // ── Shadow Chat Bot AI moderation panel (host only — uses existing AI system) ──
   _initLiveModerationPanel(roomId);
+}
+
+/** Build and open the settings panel with layout options populated. */
+function _openHostSettingsPanel() {
+  const panel = _el('snxLiveSettingsPanel');
+  if (!panel) return;
+  panel.classList.toggle('open');
+  if (!panel.classList.contains('open')) return;
+
+  // Populate layout options (built dynamically — matches _attachLayoutPicker data)
+  const container = _el('snxSettingsLayoutOpts');
+  if (container && !container.hasChildNodes()) {
+    _LAYOUT_META.forEach(({ key, icon, name }) => {
+      const opt = document.createElement('button');
+      opt.className = 'snx-settings-layout-opt' + (key === _currentLayout ? ' active' : '');
+      opt.dataset.layout = key;
+      opt.innerHTML = '<span>' + icon + '</span> ' + name;
+      opt.addEventListener('click', () => {
+        window.snxBoxManager.setLayout(key);
+        container.querySelectorAll('.snx-settings-layout-opt').forEach(o => {
+          o.classList.toggle('active', o.dataset.layout === key);
+        });
+        // Also sync the floating layout panel if it exists
+        _syncLayoutPanel(key);
+      });
+      container.appendChild(opt);
+    });
+  } else if (container) {
+    // Re-sync active state
+    container.querySelectorAll('.snx-settings-layout-opt').forEach(o => {
+      o.classList.toggle('active', o.dataset.layout === _currentLayout);
+    });
+  }
+
+  // Sync toggle button states
+  const sc = _el('snxSettingsCamToggle');
+  if (sc) { sc.dataset.on = String(_S.hostCamOn); sc.textContent = _S.hostCamOn ? 'ON' : 'OFF'; sc.classList.toggle('on', _S.hostCamOn); }
+  const sm = _el('snxSettingsMicToggle');
+  if (sm) { sm.dataset.on = String(_S.hostMicOn); sm.textContent = _S.hostMicOn ? 'ON' : 'OFF'; sm.classList.toggle('on', _S.hostMicOn); }
 }
 
 // NOTE: _attachBoxesOnStageOpen is defined later in this file (SNS-2026-BOXES-002).
@@ -895,6 +998,8 @@ function _buildHostStageHTML(hostName, title, camOn, micOn) {
   <div class="snx-live-cam-off-overlay${camOn ? '' : ' show'}" id="snxLiveStageCamOff">
     <span class="snx-live-cam-off-icon">📷</span><span>Camera off</span>
   </div>
+
+  <!-- TOP BAR: avatar · LIVE · name/title · viewer count · Settings -->
   <div class="snx-live-top-bar">
     <div class="snx-live-host-avatar" style="${avatarStyle}" title="${_esc(hostName)}">${avatarText}</div>
     <div class="snx-live-badge"><span class="live-dot"></span>LIVE</div>
@@ -907,24 +1012,65 @@ function _buildHostStageHTML(hostName, title, camOn, micOn) {
       <div class="snx-live-like-count-top" id="snxLiveLikeCount">⚡ 0</div>
       <div class="snx-live-timer" id="snxLiveTimer">00:00</div>
     </div>
+    <!-- Settings icon — top-right -->
+    <button class="snx-live-settings-btn" id="snxLiveSettingsBtn" aria-label="Live Settings">⚙</button>
   </div>
+
+  <!-- COMMENTS overlay — lower-left -->
   <div class="snx-live-comments-overlay" id="snxLiveChatMessages"></div>
+
+  <!-- CHAT INPUT -->
   <div class="snx-live-chat-input-row">
     <input class="snx-live-chat-input" id="snxLiveChatInput" type="text" maxlength="200" placeholder="Say something…" autocomplete="off">
     <button class="snx-live-chat-send" id="snxLiveChatSend">➤</button>
   </div>
-  <div class="snx-live-host-controls">
-    <button class="snx-live-ctrl-btn${camOn ? '' : ' off'}" id="snxLiveHostCamBtn">${camOn ? '📷' : '🚫'}</button>
-    <button class="snx-live-ctrl-btn${micOn ? '' : ' off'}" id="snxLiveHostMicBtn">${micOn ? '🎤' : '🔇'}</button>
-    <button class="snx-live-requests-btn" id="snxLiveReqsBtn">🎙 Requests</button>
-    <button class="snx-live-end-btn" id="snxLiveEndBtn">⏹ END LIVE</button>
+
+  <!-- BOTTOM PRIMARY CONTROLS -->
+  <div class="snx-host-bottom-bar">
+    <!-- REQUESTS — main action button, full-width on top row -->
+    <div class="snx-host-bottom-row snx-host-bottom-row--main">
+      <button class="snx-host-requests-btn" id="snxLiveReqsBtn" aria-label="Join Requests">
+        ⚡ REQUESTS
+        <span class="snx-req-badge" id="snxLiveReqBadge" style="display:none"></span>
+      </button>
+    </div>
+    <!-- Secondary row: mic · cam · end -->
+    <div class="snx-host-bottom-row snx-host-bottom-row--secondary">
+      <button class="snx-host-ctrl-btn${micOn ? '' : ' off'}" id="snxLiveHostMicBtn" aria-label="Toggle Microphone">${micOn ? '🎤' : '🔇'}</button>
+      <button class="snx-host-ctrl-btn${camOn ? '' : ' off'}" id="snxLiveHostCamBtn" aria-label="Toggle Camera">${camOn ? '📷' : '🚫'}</button>
+      <button class="snx-host-end-btn" id="snxLiveEndBtn" aria-label="End Live">✕</button>
+    </div>
   </div>
+
+  <!-- END LIVE confirmation -->
   <div class="snx-live-confirm" id="snxLiveEndConfirm">
     <div class="snx-live-confirm-title">End your Live?</div>
     <div class="snx-live-confirm-sub">Your broadcast will end for all viewers.</div>
     <div class="snx-live-confirm-btns">
       <button class="snx-live-confirm-end" id="snxLiveConfirmEnd">⏹ END LIVE</button>
       <button class="snx-live-confirm-cancel" id="snxLiveConfirmCancel">Keep Live</button>
+    </div>
+  </div>
+
+  <!-- SETTINGS PANEL (bottom sheet) -->
+  <div class="snx-live-settings-panel" id="snxLiveSettingsPanel">
+    <div class="snx-settings-header">
+      <span class="snx-settings-title">LIVE SETTINGS</span>
+      <button class="snx-settings-close" id="snxLiveSettingsClose" aria-label="Close">✕</button>
+    </div>
+    <div class="snx-settings-body">
+      <div class="snx-settings-section-label">CAMERA</div>
+      <div class="snx-settings-row">
+        <span class="snx-settings-row-label">Camera</span>
+        <button class="snx-settings-toggle" id="snxSettingsCamToggle" data-on="${camOn}">${camOn ? 'ON' : 'OFF'}</button>
+      </div>
+      <div class="snx-settings-section-label">AUDIO</div>
+      <div class="snx-settings-row">
+        <span class="snx-settings-row-label">Microphone</span>
+        <button class="snx-settings-toggle" id="snxSettingsMicToggle" data-on="${micOn}">${micOn ? 'ON' : 'OFF'}</button>
+      </div>
+      <div class="snx-settings-section-label">LAYOUT</div>
+      <div class="snx-settings-layout-opts" id="snxSettingsLayoutOpts"></div>
     </div>
   </div>
 </div>`;
@@ -941,7 +1087,9 @@ async function _endLive(user, roomId, db, presRef, presCb) {
   if (_S.hostHbTimer)    { clearInterval(_S.hostHbTimer);    _S.hostHbTimer    = null; }
   if (_S.hostCountTimer) { clearInterval(_S.hostCountTimer); _S.hostCountTimer = null; }
   if (_S._hostSigOff)    { _S._hostSigOff(); _S._hostSigOff = null; }
-  if (_S.hostReqUnsub)   { try { _S.hostReqUnsub(); } catch (_) {} _S.hostReqUnsub = null; }
+  if (_S.hostReqUnsub)  { try { _S.hostReqUnsub(); } catch (_) {} _S.hostReqUnsub = null; }
+  if (_S.hostPresUnsub) { try { _S.hostPresUnsub(); } catch (_) {} _S.hostPresUnsub = null; }
+  if (_S.hostSentInvites) _S.hostSentInvites = null;
 
   if (presRef && presCb) try { off(presRef, 'value', presCb); } catch (_) {}
 
@@ -1121,7 +1269,13 @@ async function _openViewerScreen(roomId) {
   const presRef  = ref(db, presPath);
   _S.viewPresRef = presRef;
   try {
-    await set(presRef, { uid: user.uid, joinedAt: Date.now() });
+    const ud = _userData();
+    await set(presRef, {
+      uid:     user.uid,
+      name:    ud.displayName || ud.username || user.displayName || '',
+      avatar:  ud.profileImage || ud.photoURL || '',
+      joinedAt: Date.now(),
+    });
     onDisconnect(presRef).remove();
   } catch (e) {
     _vErr('presence-set', e, presPath, roomId, sessId);
@@ -1380,9 +1534,10 @@ async function _openViewerScreen(roomId) {
   const leaveBtn = _el('snxLiveLeaveBtn');
   if (leaveBtn) leaveBtn.addEventListener('click', () => _leaveViewer(roomId, sessId, db));
 
-  // ── Request to Join button (viewer side, frontend only) ──
-  // Backend hook not available — see report below.
+  // ── Request to Join button (viewer side) ──
   setTimeout(() => _attachRequestBtn(roomId, db), 0);
+  // ── Invite listener (watches boxInvites for this viewer) ──
+  setTimeout(() => _attachViewerInviteListener(roomId, db), 0);
 }
 
 /** Clear the 30-second connection watchdog when connection succeeds or video plays. */
@@ -1444,8 +1599,9 @@ function _cleanupViewer() {
   if (_S.viewPc) { try { _S.viewPc.close(); } catch (_) {} _S.viewPc = null; }
   for (const fn of _S.viewUnsubs) { try { fn(); } catch (_) {} }
   _S.viewUnsubs = [];
-  // Clean up any pending Request-to-Join status listener
+  // Clean up any pending Request-to-Join or Invite status listener
   if (_S.viewReqUnsub) { try { _S.viewReqUnsub(); } catch (_) {} _S.viewReqUnsub = null; }
+  if (_S.viewInviteUnsub) { try { _S.viewInviteUnsub(); } catch (_) {} _S.viewInviteUnsub = null; }
   // Clean up guest connection if viewer was in a guest box
   _guestViewerCleanup();
   _boxState.clear();   // clear box layout state on viewer leave
@@ -1937,14 +2093,197 @@ function _attachBoxesOnStageOpen(hostName, localStream) {
   }, 0);
 }
 
-// ── Inject guest request queue element ──
+// ── Inject host request panel (tabbed: REQUESTS | INVITE) + legacy queue shim ──
 function _attachRequestQueue() {
   const stage = _getStage();
-  if (!stage || stage.querySelector('.snx-live-req-queue')) return;
-  const queue = document.createElement('div');
-  queue.className = 'snx-live-req-queue';
-  queue.id = 'snxLiveReqQueue';
-  stage.appendChild(queue);
+  if (!stage) return;
+
+  // Legacy shim element (kept for guest/viewer side compatibility)
+  if (!stage.querySelector('.snx-live-req-queue')) {
+    const queue = document.createElement('div');
+    queue.className = 'snx-live-req-queue';
+    queue.id = 'snxLiveReqQueue';
+    stage.appendChild(queue);
+  }
+
+  // Host request manager panel (host-only)
+  if (!stage.classList.contains('is-host')) return;
+  if (stage.querySelector('#snxLiveReqPanel')) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'snxLiveReqPanel';
+  panel.className = 'snx-live-req-panel';
+  panel.innerHTML =
+    '<div class="snx-req-panel-header">' +
+      '<div class="snx-req-tabs">' +
+        '<button class="snx-req-tab active" data-tab="requests">REQUESTS</button>' +
+        '<button class="snx-req-tab" data-tab="invite">INVITE</button>' +
+      '</div>' +
+      '<button class="snx-req-panel-close" id="snxLiveReqPanelClose" aria-label="Close">✕</button>' +
+    '</div>' +
+    '<div class="snx-req-panel-list" id="snxLiveReqPanelList"></div>' +
+    '<div class="snx-req-panel-list" id="snxLiveInviteList" style="display:none"></div>';
+
+  panel.querySelector('#snxLiveReqPanelClose').addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.remove('open');
+  });
+
+  // Tab switching
+  panel.querySelectorAll('.snx-req-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.querySelectorAll('.snx-req-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const reqList    = _el('snxLiveReqPanelList');
+      const inviteList = _el('snxLiveInviteList');
+      if (tab.dataset.tab === 'requests') {
+        if (reqList)    reqList.style.display    = '';
+        if (inviteList) inviteList.style.display = 'none';
+        _renderHostReqPanel();
+      } else {
+        if (reqList)    reqList.style.display    = 'none';
+        if (inviteList) inviteList.style.display = '';
+        if (!_S.hostSentInvites) _S.hostSentInvites = new Set();
+        _renderInviteTab();
+      }
+    });
+  });
+
+  stage.appendChild(panel);
+}
+
+// ── Toggle host request manager panel open/closed ──
+function _toggleHostReqPanel() {
+  const panel = _el('snxLiveReqPanel');
+  if (!panel) return;
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    // Always open on REQUESTS tab, render it
+    const reqTab = panel.querySelector('[data-tab="requests"]');
+    if (reqTab) {
+      panel.querySelectorAll('.snx-req-tab').forEach(t => t.classList.remove('active'));
+      reqTab.classList.add('active');
+      const reqList    = _el('snxLiveReqPanelList');
+      const inviteList = _el('snxLiveInviteList');
+      if (reqList)    reqList.style.display    = '';
+      if (inviteList) inviteList.style.display = 'none';
+    }
+    _renderHostReqPanel();
+  }
+}
+
+// ── Re-render the panel list from _S.hostPendingReqs map ──
+function _renderHostReqPanel() {
+  const list = _el('snxLiveReqPanelList');
+  if (!list) return;
+
+  const reqs = _S.hostPendingReqs ? [..._S.hostPendingReqs.values()] : [];
+
+  if (reqs.length === 0) {
+    list.innerHTML = '<div class="snx-req-panel-empty">No one is requesting to join right now.</div>';
+    return;
+  }
+
+  // Determine available slots (connected + accepted/connecting peers)
+  const activePeers   = typeof _guestPeers !== 'undefined' ? _guestPeers.size : 0;
+  const connectedBoxes = [..._boxState.values()].filter(b => b.role === 'guest').length;
+  const occupiedSlots = Math.max(activePeers, connectedBoxes);
+  const stageFull     = occupiedSlots >= _MAX_GUEST_PEERS;
+
+  list.innerHTML = '';
+  reqs.forEach(req => {
+    const row = document.createElement('div');
+    row.className = 'snx-req-panel-row';
+    row.dataset.uid = req.uid;
+
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'snx-req-panel-avatar';
+    if (req.avatar) {
+      avatarEl.style.backgroundImage = 'url(' + _esc(req.avatar) + ')';
+    } else {
+      avatarEl.textContent = (req.name || '?')[0].toUpperCase();
+    }
+
+    const info = document.createElement('div');
+    info.className = 'snx-req-panel-info';
+    info.innerHTML =
+      '<div class="snx-req-panel-name">' + _esc(req.name || 'Guest') + '</div>' +
+      '<div class="snx-req-panel-sub">Requesting to join</div>';
+
+    const actions = document.createElement('div');
+    actions.className = 'snx-req-panel-actions';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'snx-req-panel-accept';
+
+    if (stageFull) {
+      acceptBtn.textContent = 'Stage Full';
+      acceptBtn.disabled = true;
+      acceptBtn.classList.add('full');
+    } else {
+      acceptBtn.textContent = 'Accept';
+      acceptBtn.addEventListener('click', () => {
+        if (typeof req.onAccept === 'function') {
+          _removeHostPendingReq(req.uid);
+          req.onAccept(req.uid);
+        }
+      });
+    }
+
+    const declineBtn = document.createElement('button');
+    declineBtn.className = 'snx-req-panel-decline';
+    declineBtn.textContent = 'Decline';
+    declineBtn.addEventListener('click', () => {
+      if (typeof req.onDecline === 'function') {
+        _removeHostPendingReq(req.uid);
+        req.onDecline(req.uid);
+      }
+    });
+
+    actions.appendChild(acceptBtn);
+    actions.appendChild(declineBtn);
+    row.appendChild(avatarEl);
+    row.appendChild(info);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
+}
+
+// ── Add a pending request to the host's internal map, update badge + panel ──
+function _addHostPendingReq(uid, name, avatar, onAccept, onDecline) {
+  if (!_S.hostPendingReqs) _S.hostPendingReqs = new Map();
+  if (_S.hostPendingReqs.has(uid)) return; // already tracked
+  _S.hostPendingReqs.set(uid, { uid, name, avatar, onAccept, onDecline });
+  _updateReqBadge();
+  // If panel already open, refresh it
+  const panel = _el('snxLiveReqPanel');
+  if (panel && panel.classList.contains('open')) _renderHostReqPanel();
+  // Toast when panel is closed
+  if (!panel || !panel.classList.contains('open')) {
+    if (typeof toastNotification === 'function') toastNotification('⚡ New request to join');
+  }
+}
+
+// ── Remove a pending request from the map, update badge + panel ──
+function _removeHostPendingReq(uid) {
+  if (!_S.hostPendingReqs) return;
+  _S.hostPendingReqs.delete(uid);
+  _updateReqBadge();
+  const panel = _el('snxLiveReqPanel');
+  if (panel && panel.classList.contains('open')) _renderHostReqPanel();
+}
+
+// ── Sync the badge on snxLiveReqsBtn with pending count ──
+function _updateReqBadge() {
+  const btn   = _el('snxLiveReqsBtn');
+  const badge = _el('snxLiveReqBadge');
+  const count = _S.hostPendingReqs ? _S.hostPendingReqs.size : 0;
+  if (badge) {
+    badge.textContent = String(count);
+    badge.style.display = count > 0 ? '' : 'none';
+  }
+  if (btn) btn.classList.toggle('has-reqs', count > 0);
 }
 
 // ── Inject Layout picker button + panel (host only) ──
@@ -2161,17 +2500,96 @@ async function _viewerSendRequest(roomId, db, btn) {
   });
 }
 
+/* ── VIEWER: Watch boxInvites for host-initiated invitations ── */
+function _attachViewerInviteListener(roomId, db) {
+  const user = _user();
+  if (!user || !user.uid || user.isAnonymous) return;
+  const fs = window._snxFirestore;
+  if (!fs || !fs.db || !fs.doc || !fs.onSnapshot || !fs.updateDoc || !fs.deleteDoc) return;
+
+  if (_S.viewInviteUnsub) { try { _S.viewInviteUnsub(); } catch (_) {} _S.viewInviteUnsub = null; }
+
+  const inviteId  = roomId + '_' + user.uid;
+  const inviteRef = fs.doc(fs.db, 'boxInvites', inviteId);
+
+  _S.viewInviteUnsub = fs.onSnapshot(inviteRef, async snap => {
+    if (!snap.exists()) return;
+    const data   = snap.data();
+    const status = data.status;
+    if (status !== 'pending') return; // ignore already-handled invites
+
+    console.log('[Invite] Viewer received invite from host:', data.hostName);
+
+    // Show an in-stage invite prompt
+    _showViewerInvitePrompt(data, async (accepted) => {
+      if (accepted) {
+        console.log('[Invite] Viewer accepted invite — updating Firestore');
+        try { await fs.updateDoc(inviteRef, { status: 'accepted' }); } catch (_) {}
+        // Same working guest-box handoff path used by requests
+        const reqBtn = _el('snxLiveRequestBtn');
+        _guestJoinAsViewer(roomId, db, reqBtn);
+      } else {
+        console.log('[Invite] Viewer declined invite');
+        try { await fs.updateDoc(inviteRef, { status: 'declined' }); } catch (_) {}
+        setTimeout(async () => {
+          try { await fs.deleteDoc(inviteRef); } catch (_) {}
+        }, 3000);
+      }
+      if (_S.viewInviteUnsub) { try { _S.viewInviteUnsub(); } catch (_) {} _S.viewInviteUnsub = null; }
+    });
+  }, err => {
+    console.error('[Invite] Viewer invite snapshot error:', err.code, err.message);
+  });
+}
+
+/** Show a non-blocking invite prompt inside the viewer stage. */
+function _showViewerInvitePrompt(data, onResponse) {
+  const stage = _getStage();
+  if (!stage) { onResponse(false); return; }
+
+  // Remove any existing prompt
+  const existing = stage.querySelector('.snx-invite-prompt');
+  if (existing) existing.remove();
+
+  const prompt = document.createElement('div');
+  prompt.className = 'snx-invite-prompt';
+  prompt.innerHTML =
+    '<div class="snx-invite-prompt-title">⚡ You're Invited!</div>' +
+    '<div class="snx-invite-prompt-sub">' + _esc(data.hostName || 'The host') + ' invited you to join the stage</div>' +
+    '<div class="snx-invite-prompt-btns">' +
+      '<button class="snx-invite-accept" id="snxInviteAcceptBtn">JOIN STAGE</button>' +
+      '<button class="snx-invite-decline" id="snxInviteDeclineBtn">DECLINE</button>' +
+    '</div>';
+
+  stage.appendChild(prompt);
+
+  // Auto-dismiss after 30s
+  const timer = setTimeout(() => {
+    if (prompt.parentNode) { prompt.remove(); onResponse(false); }
+  }, 30_000);
+
+  prompt.querySelector('#snxInviteAcceptBtn').addEventListener('click', () => {
+    clearTimeout(timer); prompt.remove(); onResponse(true);
+  });
+  prompt.querySelector('#snxInviteDeclineBtn').addEventListener('click', () => {
+    clearTimeout(timer); prompt.remove(); onResponse(false);
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════
-   HOST: Request listener — watches for pending viewer requests
+   HOST: Request listener — full pending-list manager
+   Maintains _S.hostPendingReqs Map, badge, and panel.
    ═══════════════════════════════════════════════════════════ */
 function _startHostRequestListener(roomId, hostUid, db) {
   // Stop any previous listener
   if (_S.hostReqUnsub) { try { _S.hostReqUnsub(); } catch (_) {} _S.hostReqUnsub = null; }
-  _S.hostShownReqs = new Set();
+  // Reset pending map
+  _S.hostPendingReqs = new Map();
+  _updateReqBadge();
 
   const fs = window._snxFirestore;
 
-  // ── Primary: Firestore boxRequests listener ──
+  // ── Primary: Firestore boxRequests real-time listener (full snapshot) ──
   if (fs && fs.db && fs.query && fs.collection && fs.where && fs.onSnapshot) {
     const fsQuery = fs.query(
       fs.collection(fs.db, 'boxRequests'),
@@ -2181,58 +2599,57 @@ function _startHostRequestListener(roomId, hostUid, db) {
     );
 
     const fsUnsub = fs.onSnapshot(fsQuery, snap => {
+      // ── Process all changes (added = new request, removed = accepted/declined/cancelled) ──
       snap.docChanges().forEach(change => {
-        if (change.type !== 'added') return;
-        const d = change.doc.data();
+        const d        = change.doc.data();
         const viewerUid = d.viewerId;
+        const reqId    = change.doc.id;
         if (!viewerUid) return;
-        if (_S.hostShownReqs && _S.hostShownReqs.has(viewerUid)) return;
-        if (_S.hostShownReqs) _S.hostShownReqs.add(viewerUid);
+
+        if (change.type === 'removed') {
+          // Request resolved externally (viewer cancelled, timed out, etc.)
+          _removeHostPendingReq(viewerUid);
+          return;
+        }
+
+        if (change.type !== 'added') return;
+        if (_S.hostPendingReqs && _S.hostPendingReqs.has(viewerUid)) return;
 
         console.log('[BoxRequest] Host received request from:', viewerUid, 'name:', d.viewerName);
 
-        const reqId = change.doc.id;
-
-        window.snxBoxManager.showRequestCard(
-          viewerUid,
-          d.viewerName || 'Guest',
-          d.viewerProfileImage || '',
-          /* onAccept */ async (uid) => {
-            console.log('[BoxRequest] Host accepting:', uid);
-            // Update Firestore status → accepted
-            try {
-              await fs.updateDoc(fs.doc(fs.db, 'boxRequests', reqId), { status: 'accepted' });
-              console.log('[BoxRequest] Firestore boxRequest → accepted');
-            } catch (e) {
-              console.error('[BoxRequest] Could not update boxRequest (accepted):', e.code, e.message);
-            }
-            // Update RTDB status → accepted
-            try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'accepted' }); } catch (_) {}
-            if (_S.hostShownReqs) _S.hostShownReqs.delete(uid);
-            // ── GUEST BOX HANDOFF ──
-            console.log('[SNX-HOST-GUEST] accept complete — starting host guest peer for uid:', uid);
-            _hostAcceptGuest(uid, { name: d.viewerName || 'Guest', avatar: d.viewerProfileImage || '' }, roomId, db);
-          },
-          /* onDecline */ async (uid) => {
-            console.log('[BoxRequest] Host declining:', uid);
-            // Update Firestore status → declined
-            try {
-              await fs.updateDoc(fs.doc(fs.db, 'boxRequests', reqId), { status: 'declined' });
-              console.log('[BoxRequest] Firestore boxRequest → declined');
-            } catch (e) {
-              console.error('[BoxRequest] Could not update boxRequest (declined):', e.code, e.message);
-            }
-            // Update RTDB status → declined, then remove after 5s
-            try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'declined' }); } catch (_) {}
-            setTimeout(async () => {
-              try { await remove(ref(db, 'guestRequests/' + roomId + '/' + uid)); } catch (_) {}
-              if (fs.deleteDoc) {
-                try { await fs.deleteDoc(fs.doc(fs.db, 'boxRequests', reqId)); } catch (_) {}
-              }
-            }, 5000);
-            if (_S.hostShownReqs) _S.hostShownReqs.delete(uid);
+        // Build accept/decline callbacks (capture reqId + d in closure)
+        const onAccept = async (uid) => {
+          console.log('[BoxRequest] Host accepting:', uid);
+          try {
+            await fs.updateDoc(fs.doc(fs.db, 'boxRequests', reqId), { status: 'accepted' });
+            console.log('[BoxRequest] Firestore boxRequest → accepted');
+          } catch (e) {
+            console.error('[BoxRequest] Could not update boxRequest (accepted):', e.code, e.message);
           }
-        );
+          try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'accepted' }); } catch (_) {}
+          // ── GUEST BOX HANDOFF (existing working path — unchanged) ──
+          console.log('[SNX-HOST-GUEST] accept complete — starting host guest peer for uid:', uid);
+          _hostAcceptGuest(uid, { name: d.viewerName || 'Guest', avatar: d.viewerProfileImage || '' }, roomId, db);
+        };
+
+        const onDecline = async (uid) => {
+          console.log('[BoxRequest] Host declining:', uid);
+          try {
+            await fs.updateDoc(fs.doc(fs.db, 'boxRequests', reqId), { status: 'declined' });
+            console.log('[BoxRequest] Firestore boxRequest → declined');
+          } catch (e) {
+            console.error('[BoxRequest] Could not update boxRequest (declined):', e.code, e.message);
+          }
+          try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'declined' }); } catch (_) {}
+          setTimeout(async () => {
+            try { await remove(ref(db, 'guestRequests/' + roomId + '/' + uid)); } catch (_) {}
+            if (fs.deleteDoc) {
+              try { await fs.deleteDoc(fs.doc(fs.db, 'boxRequests', reqId)); } catch (_) {}
+            }
+          }, 5000);
+        };
+
+        _addHostPendingReq(viewerUid, d.viewerName || 'Guest', d.viewerProfileImage || '', onAccept, onDecline);
       });
     }, err => {
       console.error('[BoxRequest] Host Firestore listener error:', err.code, err.message);
@@ -2240,42 +2657,42 @@ function _startHostRequestListener(roomId, hostUid, db) {
 
     _S.hostReqUnsub = () => {
       try { fsUnsub(); } catch (_) {}
-      if (_S.hostShownReqs) _S.hostShownReqs.clear();
+      if (_S.hostPendingReqs) { _S.hostPendingReqs.clear(); _updateReqBadge(); }
     };
     console.log('[BoxRequest] Host request listener started (Firestore) — roomId:', roomId);
 
   } else {
-    // ── Fallback: RTDB guestRequests ──
+    // ── Fallback: RTDB guestRequests (full value listener) ──
     console.warn('[BoxRequest] Firestore unavailable — using RTDB fallback for host request listener');
     const rtdbReqRef = ref(db, 'guestRequests/' + roomId);
     const rtdbCb = onValue(rtdbReqRef, snap => {
-      if (!snap.exists()) return;
-      snap.forEach(child => {
-        const req = child.val();
-        if (!req || req.status !== 'pending') return;
-        const viewerUid = req.uid;
-        if (!viewerUid) return;
-        if (_S.hostShownReqs && _S.hostShownReqs.has(viewerUid)) return;
-        if (_S.hostShownReqs) _S.hostShownReqs.add(viewerUid);
+      if (!_S.hostPendingReqs) _S.hostPendingReqs = new Map();
+      const currentUids = new Set();
 
-        console.log('[BoxRequest] Host received RTDB request from:', viewerUid, 'name:', req.name);
-        const reqId = req.requestId || (roomId + '_' + viewerUid);
-        const fs2 = window._snxFirestore;
+      if (snap.exists()) {
+        snap.forEach(child => {
+          const req = child.val();
+          if (!req || req.status !== 'pending') return;
+          const viewerUid = req.uid;
+          if (!viewerUid) return;
+          currentUids.add(viewerUid);
 
-        window.snxBoxManager.showRequestCard(
-          viewerUid,
-          req.name || 'Guest',
-          req.avatar || '',
-          async (uid) => {
+          if (_S.hostPendingReqs.has(viewerUid)) return; // already tracked
+
+          console.log('[BoxRequest] Host received RTDB request from:', viewerUid, 'name:', req.name);
+          const reqId = req.requestId || (roomId + '_' + viewerUid);
+          const fs2 = window._snxFirestore;
+
+          const onAccept = async (uid) => {
             try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'accepted' }); } catch (_) {}
             if (fs2 && fs2.updateDoc && fs2.doc && fs2.db) {
               try { await fs2.updateDoc(fs2.doc(fs2.db, 'boxRequests', reqId), { status: 'accepted' }); } catch (_) {}
             }
-            if (_S.hostShownReqs) _S.hostShownReqs.delete(uid);
             console.log('[SNX-HOST-GUEST] accept (RTDB fallback) — starting host guest peer for uid:', uid);
             _hostAcceptGuest(uid, { name: req.name || 'Guest', avatar: req.avatar || '' }, roomId, db);
-          },
-          async (uid) => {
+          };
+
+          const onDecline = async (uid) => {
             try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'declined' }); } catch (_) {}
             if (fs2 && fs2.updateDoc && fs2.doc && fs2.db) {
               try { await fs2.updateDoc(fs2.doc(fs2.db, 'boxRequests', reqId), { status: 'declined' }); } catch (_) {}
@@ -2283,18 +2700,181 @@ function _startHostRequestListener(roomId, hostUid, db) {
             setTimeout(async () => {
               try { await remove(ref(db, 'guestRequests/' + roomId + '/' + uid)); } catch (_) {}
             }, 5000);
-            if (_S.hostShownReqs) _S.hostShownReqs.delete(uid);
-          }
-        );
-      });
+          };
+
+          _addHostPendingReq(viewerUid, req.name || 'Guest', req.avatar || '', onAccept, onDecline);
+        });
+      }
+
+      // Remove any tracked requests that are no longer pending in RTDB
+      if (_S.hostPendingReqs) {
+        [..._S.hostPendingReqs.keys()].forEach(uid => {
+          if (!currentUids.has(uid)) _removeHostPendingReq(uid);
+        });
+      }
     });
 
     _S.hostReqUnsub = () => {
       try { off(rtdbReqRef, 'value', rtdbCb); } catch (_) {}
-      if (_S.hostShownReqs) _S.hostShownReqs.clear();
+      if (_S.hostPendingReqs) { _S.hostPendingReqs.clear(); _updateReqBadge(); }
     };
     console.log('[BoxRequest] Host request listener started (RTDB fallback) — roomId:', roomId);
   }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HOST: Viewer presence watcher — tracks who is watching for the INVITE tab.
+   Reads livePresence/{roomId} (already written by every viewer).
+   ═══════════════════════════════════════════════════════════ */
+function _startHostPresenceWatcher(roomId, db) {
+  if (_S.hostPresUnsub) { try { _S.hostPresUnsub(); } catch (_) {} _S.hostPresUnsub = null; }
+  _S.hostViewers = new Map(); // uid → { uid, name, avatar }
+
+  const presRef = ref(db, 'livePresence/' + roomId);
+  const cb = onValue(presRef, async (snap) => {
+    if (!_S.hostViewers) _S.hostViewers = new Map();
+    const newMap = new Map();
+
+    if (snap.exists()) {
+      // For each presence entry, pull uid; name/avatar come from userData if available
+      snap.forEach(child => {
+        const val = child.val();
+        if (!val || !val.uid) return;
+        // Exclude host themselves and already-on-stage guests
+        if (val.uid === _user()?.uid) return;
+        if (_boxState.has(val.uid)) return;
+        newMap.set(val.uid, {
+          uid:    val.uid,
+          name:   val.name   || val.displayName || 'Viewer',
+          avatar: val.avatar || val.profileImage || '',
+        });
+      });
+    }
+
+    _S.hostViewers = newMap;
+
+    // If the INVITE tab is open, refresh it
+    const panel = _el('snxLiveReqPanel');
+    if (panel && panel.classList.contains('open')) {
+      const activeTab = panel.querySelector('.snx-req-tab.active');
+      if (activeTab && activeTab.dataset.tab === 'invite') _renderInviteTab();
+    }
+  });
+
+  _S.hostPresUnsub = () => { try { off(presRef, 'value', cb); } catch (_) {} };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HOST: Send an invite to a viewer
+   Writes Firestore boxInvites/{roomId}_{viewerUid} for viewer to pick up.
+   ═══════════════════════════════════════════════════════════ */
+async function _hostInviteViewer(viewerUid, viewerName, viewerAvatar, roomId, db) {
+  const fs = window._snxFirestore;
+  if (!fs || !fs.db || !fs.setDoc || !fs.doc || !fs.serverTimestamp) {
+    if (typeof toastNotification === 'function') toastNotification('⛔ Service unavailable.');
+    return;
+  }
+  const user   = _user();
+  const ud     = _userData();
+  const hostId = user?.uid;
+  if (!hostId) return;
+
+  const inviteId = roomId + '_' + viewerUid;
+  console.log('[Invite] Host inviting viewer:', viewerUid, 'inviteId:', inviteId);
+
+  try {
+    await fs.setDoc(fs.doc(fs.db, 'boxInvites', inviteId), {
+      liveId:        roomId,
+      hostId,
+      hostName:      ud.displayName || ud.username || 'Host',
+      hostAvatar:    ud.profileImage || ud.photoURL || '',
+      viewerId:      viewerUid,
+      viewerName:    viewerName || 'Viewer',
+      viewerAvatar:  viewerAvatar || '',
+      status:        'pending',
+      createdAt:     fs.serverTimestamp(),
+    });
+    console.log('[Invite] boxInvite written');
+    if (typeof toastNotification === 'function') toastNotification('⚡ Invite sent to ' + (viewerName || 'Viewer'));
+    // Remove from invite tab pending list
+    _removeHostPendingInvite(viewerUid);
+  } catch (e) {
+    console.error('[Invite] Failed to write boxInvite:', e.code, e.message);
+    if (typeof toastNotification === 'function') toastNotification('❌ Could not send invite. Try again.');
+  }
+}
+
+// Track pending invites (already sent, awaiting viewer response) so we don't double-send
+function _removeHostPendingInvite(uid) {
+  if (_S.hostSentInvites) _S.hostSentInvites.add(uid);
+  _renderInviteTab();
+}
+
+/* ── Render the INVITE tab contents ── */
+function _renderInviteTab() {
+  const list = _el('snxLiveInviteList');
+  if (!list) return;
+
+  const viewers = _S.hostViewers ? [..._S.hostViewers.values()] : [];
+  const sentInvites = _S.hostSentInvites || new Set();
+
+  // Determine available slots
+  const activePeers   = typeof _guestPeers !== 'undefined' ? _guestPeers.size : 0;
+  const connectedBoxes = [..._boxState.values()].filter(b => b.role === 'guest').length;
+  const occupiedSlots = Math.max(activePeers, connectedBoxes);
+  const stageFull     = occupiedSlots >= _MAX_GUEST_PEERS;
+
+  if (viewers.length === 0) {
+    list.innerHTML = '<div class="snx-req-panel-empty">No viewers are watching right now.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  viewers.forEach(v => {
+    const row = document.createElement('div');
+    row.className = 'snx-req-panel-row';
+    row.dataset.uid = v.uid;
+
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'snx-req-panel-avatar';
+    if (v.avatar) avatarEl.style.backgroundImage = 'url(' + _esc(v.avatar) + ')';
+    else avatarEl.textContent = (v.name || '?')[0].toUpperCase();
+
+    const info = document.createElement('div');
+    info.className = 'snx-req-panel-info';
+    info.innerHTML =
+      '<div class="snx-req-panel-name">' + _esc(v.name || 'Viewer') + '</div>' +
+      '<div class="snx-req-panel-sub">Watching</div>';
+
+    const actions = document.createElement('div');
+    actions.className = 'snx-req-panel-actions';
+
+    const inviteBtn = document.createElement('button');
+    inviteBtn.className = 'snx-req-panel-accept';
+
+    if (stageFull) {
+      inviteBtn.textContent = 'Stage Full';
+      inviteBtn.disabled = true;
+      inviteBtn.classList.add('full');
+    } else if (sentInvites.has(v.uid)) {
+      inviteBtn.textContent = 'Invited ✓';
+      inviteBtn.disabled = true;
+      inviteBtn.classList.add('full');
+    } else {
+      inviteBtn.textContent = 'Invite';
+      inviteBtn.addEventListener('click', () => {
+        const roomId = _S.hostRoomId;
+        const db     = _db();
+        if (roomId && db) _hostInviteViewer(v.uid, v.name, v.avatar, roomId, db);
+      });
+    }
+
+    actions.appendChild(inviteBtn);
+    row.appendChild(avatarEl);
+    row.appendChild(info);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
 }
 
 // ══════════════════════════════════════════════════════════

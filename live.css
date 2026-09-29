@@ -505,7 +505,7 @@
 .snx-live-comments-overlay {
   position: absolute;
   left: 0;
-  bottom: 72px; /* above the input row */
+  bottom: 72px; /* above the input row (viewer) */
   width: min(360px, 62%);
   max-height: 38vh;
   z-index: 22;
@@ -515,6 +515,10 @@
   pointer-events: none;
   overflow: hidden;
   padding: 0 0 4px 12px;
+}
+/* Host: push comments up above the bottom bar */
+.snx-live-stage.is-host .snx-live-comments-overlay {
+  bottom: 200px;
 }
 .snx-live-comments-overlay .snx-live-chat-msg {
   pointer-events: none;
@@ -551,9 +555,11 @@
   align-items: center;
   pointer-events: auto;
 }
-/* Host: shift input left to leave room for controls */
+/* Host: shift input up and compress to leave room for bottom bar */
 .snx-live-stage.is-host .snx-live-chat-input-row {
-  padding-right: 180px;
+  bottom: 96px;
+  background: none;
+  padding-bottom: 0;
 }
 .snx-live-chat-input {
   flex: 1;
@@ -589,53 +595,169 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── Host controls dock — floats bottom-right ── */
-.snx-live-host-controls {
+/* ══════════════════════════════════════════════════════════
+   HOST BOTTOM BAR — 2-row redesign
+   Row 1: REQUESTS (primary, full-width)
+   Row 2: 🎤  📷  ✕ (secondary, compact circle buttons)
+══════════════════════════════════════════════════════════ */
+.snx-host-bottom-bar {
   position: absolute;
-  right: 12px;
-  bottom: 56px;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 24;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 10px 16px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.35) 70%, transparent 100%);
+  pointer-events: auto;
+}
+
+/* Row wrapper */
+.snx-host-bottom-row {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding-bottom: max(0px, env(safe-area-inset-bottom));
+  justify-content: center;
 }
-.snx-live-end-btn {
-  padding: 9px 16px;
-  background: rgba(200,0,0,0.85);
-  border: 1px solid rgba(255,80,80,0.4);
-  border-radius: 20px;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 900;
-  cursor: pointer;
-  letter-spacing: 0.3px;
-  backdrop-filter: blur(6px);
-  -webkit-tap-highlight-color: transparent;
-  white-space: nowrap;
+
+/* ── REQUESTS primary row ── */
+.snx-host-bottom-row--main {
+  margin-bottom: 0;
 }
-/* Requests button — compact, lives in host controls dock */
-.snx-live-requests-btn {
-  padding: 9px 16px;
-  background: rgba(0, 212, 255, 0.14);
-  border: 1px solid rgba(0, 212, 255, 0.45);
-  border-radius: 20px;
+.snx-host-requests-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 28px;
+  background: rgba(0, 212, 255, 0.16);
+  border: 1.5px solid rgba(0, 212, 255, 0.55);
+  border-radius: 28px;
   color: #00d4ff;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 900;
+  letter-spacing: 0.8px;
   cursor: pointer;
-  letter-spacing: 0.3px;
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   -webkit-tap-highlight-color: transparent;
   white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  min-width: 180px;
 }
-.snx-live-requests-btn:hover,
-.snx-live-requests-btn:active {
+.snx-host-requests-btn:hover,
+.snx-host-requests-btn:active {
   background: rgba(0, 212, 255, 0.28);
-  border-color: rgba(0, 212, 255, 0.75);
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow: 0 0 16px rgba(0, 212, 255, 0.25);
 }
+.snx-host-requests-btn.has-reqs {
+  border-color: rgba(0, 212, 255, 0.85);
+  background: rgba(0, 212, 255, 0.22);
+  box-shadow: 0 0 14px rgba(0, 212, 255, 0.2);
+}
+
+/* Pending request badge */
+.snx-req-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: #00d4ff;
+  color: #050C1C;
+  font-size: 11px;
+  font-weight: 900;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+/* ── Secondary row: mic, cam, end ── */
+.snx-host-bottom-row--secondary {
+  gap: 20px;
+}
+.snx-host-ctrl-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1.5px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  flex-shrink: 0;
+}
+.snx-host-ctrl-btn:hover,
+.snx-host-ctrl-btn:active {
+  background: rgba(0, 174, 239, 0.3);
+  border-color: rgba(0, 174, 239, 0.6);
+}
+.snx-host-ctrl-btn.off {
+  border-color: rgba(255, 80, 80, 0.5);
+  background: rgba(180, 0, 0, 0.35);
+}
+.snx-host-end-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(200, 0, 0, 0.85);
+  border: 1.5px solid rgba(255, 80, 80, 0.4);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 900;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
+}
+.snx-host-end-btn:hover,
+.snx-host-end-btn:active {
+  background: rgba(255, 20, 20, 0.95);
+}
+
+/* ── Settings button — top bar, right of viewer count ── */
+.snx-live-settings-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+  backdrop-filter: blur(6px);
+  transition: background 0.15s;
+  margin-left: 4px;
+}
+.snx-live-settings-btn:hover,
+.snx-live-settings-btn:active {
+  background: rgba(0, 174, 239, 0.25);
+  border-color: rgba(0, 174, 239, 0.5);
+}
+
+/* ── Legacy viewer Leave button ── */
 .snx-live-leave-btn {
   padding: 9px 16px;
   background: rgba(0,0,0,0.5);
@@ -649,6 +771,139 @@
   -webkit-tap-highlight-color: transparent;
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════════════════════
+   LIVE SETTINGS PANEL — compact bottom sheet (host only)
+══════════════════════════════════════════════════════════ */
+.snx-live-settings-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 46;
+  background: rgba(5, 10, 24, 0.97);
+  border-top: 1px solid rgba(0, 212, 255, 0.25);
+  border-radius: 18px 18px 0 0;
+  max-height: 65vh;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateY(100%);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.22s ease;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+.snx-live-settings-panel.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.snx-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.12);
+  flex-shrink: 0;
+}
+.snx-settings-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 1.4px;
+  color: #00d4ff;
+  text-transform: uppercase;
+}
+.snx-settings-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.snx-settings-close:hover { background: rgba(255, 255, 255, 0.14); }
+
+.snx-settings-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 12px 18px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+.snx-settings-section-label {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  color: rgba(0, 212, 255, 0.55);
+  text-transform: uppercase;
+  margin: 14px 0 6px;
+}
+.snx-settings-section-label:first-child { margin-top: 4px; }
+
+.snx-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.snx-settings-row-label {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+}
+.snx-settings-toggle {
+  padding: 5px 14px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.4);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+  letter-spacing: 0.5px;
+}
+.snx-settings-toggle.on {
+  background: rgba(0, 174, 239, 0.2);
+  border-color: rgba(0, 174, 239, 0.5);
+  color: #00AEEF;
+}
+
+.snx-settings-layout-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 0 2px;
+}
+.snx-settings-layout-opt {
+  padding: 7px 14px;
+  border-radius: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.55);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.snx-settings-layout-opt.active {
+  background: rgba(0, 174, 239, 0.2);
+  border-color: rgba(0, 174, 239, 0.55);
+  color: #00AEEF;
+}
+.snx-settings-layout-opt:hover { background: rgba(255, 255, 255, 0.1); }
 
 /* ── Tap reaction zone — transparent, covers the video body ── */
 .snx-live-tap-zone {
@@ -1645,7 +1900,7 @@
 .snx-live-stage.is-host .snx-live-request-btn { display: none; }
 
 /* ══════════════════════════════════════════════════════════
-   HOST REQUEST NOTIFICATION QUEUE
+   HOST REQUEST NOTIFICATION QUEUE (legacy shim — kept for viewer side)
 ══════════════════════════════════════════════════════════ */
 
 .snx-live-req-queue {
@@ -1661,6 +1916,7 @@
 }
 .snx-live-req-queue > * { pointer-events: auto; }
 
+/* Legacy card styles — kept for compatibility */
 .snx-req-card {
   display: flex;
   align-items: center;
@@ -1701,6 +1957,286 @@
 .snx-req-decline { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.5); }
 .snx-req-accept:hover  { background: #00AEEF; }
 .snx-req-decline:hover { background: rgba(255,255,255,0.14); }
+
+/* ══════════════════════════════════════════════════════════
+   HOST REQUEST MANAGER PANEL
+   Dark translucent slide-up drawer — host only.
+   z-index 45: above box grid, layout panel, below confirm dialog.
+══════════════════════════════════════════════════════════ */
+
+.snx-live-req-panel {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  width: min(340px, calc(100vw - 24px));
+  max-height: 60vh;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  background: rgba(5, 10, 24, 0.96);
+  border: 1px solid rgba(0, 212, 255, 0.35);
+  border-radius: 18px;
+  overflow: hidden;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 0 32px rgba(0, 60, 120, 0.6), 0 8px 40px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.snx-live-req-panel.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Panel header */
+.snx-req-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(0, 212, 255, 0.15);
+  flex-shrink: 0;
+}
+.snx-req-panel-title {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+  color: #00d4ff;
+  text-transform: uppercase;
+}
+.snx-req-panel-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+.snx-req-panel-close:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* Panel list — scrollable */
+.snx-req-panel-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 8px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Empty state */
+.snx-req-panel-empty {
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  line-height: 1.5;
+}
+
+/* Individual request row */
+.snx-req-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.1s;
+}
+.snx-req-panel-row:last-child { border-bottom: none; }
+.snx-req-panel-row:hover { background: rgba(0, 212, 255, 0.05); }
+
+/* Row avatar */
+.snx-req-panel-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(0, 60, 120, 0.5) center/cover no-repeat;
+  border: 2px solid rgba(0, 212, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 900;
+  color: #00d4ff;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Row info */
+.snx-req-panel-info {
+  flex: 1;
+  min-width: 0;
+}
+.snx-req-panel-name {
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-req-panel-sub {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.38);
+  margin-top: 2px;
+}
+
+/* Row action buttons */
+.snx-req-panel-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.snx-req-panel-accept,
+.snx-req-panel-decline {
+  padding: 5px 13px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  border: none;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  transition: background 0.15s, opacity 0.15s;
+}
+.snx-req-panel-accept {
+  background: rgba(0, 174, 239, 0.85);
+  color: #fff;
+}
+.snx-req-panel-accept:hover { background: #00AEEF; }
+.snx-req-panel-accept.full {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: default;
+  opacity: 0.7;
+}
+.snx-req-panel-decline {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.45);
+}
+.snx-req-panel-decline:hover { background: rgba(255, 255, 255, 0.12); }
+
+/* ── Request panel TABS (REQUESTS | INVITE) ── */
+.snx-req-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 3px;
+}
+.snx-req-tab {
+  padding: 5px 14px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.38);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.snx-req-tab.active {
+  background: rgba(0, 212, 255, 0.18);
+  color: #00d4ff;
+}
+
+/* ── On mobile: panel anchored to bottom, full-width ── */
+@media (max-width: 480px) {
+  .snx-live-req-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 65vh;
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    transform: translateX(0) translateY(24px);
+  }
+  .snx-live-req-panel.open {
+    transform: translateX(0) translateY(0);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   VIEWER INVITE PROMPT — non-blocking, in-stage overlay
+══════════════════════════════════════════════════════════ */
+.snx-invite-prompt {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 48;
+  width: min(300px, calc(100vw - 32px));
+  background: rgba(5, 10, 24, 0.96);
+  border: 1.5px solid rgba(0, 212, 255, 0.5);
+  border-radius: 18px;
+  padding: 20px 20px 16px;
+  text-align: center;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 0 30px rgba(0, 60, 120, 0.6), 0 8px 40px rgba(0, 0, 0, 0.7);
+  animation: snxBoxEnter 0.22s ease-out both;
+}
+.snx-invite-prompt-title {
+  font-size: 16px;
+  font-weight: 900;
+  color: #00d4ff;
+  margin-bottom: 6px;
+}
+.snx-invite-prompt-sub {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.45;
+  margin-bottom: 16px;
+}
+.snx-invite-prompt-btns {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.snx-invite-accept {
+  padding: 10px 22px;
+  border-radius: 22px;
+  background: rgba(0, 174, 239, 0.85);
+  border: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+.snx-invite-accept:hover { background: #00AEEF; }
+.snx-invite-decline {
+  padding: 10px 22px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+.snx-invite-decline:hover { background: rgba(255, 255, 255, 0.13); }
 
 /* ══════════════════════════════════════════════════════════
    HOST LAYOUT PICKER BUTTON & PANEL
@@ -1833,6 +2369,9 @@
 .snx-live-layout-btn       { z-index: 26; }
 .snx-live-req-queue        { z-index: 30; }
 .snx-live-layout-panel     { z-index: 40; }
+.snx-live-req-panel        { z-index: 45; }
+.snx-live-settings-panel   { z-index: 46; }
+.snx-invite-prompt         { z-index: 48; }
 .snx-live-confirm          { z-index: 50; }
 .snx-live-loader           { z-index: 60; }
 
@@ -2024,9 +2563,13 @@
 
 /* Hide all host-only elements on guest stage */
 .snx-live-stage.is-guest .snx-live-host-controls,
+.snx-live-stage.is-guest .snx-host-bottom-bar,
+.snx-live-stage.is-guest .snx-live-settings-panel,
+.snx-live-stage.is-guest .snx-live-settings-btn,
 .snx-live-stage.is-guest .snx-live-layout-btn,
 .snx-live-stage.is-guest .snx-live-layout-panel,
 .snx-live-stage.is-guest .snx-live-req-queue,
+.snx-live-stage.is-guest .snx-live-req-panel,
 .snx-live-stage.is-guest .snx-live-mod-panel,
 .snx-live-stage.is-guest .snx-live-confirm {
   display: none !important;
