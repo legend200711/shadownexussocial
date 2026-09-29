@@ -1,6 +1,6 @@
 /**
  * Shadow Nexus Social — Live System
- * live.js  (SNS-2026-LIVE-008)
+ * live.js  (SNS-2026-LIVE-010)
  *
  * ONE canonical Live engine for Shadow Nexus Social.
  * ES module — loaded as <script type="module"> in index.html.
@@ -28,6 +28,33 @@
  *   - VIEWER: _setViewerStatus extended with NEGOTIATING state
  *   - VIEWER: connTimeout cleared in _cleanupViewer
  *   - ALL: checkpoint labels match spec exactly
+ *
+ * FIXES (SNS-2026-LIVE-010):
+ *   - TIKTOK-STYLE MULTI-GUEST UX:
+ *     snxBoxManager upgraded: addGuest(uid,name,avatarUrl), setGuestState supports
+ *     'live'|'camera-off'|'muted', updateLayout() added to public API.
+ *     Camera-off tiles show avatar + name (no black rectangle).
+ *     Tile labels show LIVE / CONNECTING / CAMERA OFF / MUTED state badge.
+ *     Active speaker: subtle electric-blue glow via .snx-box-speaking.
+ *   - GUEST PARTICIPANT STAGE: after _guestJoinAsViewer connects, the viewer
+ *     screen transitions to a 2-person TikTok-style split stage showing host
+ *     video (top) and own camera preview (bottom) with MIC/CAM/LEAVE controls.
+ *   - HOST CONTROLS: Requests button added to host stage controls bar.
+ *   - live.css: full new TikTok-style stage CSS (#00d4ff borders, #0a0a0f bg,
+ *     avatar placeholders, state badges, smooth layout transitions).
+ *
+ * FIXES (SNS-2026-LIVE-009):
+ *   - FIX CRITICAL: _hostAcceptGuest() now calls pc.addTransceiver('video',{direction:'recvonly'})
+ *     and pc.addTransceiver('audio',{direction:'recvonly'}) BEFORE createOffer().
+ *     Removed deprecated offerToReceiveVideo / offerToReceiveAudio flags.
+ *     This ensures the SDP offer always contains both audio and video m-lines regardless
+ *     of browser implementation of the deprecated flags, fixing CONNECTING never resolving.
+ *   - DIAG-8: SDP offer now verified for audio and video m-lines (YES/NO only, no full SDP).
+ *     If either m-line is absent the connection is aborted and the failure is reported.
+ *   - DIAG-13: Guest answer SDP verified for audio and video m-lines (YES/NO only).
+ *   - DIAG-8 TURN: _fetchTurnConfig() now logs HTTP status, TURN server presence, and
+ *     STUN server presence without exposing credentials, token, username, or secret.
+ *   - index.html: cache-busting query updated to ?v=SNS-2026-LIVE-009.
  *
  * FIXES (SNS-2026-LIVE-008):
  *   - PART 5 (complete): _fetchTurnConfig() added — fetches short-lived TURN
@@ -139,7 +166,10 @@ async function _fetchTurnConfig() {
     } catch (_) {}
 
     if (!idToken) {
-      _log('TURN: no ID token — skipping, STUN-only');
+      _log('TURN ENDPOINT: no ID token — skipping, STUN-only');
+      console.log('[DIAG-TURN] TURN ENDPOINT HTTP STATUS: N/A (no auth token)');
+      console.log('[DIAG-TURN] TURN SERVERS RETURNED: NO');
+      console.log('[DIAG-TURN] STUN SERVERS: YES (built-in)');
       return;
     }
 
@@ -148,8 +178,12 @@ async function _fetchTurnConfig() {
       headers: { 'Authorization': 'Bearer ' + idToken },
     });
 
+    console.log('[DIAG-TURN] TURN ENDPOINT HTTP STATUS: ' + resp.status);
+
     if (!resp.ok) {
       _log('TURN: worker returned ' + resp.status + ' — STUN-only fallback');
+      console.log('[DIAG-TURN] TURN SERVERS RETURNED: NO');
+      console.log('[DIAG-TURN] STUN SERVERS: YES (built-in)');
       return;
     }
 
@@ -157,6 +191,8 @@ async function _fetchTurnConfig() {
     const servers = data.iceServers;
     if (!Array.isArray(servers) || !servers.length) {
       _log('TURN: empty iceServers from worker — STUN-only fallback');
+      console.log('[DIAG-TURN] TURN SERVERS RETURNED: NO (empty iceServers)');
+      console.log('[DIAG-TURN] STUN SERVERS: YES (built-in)');
       return;
     }
 
@@ -166,10 +202,20 @@ async function _fetchTurnConfig() {
       return urls.some(u => typeof u === 'string' && u.startsWith('turn:'));
     });
 
+    const stunFromWorker = servers.filter(s => {
+      const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+      return urls.some(u => typeof u === 'string' && u.startsWith('stun:'));
+    });
+
     window.__snxTurnConfig = turnOnly.length ? turnOnly : servers;
     _log('TURN: configured — ' + (window.__snxTurnConfig.length) + ' TURN server(s) from LiveKit');
+    console.log('[DIAG-TURN] TURN SERVERS RETURNED: ' + (turnOnly.length ? 'YES (' + turnOnly.length + ')' : 'NO'));
+    console.log('[DIAG-TURN] STUN SERVERS: ' + (stunFromWorker.length ? 'YES (from worker, plus built-in)' : 'YES (built-in only)'));
   } catch (e) {
     _log('TURN: fetch failed (' + e.message + ') — STUN-only fallback');
+    console.log('[DIAG-TURN] TURN ENDPOINT HTTP STATUS: ERROR (' + e.message + ')');
+    console.log('[DIAG-TURN] TURN SERVERS RETURNED: NO');
+    console.log('[DIAG-TURN] STUN SERVERS: YES (built-in)');
   }
 }
 
@@ -810,6 +856,13 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
     micBtn.textContent = _S.hostMicOn ? '🎤' : '🔇';
   });
 
+  // ── Requests button toggles the request queue panel scroll-into-view ──
+  const reqsBtn = _el('snxLiveReqsBtn');
+  if (reqsBtn) reqsBtn.addEventListener('click', () => {
+    const q = _el('snxLiveReqQueue');
+    if (q) q.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
   const endBtn  = _el('snxLiveEndBtn');
   const confirm = _el('snxLiveEndConfirm');
   if (endBtn && confirm) endBtn.addEventListener('click', () => confirm.classList.add('show'));
@@ -863,6 +916,7 @@ function _buildHostStageHTML(hostName, title, camOn, micOn) {
   <div class="snx-live-host-controls">
     <button class="snx-live-ctrl-btn${camOn ? '' : ' off'}" id="snxLiveHostCamBtn">${camOn ? '📷' : '🚫'}</button>
     <button class="snx-live-ctrl-btn${micOn ? '' : ' off'}" id="snxLiveHostMicBtn">${micOn ? '🎤' : '🔇'}</button>
+    <button class="snx-live-requests-btn" id="snxLiveReqsBtn">🎙 Requests</button>
     <button class="snx-live-end-btn" id="snxLiveEndBtn">⏹ END LIVE</button>
   </div>
   <div class="snx-live-confirm" id="snxLiveEndConfirm">
@@ -1666,7 +1720,9 @@ function _initHostBox(hostName, localStream) {
   if (!grid) return;
   if (_boxState.has('_host_')) return;
 
-  const box = _buildBox('_host_', hostName || 'Host', 'host');
+  const ud = _userData();
+  const hostAvatar = ud.profileImage || ud.photoURL || '';
+  const box = _buildBox('_host_', hostName || 'Host', 'host', hostAvatar);
   grid.appendChild(box.el);
   _boxState.set('_host_', box);
 
@@ -1680,7 +1736,7 @@ function _initHostBox(hostName, localStream) {
 }
 
 // ── Build a single .snx-box element ──
-function _buildBox(uid, name, role) {
+function _buildBox(uid, name, role, avatarUrl) {
   const el = document.createElement('div');
   el.className = 'snx-box';
   el.dataset.uid   = uid;
@@ -1696,13 +1752,28 @@ function _buildBox(uid, name, role) {
   if (role === 'host') videoEl.muted = true;
   el.appendChild(videoEl);
 
-  // Label  ("★ HOST • NAME" or "NAME")
+  // Label  ("★ HOST • NAME" or "NAME") + state badge
   const label = document.createElement('div');
   label.className = 'snx-box-label';
-  label.textContent = role === 'host'
+  const labelNamePart = role === 'host'
     ? ('★ HOST' + (name ? ' • ' + name : ''))
-    : _esc(name || 'Guest');
+    : (name || 'Guest');
+  label.innerHTML =
+    '<span class="snx-box-label-name">' + _esc(labelNamePart) + '</span>' +
+    '<span class="snx-box-state-badge" data-state="connecting">CONNECTING</span>';
   el.appendChild(label);
+
+  // Cam-off / avatar overlay — shown instead of black rectangle
+  const camOffEl = document.createElement('div');
+  camOffEl.className = 'snx-box-cam-off';
+  const avatarInner = avatarUrl
+    ? '<div class="snx-box-avatar-img" style="background-image:url(' + _esc(avatarUrl) + ')"></div>'
+    : '<div class="snx-box-avatar-initial">' + _esc((name || '?')[0].toUpperCase()) + '</div>';
+  camOffEl.innerHTML =
+    avatarInner +
+    '<span class="snx-box-cam-off-name">' + _esc(name || '') + '</span>' +
+    '<span class="snx-box-cam-off-text">Camera off</span>';
+  el.appendChild(camOffEl);
 
   // Connecting overlay
   const connEl = document.createElement('div');
@@ -1712,12 +1783,6 @@ function _buildBox(uid, name, role) {
     '<div class="snx-box-conn-name">' + _esc(name || '') + '</div>' +
     '<div class="snx-box-conn-text">Connecting…</div>';
   el.appendChild(connEl);
-
-  // Cam-off overlay
-  const camOffEl = document.createElement('div');
-  camOffEl.className = 'snx-box-cam-off';
-  camOffEl.innerHTML = '<span class="snx-box-cam-off-icon">📷</span><span>Camera off</span>';
-  el.appendChild(camOffEl);
 
   // Disconnected overlay
   const discEl = document.createElement('div');
@@ -1762,25 +1827,38 @@ function _buildBox(uid, name, role) {
     el.appendChild(removeBtn);
   }
 
-  return { uid, name, role, state: 'connecting', el, videoEl };
+  return { uid, name, role, avatarUrl: avatarUrl || '', state: 'connecting', el, videoEl };
 }
 
 // ── Set box visual state ──
-// state: 'connecting' | 'ready' | 'disconnected' | 'failed'
+// state: 'connecting' | 'live' | 'ready' | 'disconnected' | 'failed' | 'camera-off' | 'muted'
+// 'live' and 'ready' are aliases — both mean stream active.
 function _setBxState(uid, state) {
   const box = _boxState.get(uid);
   if (!box) return;
-  box.state = state;
-  box.el.dataset.state = state;
-  const conn = box.el.querySelector('.snx-box-connecting');
-  const disc = box.el.querySelector('.snx-box-disconnected');
-  if (conn) conn.classList.toggle('show', state === 'connecting');
+  // Normalise 'ready' → 'live' for display
+  const displayState = state === 'ready' ? 'live' : state;
+  box.state = displayState;
+  box.el.dataset.state = displayState;
+
+  const conn   = box.el.querySelector('.snx-box-connecting');
+  const disc   = box.el.querySelector('.snx-box-disconnected');
+  const camOff = box.el.querySelector('.snx-box-cam-off');
+  const badge  = box.el.querySelector('.snx-box-state-badge');
+
+  // Connecting spinner
+  if (conn) conn.classList.toggle('show', displayState === 'connecting');
+
+  // Cam-off avatar overlay
+  if (camOff) camOff.classList.toggle('show', displayState === 'camera-off');
+
+  // Disconnected/failed overlay
   if (disc) {
-    if (state === 'disconnected') {
+    if (displayState === 'disconnected') {
       disc.classList.add('show');
       const txt = disc.querySelector('.snx-box-disconnected-text');
       if (txt) txt.textContent = 'Connection lost…';
-    } else if (state === 'failed') {
+    } else if (displayState === 'failed') {
       disc.classList.add('show');
       const txt = disc.querySelector('.snx-box-disconnected-text');
       if (txt) txt.textContent = 'CONNECTION FAILED';
@@ -1788,6 +1866,23 @@ function _setBxState(uid, state) {
       disc.classList.remove('show');
     }
   }
+
+  // State badge text + colour class
+  if (badge) {
+    const BADGE_MAP = {
+      'connecting':  'CONNECTING',
+      'live':        'LIVE',
+      'camera-off':  'CAMERA OFF',
+      'muted':       'MUTED',
+      'disconnected':'LOST',
+      'failed':      'FAILED',
+    };
+    badge.textContent  = BADGE_MAP[displayState] || displayState.toUpperCase();
+    badge.dataset.state = displayState;
+  }
+
+  // Active-speaker class (removed here; added via snxBoxManager.setSpeaking)
+  if (displayState !== 'live') box.el.classList.remove('snx-box-speaking');
 }
 
 // ── Recalculate data-boxes + data-layout on stage element ──
@@ -2207,8 +2302,14 @@ function _startHostRequestListener(roomId, hostUid, db) {
 // ══════════════════════════════════════════════════════════
 window.snxBoxManager = {
 
-  /** Add a guest box. stream may be null → connecting state shown. */
-  addGuest(uid, name, stream) {
+  /**
+   * Add a guest box.
+   * @param {string} uid
+   * @param {string} name
+   * @param {string|null} avatarUrl  — avatar image URL (used in camera-off placeholder)
+   * stream attachment is done separately via setGuestStream()
+   */
+  addGuest(uid, name, avatarUrl) {
     if (!uid) return;
     const guests = [..._boxState.values()].filter(b => b.role === 'guest');
     if (guests.length >= MAX_GUEST_BOXES) {
@@ -2219,15 +2320,10 @@ window.snxBoxManager = {
     const grid = _ensureBoxGrid();
     if (!grid) return;
 
-    const box = _buildBox(uid, name || 'Guest', 'guest');
+    const box = _buildBox(uid, name || 'Guest', 'guest', avatarUrl || '');
     grid.appendChild(box.el);
     _boxState.set(uid, box);
 
-    if (stream) {
-      box.videoEl.srcObject = stream;
-      box.videoEl.play().catch(() => {});
-      _setBxState(uid, 'ready');
-    }
     _recalcLayout();
     _log('Box added uid=' + uid + ' total=' + _boxState.size);
   },
@@ -2258,7 +2354,10 @@ window.snxBoxManager = {
     _log('Box stream ready uid=' + uid);
   },
 
-  /** Update guest box visual state: 'connecting' | 'ready' | 'disconnected' | 'failed' */
+  /**
+   * Update guest box visual state.
+   * state: 'connecting' | 'live' | 'ready' | 'disconnected' | 'failed' | 'camera-off' | 'muted'
+   */
   setGuestState(uid, state) {
     _setBxState(uid, state);
     if (state === 'disconnected') {
@@ -2270,6 +2369,24 @@ window.snxBoxManager = {
     // 'failed' state: keep box visible with CONNECTION FAILED text.
     // Host can remove manually via the ✕ button.
     // Do NOT auto-remove so the host can see which connection failed.
+  },
+
+  /**
+   * Recalculate layout — call after any external add/remove to ensure
+   * data-boxes + data-layout are up to date.
+   */
+  updateLayout() {
+    _recalcLayout();
+  },
+
+  /**
+   * Mark a participant as the active speaker (shows electric-blue glow).
+   * Pass uid=null to clear all speaking indicators.
+   */
+  setSpeaking(uid) {
+    _boxState.forEach((box) => {
+      box.el.classList.toggle('snx-box-speaking', uid !== null && box.uid === uid);
+    });
   },
 
   /** Remove a guest box and collapse the layout. */
@@ -2507,8 +2624,17 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
   console.log('[DIAG-7] HOST GUEST PEER CREATED — roomId:', roomId, 'guestUid:', guestUid,
     'signalingState:', pc.signalingState, 'iceConnectionState:', pc.iceConnectionState);
 
+  // ── FIX: Explicitly create recvonly transceivers BEFORE createOffer.
+  //    Do NOT rely on deprecated offerToReceiveVideo / offerToReceiveAudio.
+  //    These transceivers tell the browser to include both audio and video
+  //    m-lines in the offer SDP so the guest's tracks have a negotiated channel.
+  //    The host guest peer is RECEIVE-ONLY — we do not add host camera/mic here.
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
+  console.log('[DIAG-7] HOST recvonly TRANSCEIVERS ADDED — video: PASS, audio: PASS');
+
   // Add to box manager immediately (connecting state — no stream yet)
-  window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', null);
+  window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', req.avatar || '');
   console.log('[SNX-HOST-GUEST] guest added to box (connecting) — roomId:', roomId, 'guestUid:', guestUid);
 
   // ── CONNECTING timeout — 35 s: if still no connected state, mark as failed ──
@@ -2658,13 +2784,32 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
   };
 
   // ── Create offer ──
+  // NOTE: offerToReceiveVideo/offerToReceiveAudio are NOT passed — transceivers
+  //       were already added above with direction:'recvonly'.
   let offer;
   try {
-    offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+    offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    // ── DIAG STEP 8 — HOST OFFER CREATED ──
+
+    // ── DIAG STEP 8 — VERIFY OFFER SDP M-LINES (no full SDP logged) ──
+    const sdpLines  = offer.sdp || '';
+    const hasAudio  = /^m=audio/m.test(sdpLines);
+    const hasVideo  = /^m=video/m.test(sdpLines);
+    console.log('[DIAG-8] HOST GUEST OFFER:');
+    console.log('[DIAG-8] AUDIO M-LINE:', hasAudio ? 'YES' : 'NO');
+    console.log('[DIAG-8] VIDEO M-LINE:', hasVideo ? 'YES' : 'NO');
     console.log('[DIAG-8] HOST OFFER CREATED — roomId:', roomId, 'guestUid:', guestUid,
-      'type:', offer.type, 'sdp lines:', offer.sdp.split('\n').length);
+      'type:', offer.type, 'sdp lines:', sdpLines.split('\n').length);
+
+    if (!hasAudio || !hasVideo) {
+      console.error('[DIAG-8] OFFER M-LINE FAILURE — audio:', hasAudio, 'video:', hasVideo,
+        '— roomId:', roomId, 'guestUid:', guestUid,
+        '— Connection cannot proceed: offer is missing required media section(s).');
+      if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
+      try { pc.close(); } catch (_) {}
+      window.snxBoxManager.removeGuest(guestUid);
+      return;
+    }
   } catch (e) {
     console.error('[DIAG-8] HOST OFFER CREATION FAILED — roomId:', roomId, 'guestUid:', guestUid, e.name, e.message);
     if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
@@ -3054,10 +3199,21 @@ async function _guestJoinAsViewer(roomId, db, btn) {
   try {
     answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    // ── DIAG STEP 13 — GUEST ANSWER CREATED ──
-    // ── DIAG STEP 14 — GUEST setLocalDescription SUCCESS ──
+
+    // ── DIAG STEP 13 — GUEST ANSWER CREATED — verify m-lines (no full SDP logged) ──
+    const answerSdp      = answer.sdp || '';
+    const answerHasAudio = /^m=audio/m.test(answerSdp);
+    const answerHasVideo = /^m=video/m.test(answerSdp);
     console.log('[DIAG-13] GUEST ANSWER CREATED — roomId:', roomId, 'guestUid:', user.uid,
       'type:', answer.type);
+    console.log('[DIAG-13] GUEST ANSWER AUDIO:', answerHasAudio ? 'PASS' : 'FAIL');
+    console.log('[DIAG-13] GUEST ANSWER VIDEO:', answerHasVideo ? 'PASS' : 'FAIL');
+    if (!answerHasAudio || !answerHasVideo) {
+      console.error('[DIAG-13] GUEST ANSWER M-LINE MISSING — audio:', answerHasAudio, 'video:', answerHasVideo,
+        '— roomId:', roomId, 'guestUid:', user.uid,
+        '— This indicates the host offer did not contain required media section(s).');
+    }
+    // ── DIAG STEP 14 — GUEST setLocalDescription SUCCESS ──
     console.log('[DIAG-14] GUEST setLocalDescription SUCCESS — roomId:', roomId, 'guestUid:', user.uid,
       'signalingState:', pc.signalingState);
   } catch (e) {
@@ -3107,6 +3263,29 @@ async function _guestJoinAsViewer(roomId, db, btn) {
 
   console.log('[SNX-GUEST] signaling complete — WebRTC in progress — roomId:', roomId, 'guestUid:', user.uid);
   if (typeof toastNotification === 'function') toastNotification('🎙 Connecting to guest box…');
+
+  // ── Open TikTok-style guest participant stage once WebRTC is negotiated ──
+  // Give the peer connection a moment to reach 'connected' state before rendering.
+  // We watch connection state — stage renders as soon as we're connected.
+  const _openOnConnect = () => {
+    const pc2 = _guestViewerPc;
+    if (!pc2) return;
+    if (pc2.connectionState === 'connected') {
+      _openGuestStage(roomId, db, btn);
+      return;
+    }
+    const onStateChange = () => {
+      if (!_guestViewerPc) return;
+      if (_guestViewerPc.connectionState === 'connected') {
+        _guestViewerPc.removeEventListener('connectionstatechange', onStateChange);
+        _openGuestStage(roomId, db, btn);
+      } else if (_guestViewerPc.connectionState === 'failed' || _guestViewerPc.connectionState === 'closed') {
+        _guestViewerPc.removeEventListener('connectionstatechange', onStateChange);
+      }
+    };
+    pc2.addEventListener('connectionstatechange', onStateChange);
+  };
+  setTimeout(_openOnConnect, 200);
 }
 
 /**
@@ -3164,6 +3343,169 @@ function _guestViewerCleanup() {
   _guestViewerUid    = null;
 
   console.log('[SNX-GUEST] viewer guest cleanup complete');
+}
+
+/* ══════════════════════════════════════════════════════════
+   GUEST PARTICIPANT STAGE  (SNS-2026-LIVE-010)
+
+   When a viewer is accepted as a guest, _openGuestStage() replaces
+   the normal viewer screen with a TikTok-style 2-person split:
+     TOP  tile — host video (from _S.viewPc remote stream — already playing)
+     BOTTOM tile — own camera preview (from _guestViewerStream, muted)
+
+   Same .snx-live-stage CSS as the host stage, but:
+     • class is-guest (not is-host) — hides host-only controls
+     • guest-specific control bar: MIC, CAM, LEAVE
+     • The existing viewer <video> is re-used for the host tile.
+     • Guest preview gets its own <video> (muted).
+════════════════════════════════════════════════════════════ */
+
+/**
+ * Transition the current viewer overlay to a TikTok-style participant stage.
+ * Called once _guestViewerPc reaches 'connected'.
+ *
+ * @param {string}   roomId
+ * @param {object}   db       — Firebase RTDB instance
+ * @param {Element}  btn      — "Request to Join" button (to hide/restore on leave)
+ */
+function _openGuestStage(roomId, db, btn) {
+  // Guard: only proceed if we still have an active guest connection
+  if (!_guestViewerPc || !_guestViewerStream) {
+    console.warn('[SNX-GUEST-STAGE] called but viewerPc or guestStream is gone — aborting');
+    return;
+  }
+
+  const overlay = _el('snxLiveOverlay');
+  if (!overlay) return;
+
+  const ud          = _userData();
+  const guestName   = ud.displayName || ud.username || 'Guest';
+  const guestAvatar = ud.profileImage || ud.photoURL || '';
+  const sessId      = _S.viewSessId || '';
+
+  // Re-use existing room metadata if available
+  const hostVideoEl = _el('snxLiveViewerVideo');  // already playing host stream
+
+  // Build the new stage HTML
+  overlay.innerHTML = _buildGuestStageHTML(guestName, guestAvatar);
+  overlay.classList.add('is-open');
+
+  const stage = overlay.querySelector('.snx-live-stage');
+  if (stage) {
+    // data-boxes="2": host tile (top) + self tile (bottom)
+    stage.dataset.boxes  = '2';
+    stage.dataset.layout = 'auto';
+  }
+
+  // ── Attach host video to the host tile ──
+  const hostTileVideo = _el('snxGuestStageHostVideo');
+  if (hostTileVideo && hostVideoEl && hostVideoEl.srcObject) {
+    hostTileVideo.srcObject = hostVideoEl.srcObject;
+    hostTileVideo.play().catch(() => {});
+  } else if (hostTileVideo && _S.viewPc) {
+    // Fallback: attach via ontrack in case srcObject wasn't set yet
+    const rs = new MediaStream();
+    _S.viewPc.getReceivers().forEach(r => { if (r.track) rs.addTrack(r.track); });
+    if (rs.getTracks().length) {
+      hostTileVideo.srcObject = rs;
+      hostTileVideo.play().catch(() => {});
+    }
+  }
+
+  // ── Attach own camera preview (muted — prevents local echo) ──
+  const selfVideo = _el('snxGuestStageSelfVideo');
+  if (selfVideo && _guestViewerStream) {
+    selfVideo.srcObject = _guestViewerStream;
+    selfVideo.muted     = true;
+    selfVideo.play().catch(() => {});
+  }
+
+  // ── Guest controls: MIC ──
+  let guestMicOn = true;
+  const micBtn = _el('snxGuestMicBtn');
+  if (micBtn) micBtn.addEventListener('click', () => {
+    guestMicOn = !guestMicOn;
+    if (_guestViewerStream) {
+      _guestViewerStream.getAudioTracks().forEach(t => { t.enabled = guestMicOn; });
+    }
+    micBtn.classList.toggle('off', !guestMicOn);
+    micBtn.textContent = guestMicOn ? '🎤' : '🔇';
+  });
+
+  // ── Guest controls: CAM ──
+  let guestCamOn = true;
+  const camBtn = _el('snxGuestCamBtn');
+  if (camBtn) camBtn.addEventListener('click', () => {
+    guestCamOn = !guestCamOn;
+    if (_guestViewerStream) {
+      _guestViewerStream.getVideoTracks().forEach(t => { t.enabled = guestCamOn; });
+    }
+    camBtn.classList.toggle('off', !guestCamOn);
+    camBtn.textContent = guestCamOn ? '📷' : '🚫';
+    const selfCamOff = _el('snxGuestSelfCamOff');
+    if (selfCamOff) selfCamOff.classList.toggle('show', !guestCamOn);
+  });
+
+  // ── Guest controls: LEAVE ──
+  const leaveBtn = _el('snxGuestLeaveBtn');
+  if (leaveBtn) leaveBtn.addEventListener('click', () => {
+    _guestViewerCleanup();
+    if (_S.viewPresRef) { remove(_S.viewPresRef).catch(() => {}); _S.viewPresRef = null; }
+    _closeOverlay();
+    if (btn) {
+      btn.textContent = '🎙 Request to Join';
+      btn.disabled = false;
+      btn.dataset.reqPending = '';
+    }
+  });
+
+  console.log('[SNX-GUEST-STAGE] guest participant stage open — roomId:', roomId);
+}
+
+function _buildGuestStageHTML(guestName, guestAvatar) {
+  const avatarStyle = guestAvatar ? 'background-image:url(' + _esc(guestAvatar) + ')' : '';
+  const avatarText  = guestAvatar ? '' : (guestName ? guestName.charAt(0).toUpperCase() : '?');
+  return `
+<div class="snx-live-stage is-guest" data-boxes="2" data-layout="auto">
+  <div class="snx-live-boxes">
+    <!-- Host tile (top) -->
+    <div class="snx-box snx-box-guest-host" data-role="host" data-state="live">
+      <video id="snxGuestStageHostVideo" playsinline autoplay></video>
+      <div class="snx-box-label">
+        <span class="snx-box-label-name">★ HOST</span>
+        <span class="snx-box-state-badge" data-state="live">LIVE</span>
+      </div>
+    </div>
+    <!-- Self tile (bottom) -->
+    <div class="snx-box snx-box-guest-self" data-role="guest" data-state="live">
+      <video id="snxGuestStageSelfVideo" playsinline autoplay muted></video>
+      <div class="snx-box-cam-off" id="snxGuestSelfCamOff">
+        <div class="snx-box-avatar-img${guestAvatar ? '' : ' snx-box-avatar-initial'}" style="${avatarStyle}">${avatarText}</div>
+        <span class="snx-box-cam-off-name">${_esc(guestName)}</span>
+        <span class="snx-box-cam-off-text">Camera off</span>
+      </div>
+      <div class="snx-box-label">
+        <span class="snx-box-label-name">${_esc(guestName)}</span>
+        <span class="snx-box-state-badge" data-state="live">LIVE</span>
+      </div>
+    </div>
+  </div>
+  <!-- Guest controls -->
+  <div class="snx-live-guest-controls">
+    <button class="snx-live-ctrl-btn" id="snxGuestMicBtn" title="Toggle Mic">🎤</button>
+    <button class="snx-live-ctrl-btn" id="snxGuestCamBtn" title="Toggle Camera">📷</button>
+    <button class="snx-live-guest-leave-btn" id="snxGuestLeaveBtn">✕ LEAVE</button>
+  </div>
+  <!-- Top bar (minimal) -->
+  <div class="snx-live-top-bar">
+    <div class="snx-live-host-avatar" style="${avatarStyle}" title="${_esc(guestName)}">${avatarText}</div>
+    <div class="snx-live-badge"><span class="live-dot"></span>LIVE</div>
+    <div class="snx-live-top-info">
+      <div class="snx-live-host-name">${_esc(guestName)}</div>
+      <div class="snx-live-stage-title">Guest participant</div>
+    </div>
+  </div>
+</div>`;
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -3347,4 +3689,4 @@ function _fmtModAge(tsMs) {
   return Math.floor(diff / 3_600_000) + 'h ago';
 }
 
-_log('live.js loaded — SNS-2026-LIVE-008');
+_log('live.js loaded — SNS-2026-LIVE-010');

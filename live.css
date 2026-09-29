@@ -1,10 +1,14 @@
 /**
  * Shadow Nexus Social — Live System CSS
- * live.css  (SNS-2026-LIVE-002)
+ * live.css  (SNS-2026-LIVE-010)
  *
  * Covers:
  *   - livePage (hub + go-live setup inline)
  *   - Full-screen immersive Live overlay (host stage + viewer stage)
+ *   - TikTok-style multi-guest box layout (SNS-2026-LIVE-010)
+ *     Electric-blue #00d4ff borders, deep-black #0a0a0f bg,
+ *     avatar placeholder tiles, state badges, active-speaker glow,
+ *     guest participant stage (2-split MIC/CAM/LEAVE controls).
  */
 
 /* ═══════════════════════════════════════════════════════════
@@ -349,8 +353,10 @@
   width: 100%;
   height: 100%;
   position: relative;
-  background: #000;
+  background: #0a0a0f;
   overflow: hidden;
+  /* Smooth layout transition when data-boxes changes */
+  transition: background 0.3s ease;
 }
 
 /* The video fill the entire stage */
@@ -608,6 +614,27 @@
   backdrop-filter: blur(6px);
   -webkit-tap-highlight-color: transparent;
   white-space: nowrap;
+}
+/* Requests button — compact, lives in host controls dock */
+.snx-live-requests-btn {
+  padding: 9px 16px;
+  background: rgba(0, 212, 255, 0.14);
+  border: 1px solid rgba(0, 212, 255, 0.45);
+  border-radius: 20px;
+  color: #00d4ff;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+  backdrop-filter: blur(6px);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.snx-live-requests-btn:hover,
+.snx-live-requests-btn:active {
+  background: rgba(0, 212, 255, 0.28);
+  border-color: rgba(0, 212, 255, 0.75);
 }
 .snx-live-leave-btn {
   padding: 9px 16px;
@@ -1256,15 +1283,15 @@
 
 /* Focus glow — electric blue edge on focused box */
 .snx-box-focused {
-  outline: 2px solid rgba(0, 174, 239, 0.75);
+  outline: 2px solid rgba(0, 212, 255, 0.80);
   outline-offset: -2px;
-  box-shadow: 0 0 16px rgba(0, 174, 239, 0.35), inset 0 0 20px rgba(0, 60, 120, 0.3);
+  box-shadow: 0 0 18px rgba(0, 212, 255, 0.40), inset 0 0 22px rgba(0, 80, 150, 0.3);
 }
 
 /* Small FOCUS badge on focused box */
-.snx-box-focused .snx-box-label::after {
+.snx-box-focused .snx-box-label-name::after {
   content: ' • FOCUS';
-  color: rgba(0, 174, 239, 0.8);
+  color: rgba(0, 212, 255, 0.85);
 }
 
 /* Focus tap hint overlay — appears briefly when clicked in focus mode */
@@ -1282,21 +1309,35 @@
 
 .snx-box {
   position: relative;
-  background: #050C1C;
+  background: #0a0a0f;
   overflow: hidden;
-  border: 1px solid rgba(0, 174, 239, 0.18);
+  /* TikTok-style electric blue border */
+  border: 1.5px solid rgba(0, 212, 255, 0.22);
+  border-radius: 2px;
   transition:
-    opacity     0.3s ease,
-    transform   0.3s ease,
+    opacity     0.35s ease,
+    transform   0.35s ease,
     outline     0.2s ease,
-    box-shadow  0.2s ease;
+    box-shadow  0.25s ease,
+    border-color 0.25s ease;
   min-width: 0;
   min-height: 0;
 }
 
 .snx-box[data-role="host"] {
-  border-color: rgba(0, 174, 239, 0.32);
-  box-shadow: inset 0 0 24px rgba(0, 60, 120, 0.4);
+  border-color: rgba(0, 212, 255, 0.40);
+  box-shadow: inset 0 0 28px rgba(0, 40, 80, 0.5);
+}
+
+/* ── Active speaker: electric-blue glow ── */
+.snx-box.snx-box-speaking {
+  border-color: rgba(0, 212, 255, 0.85);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.35), inset 0 0 20px rgba(0, 150, 255, 0.15);
+  animation: snxSpeakingPulse 1.4s ease-in-out infinite;
+}
+@keyframes snxSpeakingPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.35), inset 0 0 20px rgba(0, 150, 255, 0.15); }
+  50%       { box-shadow: 0 0 0 4px rgba(0, 212, 255, 0.55), inset 0 0 28px rgba(0, 180, 255, 0.22); }
 }
 
 /* Video covers box */
@@ -1325,43 +1366,132 @@
   bottom: 5px;
   left: 7px;
   z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+  max-width: calc(100% - 14px);
+}
+
+.snx-box-label-name {
   font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.7px;
-  color: rgba(255, 255, 255, 0.75);
-  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(0, 0, 0, 0.58);
   backdrop-filter: blur(4px);
   padding: 2px 7px;
   border-radius: 6px;
   text-transform: uppercase;
-  pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: calc(100% - 14px);
-}
-.snx-box[data-role="host"] .snx-box-label {
-  color: #00AEEF;
-  background: rgba(0, 20, 50, 0.7);
-  border: 1px solid rgba(0, 174, 239, 0.35);
+  max-width: 110px;
 }
 
-/* ── Cam-off overlay ── */
+.snx-box[data-role="host"] .snx-box-label-name {
+  color: #00d4ff;
+  background: rgba(0, 15, 40, 0.75);
+  border: 1px solid rgba(0, 212, 255, 0.38);
+}
+
+/* State badge — LIVE / CONNECTING / CAMERA OFF / MUTED */
+.snx-box-state-badge {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.snx-box-state-badge[data-state="live"] {
+  background: rgba(0, 212, 255, 0.18);
+  color: #00d4ff;
+  border: 1px solid rgba(0, 212, 255, 0.4);
+}
+.snx-box-state-badge[data-state="connecting"] {
+  background: rgba(255, 180, 0, 0.15);
+  color: rgba(255, 200, 60, 0.9);
+  border: 1px solid rgba(255, 180, 0, 0.3);
+  animation: snxBadgeBlink 1.4s ease-in-out infinite;
+}
+.snx-box-state-badge[data-state="camera-off"] {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.snx-box-state-badge[data-state="muted"] {
+  background: rgba(255, 100, 60, 0.12);
+  color: rgba(255, 140, 80, 0.85);
+  border: 1px solid rgba(255, 100, 60, 0.25);
+}
+.snx-box-state-badge[data-state="disconnected"],
+.snx-box-state-badge[data-state="failed"] {
+  background: rgba(200, 0, 0, 0.18);
+  color: rgba(255, 80, 80, 0.9);
+  border: 1px solid rgba(200, 0, 0, 0.3);
+}
+@keyframes snxBadgeBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* ── Cam-off overlay — shows avatar + name, NO black rectangle ── */
 .snx-box-cam-off {
   display: none;
   position: absolute;
   inset: 0;
-  background: #050C1C;
+  background: #0d1117;  /* dark navy, not black */
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 8px;
-  color: rgba(255, 255, 255, 0.3);
-  font-size: 11px;
+  gap: 10px;
   z-index: 5;
 }
 .snx-box-cam-off.show { display: flex; }
-.snx-box-cam-off-icon { font-size: 26px; }
+
+/* Avatar image (with URL) */
+.snx-box-avatar-img {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(0, 30, 60, 0.7) center/cover no-repeat;
+  border: 2px solid rgba(0, 212, 255, 0.4);
+  flex-shrink: 0;
+}
+/* Avatar initial (no image) */
+.snx-box-avatar-initial {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(0, 30, 80, 0.8);
+  border: 2px solid rgba(0, 212, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 900;
+  color: #00d4ff;
+  flex-shrink: 0;
+}
+.snx-box-cam-off-name {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.75);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+}
+.snx-box-cam-off-text {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
 
 /* ── Connecting state (Nexus ring) ── */
 .snx-box-connecting {
@@ -1883,4 +2013,97 @@
   color: rgba(255, 255, 255, 0.25);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   text-align: center;
+}
+
+/* ══════════════════════════════════════════════════════════
+   GUEST PARTICIPANT STAGE  (SNS-2026-LIVE-010)
+   TikTok-style 2-person split for accepted guests.
+   Host tile top, self-preview tile bottom.
+   is-guest class on .snx-live-stage — hides host-only chrome.
+══════════════════════════════════════════════════════════ */
+
+/* Hide all host-only elements on guest stage */
+.snx-live-stage.is-guest .snx-live-host-controls,
+.snx-live-stage.is-guest .snx-live-layout-btn,
+.snx-live-stage.is-guest .snx-live-layout-panel,
+.snx-live-stage.is-guest .snx-live-req-queue,
+.snx-live-stage.is-guest .snx-live-mod-panel,
+.snx-live-stage.is-guest .snx-live-confirm {
+  display: none !important;
+}
+
+/* Guest participant controls — compact row, bottom center */
+.snx-live-guest-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.75) 0%, transparent 100%);
+}
+
+/* Guest leave button */
+.snx-live-guest-leave-btn {
+  padding: 9px 20px;
+  background: rgba(180, 0, 0, 0.80);
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  border-radius: 20px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+  letter-spacing: 0.4px;
+  backdrop-filter: blur(6px);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.snx-live-guest-leave-btn:hover,
+.snx-live-guest-leave-btn:active {
+  background: rgba(220, 0, 0, 0.92);
+}
+
+/* Guest stage: force 2-tile portrait split regardless of layout classes */
+.snx-live-stage.is-guest .snx-live-boxes {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+  position: absolute;
+  inset: 0;
+  /* bottom padding clears the guest controls */
+  padding-bottom: 56px;
+  gap: 3px;
+  z-index: 2;
+  box-sizing: border-box;
+}
+
+@media (orientation: landscape) {
+  .snx-live-stage.is-guest .snx-live-boxes {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+    padding-bottom: 0;
+    padding-right: max(56px, env(safe-area-inset-right));
+  }
+  .snx-live-guest-controls {
+    flex-direction: column;
+    right: 0;
+    left: auto;
+    bottom: 0;
+    top: 0;
+    width: 56px;
+    gap: 10px;
+    padding: 16px 6px;
+    background: linear-gradient(to left, rgba(0,0,0,0.7) 0%, transparent 100%);
+  }
+}
+
+/* Hide the background solo-video on guest stage */
+.snx-live-stage.is-guest > video {
+  display: none;
 }
