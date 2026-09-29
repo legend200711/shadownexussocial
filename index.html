@@ -12184,11 +12184,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // Stamp the very first JS execution point (APP_BOOT)
   window.__snxT = {};
   window.__snxT.APP_BOOT = _T0;
+  console.log('[SNS-STARTUP] page-start +' + Math.round(_T0) + 'ms');
   window.__snxT.FIREBASE_INIT = null;
   window.__snxT.AUTH_LISTENER_ATTACHED = null;
   window.__snxT.AUTH_FIRST_CALLBACK = null;
   window.__snxT.AUTH_USER_FOUND = null;
   window.__snxT.GLOBAL_USER_SET = null;
+  window.__snxT.ROLE_READY = null;
   window.__snxT.FIRST_PAGE_RENDER = null;
   window.__snxT.APP_INTERACTIVE = null;
   window.__snxT.LOGIN_SUBMITTED = null;
@@ -12215,7 +12217,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     var keys = [
       'APP_BOOT','INTRO_START','FIREBASE_INIT',
       'AUTH_LISTENER_ATTACHED','AUTH_FIRST_CALLBACK','AUTH_USER_FOUND',
-      'GLOBAL_USER_SET','FIRST_PAGE_RENDER','APP_INTERACTIVE',
+      'GLOBAL_USER_SET','ROLE_READY','FIRST_PAGE_RENDER','APP_INTERACTIVE',
       'LOGIN_SUBMITTED','LOGIN_FIREBASE_SUCCESS',
       'LOGOUT_START','LOGOUT_COMPLETE'
     ];
@@ -12245,7 +12247,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
 <script type="module">
   import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, browserLocalPersistence, setPersistence, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
   import { getFirestore, doc, setDoc, getDoc, getDocFromCache, getDocFromServer, updateDoc, deleteDoc, collection, collectionGroup, addDoc, query, orderBy, limit, onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment, serverTimestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
   import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging.js";
   import { getDatabase as _getRtdb, ref as _rtdbRef, set as _rtdbSet, remove as _rtdbRemove, get as _rtdbGet, onDisconnect as _rtdbOnDisconnect, serverTimestamp as _rtdbServerTimestamp, onValue as _rtdbOnValue, off as _rtdbOff } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
@@ -12269,10 +12271,12 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
   // ── Timing: Firebase app + auth instance created ──
   if (window.__snxT) window.__snxT.FIREBASE_INIT = performance.now();
-  console.log('[SNX] FIREBASE_INIT +' + Math.round(window.__snxT ? window.__snxT.FIREBASE_INIT : 0) + 'ms');
+  console.log('[SNS-STARTUP] firebase-app-ready (init) +' + Math.round(window.__snxT ? window.__snxT.FIREBASE_INIT : 0) + 'ms');
 
-  // ── Ensure auth token is always persisted in localStorage (survives tab/app close) ──
-  setPersistence(auth, browserLocalPersistence).catch(() => {});
+  // NOTE: browserLocalPersistence is the default for Firebase Auth on web.
+  // Calling setPersistence() explicitly triggers a redundant IndexedDB write
+  // that can stall auth resolution for 30-60 s on slow devices/browsers.
+  // Removed — Firebase manages persistence automatically.
 
   // ── Firebase Cloud Messaging ──
   let messaging = null;
@@ -12549,7 +12553,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   let totalUnread = 0;
   let feedUnsubscribe      = null;    // timeline feed
   let presenceUnsubscribe  = null;    // all-users presence strip
-  let userDataUnsubscribe  = null;    // current user's own doc (settings + notifs + push)
+  let userDataUnsubscribe  = null;    // current user's own doc (settings + push)
+  let _notifUnsubscribe    = null;    // [SNS-NOTIFY] dedicated notification listener
   let _presenceHeartbeatTimer = null; // clearable heartbeat interval (RTDB presence)
   // Track post IDs already in the DOM to prevent duplicates
   const _renderedPostIds = new Set();
@@ -12625,23 +12630,72 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (form)    form.style.display = '';
   }
 
+  // ── Login button: single-submission guard ──
+  let _loginInFlight = false;
+
   document.getElementById("btnLogin").onclick = async () => {
+      if (_loginInFlight) return;
       const email = document.getElementById("userEmail").value.trim();
       const pass  = document.getElementById("userPass").value;
       if (!email || !pass) { toastNotification("Please enter your email and password."); return; }
+
+      // ── Lock button to prevent double-submission ──
+      _loginInFlight = true;
+      const _btn = document.getElementById("btnLogin");
+      if (_btn) { _btn.disabled = true; }
+
       // ── Timing: login button pressed ──
-      if (window.__snxT) { window.__snxT.LOGIN_SUBMITTED = performance.now(); console.log('[SNX] LOGIN_SUBMITTED +' + Math.round(window.__snxT.LOGIN_SUBMITTED) + 'ms'); }
-      _showLoginLoading('Signing you in…');
+      if (window.__snxT) { window.__snxT.LOGIN_SUBMITTED = performance.now(); console.log('[SNS-STARTUP] login-submit +' + Math.round(window.__snxT.LOGIN_SUBMITTED) + 'ms'); }
+      _showLoginLoading('Signing in…');
       try {
           await signInWithEmailAndPassword(auth, email, pass);
           // ── Timing: Firebase accepted credentials ──
-          if (window.__snxT) { window.__snxT.LOGIN_FIREBASE_SUCCESS = performance.now(); console.log('[SNX] LOGIN_FIREBASE_SUCCESS +' + Math.round(window.__snxT.LOGIN_FIREBASE_SUCCESS) + 'ms (delta from submit: +' + Math.round(window.__snxT.LOGIN_FIREBASE_SUCCESS - (window.__snxT.LOGIN_SUBMITTED||0)) + 'ms)'); }
-          // onAuthStateChanged will navigate to feed — no manual navTo needed here
+          if (window.__snxT) { window.__snxT.LOGIN_FIREBASE_SUCCESS = performance.now(); console.log('[SNS-STARTUP] login-authenticated +' + Math.round(window.__snxT.LOGIN_FIREBASE_SUCCESS) + 'ms (delta from submit: +' + Math.round(window.__snxT.LOGIN_FIREBASE_SUCCESS - (window.__snxT.LOGIN_SUBMITTED||0)) + 'ms)'); }
+          // onAuthStateChanged will navigate to feed — do NOT re-enable button here
+          // (user will be on the feed page; login page is hidden)
       } catch(e) {
+          // ── Re-enable button on failure so user can retry ──
+          _loginInFlight = false;
+          if (_btn) { _btn.disabled = false; }
           _hideLoginLoading();
-          toastNotification("Incorrect email or password. Please try again.");
+          // Surface real Firebase Auth error codes as useful messages
+          let _errMsg = 'Incorrect email or password. Please try again.';
+          const _code = e.code || '';
+          if (_code === 'auth/user-not-found'       || _code === 'auth/wrong-password'      ||
+              _code === 'auth/invalid-credential'    || _code === 'auth/invalid-email')      {
+              _errMsg = 'Incorrect email or password. Please try again.';
+          } else if (_code === 'auth/too-many-requests') {
+              _errMsg = 'Too many login attempts. Please wait a moment, then try again.';
+          } else if (_code === 'auth/user-disabled') {
+              _errMsg = 'This account has been disabled. Contact support.';
+          } else if (_code === 'auth/network-request-failed') {
+              _errMsg = 'Network error — check your connection and try again.';
+          }
+          console.warn('[SNS-STARTUP] login-error code:', _code);
+          toastNotification(_errMsg);
       }
   };
+
+  // ── Reset login guard whenever the login page is shown (logout, nav back) ──
+  // This ensures the button is re-enabled if the user navigates away and returns.
+  const _origShow = window.show || null;
+  const _snxLoginResetGuard = function() {
+      _loginInFlight = false;
+      const _btn = document.getElementById("btnLogin");
+      if (_btn) _btn.disabled = false;
+  };
+  // Observer: re-enable button when loginPage becomes active
+  (function() {
+      const _lpObs = new MutationObserver(function(muts) {
+          muts.forEach(function(m) {
+              if (m.target && m.target.id === 'loginPage' && m.target.classList.contains('active')) {
+                  _snxLoginResetGuard();
+              }
+          });
+      });
+      const _lp = document.getElementById('loginPage');
+      if (_lp) _lpObs.observe(_lp, { attributes: true, attributeFilter: ['class'] });
+  })();
 
   /* ── Live Hub/Go Live — replaced by live.js (SNS-2026-LIVE-001) ── */
   /* The canonical window.goLiveOrWatch is registered by live.js as an ES module.
@@ -13043,7 +13097,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   //    never fires (e.g. Firebase CDN blocked, network error).
   //    This prevents a permanent loading screen on bad networks.
   // ── Timing: canonical auth listener is now attached ──
-  if (window.__snxT) { window.__snxT.AUTH_LISTENER_ATTACHED = performance.now(); console.log('[SNX] AUTH_LISTENER_ATTACHED +' + Math.round(window.__snxT.AUTH_LISTENER_ATTACHED) + 'ms'); }
+  if (window.__snxT) { window.__snxT.AUTH_LISTENER_ATTACHED = performance.now(); console.log('[SNS-STARTUP] auth-ready (listener attached) +' + Math.round(window.__snxT.AUTH_LISTENER_ATTACHED) + 'ms'); }
 
   const _authGateTimeout = setTimeout(() => {
       if (!_authFirstResolved) {
@@ -13068,13 +13122,15 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (window.__snxT) {
           if (!window.__snxT.AUTH_FIRST_CALLBACK) {
               window.__snxT.AUTH_FIRST_CALLBACK = performance.now();
-              console.log('[SNX] AUTH_FIRST_CALLBACK +' + Math.round(window.__snxT.AUTH_FIRST_CALLBACK) + 'ms (user=' + (user ? user.uid.slice(0,8) + '…' : 'null') + ')');
+              const _authMs = Math.round(window.__snxT.AUTH_FIRST_CALLBACK);
+              const _authUser = user ? user.uid.slice(0,8) + '…' : 'null';
+              console.log('[SNS-STARTUP] firebase-app-ready +' + _authMs + 'ms (user=' + _authUser + ')');
           }
       }
       if (user) {
           currentUser = user;
           // ── Timing: user found ──
-          if (window.__snxT && !window.__snxT.AUTH_USER_FOUND) window.__snxT.AUTH_USER_FOUND = performance.now();
+          if (window.__snxT && !window.__snxT.AUTH_USER_FOUND) { window.__snxT.AUTH_USER_FOUND = performance.now(); console.log('[SNS-STARTUP] profile-request-start +' + Math.round(window.__snxT.AUTH_USER_FOUND) + 'ms'); }
 
           // ── Guest state MUST be cleared when a real Firebase user is present ──
           // Guest mode uses sessionStorage only (no Firebase). Clear all traces
@@ -13101,7 +13157,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           window._snxCurrentUser = user;
           if (userData) window._snxUserData = userData;
           // ── Timing: global user set ──
-          if (window.__snxT && !window.__snxT.GLOBAL_USER_SET) { window.__snxT.GLOBAL_USER_SET = performance.now(); console.log('[SNX] GLOBAL_USER_SET +' + Math.round(window.__snxT.GLOBAL_USER_SET) + 'ms'); }
+          if (window.__snxT && !window.__snxT.GLOBAL_USER_SET) { window.__snxT.GLOBAL_USER_SET = performance.now(); console.log('[SNS-STARTUP] profile-ready +' + Math.round(window.__snxT.GLOBAL_USER_SET) + 'ms'); }
 
           // Best-effort presence + status writes — fire-and-forget (no await).
           // A slow or offline network should NEVER delay the feed from appearing.
@@ -13154,9 +13210,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
             if (typeof window._startInboxListener === 'function') window._startInboxListener();
           }, 900);
 
+          // ── [SNS-NOTIFY] Start dedicated notification listener ──
+          _startNotifListener(user.uid);
+
           // ── Single unified live listener for own user doc ──
-          // Handles: settings sync, notification bell + badge, friend badges,
-          // and push-queue processing.  One snapshot instead of two.
+          // Handles: settings sync, friend badges, and push-queue processing.
           const _seenPushIds = new Set();
           // Seed with IDs already in the queue so a page-reload never re-fires
           // notifications that were already shown in a previous session.
@@ -13193,22 +13251,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               sel('privSendFamilyRequests',  ps.sendFamilyRequests || 'everyone');
               sel('privTagging',      ps.tagging      || 'everyone');
               sel('privGameInvites',  ps.gameInvites  || 'everyone');
-
-              // ── Notification bell badge ──
-              const _notifs = userData.notifications || [];
-              renderNotifications(_notifs);
-              const _unread = _notifs.filter(n => !n.read).length;
-              const _nb = document.getElementById('sidebarNotifBadge');
-              if (_nb) {
-                  if (_unread > 0) { _nb.textContent = _unread > 99 ? '99+' : _unread; _nb.classList.add('visible'); }
-                  else _nb.classList.remove('visible');
-              }
-              // Mobile hamburger notification badge
-              const _hbBadge = document.getElementById('menuBtnNotifBadge');
-              if (_hbBadge) {
-                  if (_unread > 0) { _hbBadge.textContent = _unread > 99 ? '99+' : _unread; _hbBadge.style.display = 'inline-flex'; }
-                  else _hbBadge.style.display = 'none';
-              }
 
               // ── Friend request badge ──
               updateFriendBadges((userData.friendRequestsReceived || []).length);
@@ -13309,7 +13351,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               window.__shadowNexusAppReadyCb = null;
           }
           // ── Timing: first page render (feed) ──
-          if (window.__snxT) { window.__snxT.FIRST_PAGE_RENDER = performance.now(); console.log('[SNX] FIRST_PAGE_RENDER (navTo feed) +' + Math.round(window.__snxT.FIRST_PAGE_RENDER) + 'ms'); }
+          if (window.__snxT) { window.__snxT.FIRST_PAGE_RENDER = performance.now(); console.log('[SNS-STARTUP] main-ui-visible +' + Math.round(window.__snxT.FIRST_PAGE_RENDER) + 'ms'); }
           navTo('feed');
 
           // ── Post-nav: role + maintenance checks (deferred so navTo('feed') runs first) ──
@@ -13323,6 +13365,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                       const r2 = snap2.exists() ? (snap2.data().role || 'member') : 'member';
                       window._snxRole = r2;
                   }
+                  if (window.__snxT && !window.__snxT.ROLE_READY) { window.__snxT.ROLE_READY = performance.now(); console.log('[SNS-STARTUP] role-ready +' + Math.round(window.__snxT.ROLE_READY) + 'ms (role=' + (window._snxRole||'member') + ')'); }
                   if (typeof window._showRolePanels === 'function') window._showRolePanels();
                   // Re-apply nav visibility now that window._snxRole is confirmed.
                   if (typeof window._snxReapplyNavVisibility === 'function') window._snxReapplyNavVisibility();
@@ -13363,7 +13406,12 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // Check if user has earned the OG badge (first 100 users, 50+ days old account)
           checkOGBadgeEligibility(user.uid);
           // ── Timing: app is now interactive (all critical init complete) ──
-          if (window.__snxT) { window.__snxT.APP_INTERACTIVE = performance.now(); console.log('[SNX] APP_INTERACTIVE +' + Math.round(window.__snxT.APP_INTERACTIVE) + 'ms'); console.log('[SNX] ⚡ Login→Interactive delta: ' + Math.round(window.__snxT.APP_INTERACTIVE - (window.__snxT.LOGIN_FIREBASE_SUCCESS || window.__snxT.AUTH_FIRST_CALLBACK || 0)) + 'ms'); }
+          if (window.__snxT) {
+              window.__snxT.APP_INTERACTIVE = performance.now();
+              console.log('[SNS-STARTUP] background-services-started +' + Math.round(window.__snxT.APP_INTERACTIVE) + 'ms');
+              console.log('[SNS-STARTUP] ⚡ auth-success→main-ui: +' + Math.round(window.__snxT.FIRST_PAGE_RENDER - (window.__snxT.LOGIN_FIREBASE_SUCCESS || window.__snxT.AUTH_FIRST_CALLBACK || 0)) + 'ms');
+              console.log('[SNS-STARTUP] ⚡ login-submit→auth-success: +' + Math.round((window.__snxT.LOGIN_FIREBASE_SUCCESS||0) - (window.__snxT.LOGIN_SUBMITTED||0)) + 'ms');
+          }
           // Start push notifications (requests permission if not yet granted)
           window._snxInitPush = initPushNotifications;
           setTimeout(initPushNotifications, 2500);
@@ -13402,8 +13450,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // ── Tear down EVERY real-time listener so nothing fires against a null user ──
           if (feedUnsubscribe)     { feedUnsubscribe();     feedUnsubscribe     = null; }
           if (presenceUnsubscribe) { presenceUnsubscribe(); presenceUnsubscribe = null; }
-          // notifUnsubscribe removed — notifications are now handled inside userDataUnsubscribe
           if (userDataUnsubscribe) { userDataUnsubscribe(); userDataUnsubscribe = null; }
+          // [SNS-NOTIFY] Tear down notification listener — clear badges + list
+          if (_notifUnsubscribe) {
+              _notifUnsubscribe(); _notifUnsubscribe = null;
+              console.log('[SNS-NOTIFY] listener-stop (logout)');
+          }
+          window._lastNotifList = [];
+          _snxRefreshNotifBadges([]);
           // Clear presence heartbeat so it doesn't fire after logout
           if (_presenceHeartbeatTimer) { clearInterval(_presenceHeartbeatTimer); _presenceHeartbeatTimer = null; }
           // Tear down profile snapshot so it doesn't fire against null currentUser
@@ -14748,20 +14802,48 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       }
   };
 
-  /* ── Helper: push a notification to a user's document + FCM push ── */
+  /* ── [SNS-NOTIFY] Canonical notification helper ──────────────────────────
+     All in-app notifications go through this single function.
+     Writes to: notifications/{recipientUid}/items/{docId}
+     This is a standalone subcollection — never touches the old embedded array.
+  ─────────────────────────────────────────────────────────────────────────── */
   async function pushNotification(targetUid, notif) {
       if (!targetUid || targetUid === currentUser.uid) return;
-      // 1. Save to Firestore (in-app bell)
+      // 1. Write to canonical subcollection — one doc per notification
       try {
-          await updateDoc(doc(db, "users", targetUid), {
-              notifications: arrayUnion({
-                  id: Date.now() + Math.random().toString(36).slice(2),
-                  ...notif,
-                  ts: Date.now(),
-                  read: false
-              })
-          });
-      } catch(e) { /* best-effort */ }
+          const _notifDoc = {
+              recipientUid: targetUid,
+              actorUid:     notif.fromUid  || currentUser.uid,
+              type:         notif.type     || 'system',
+              fromName:     notif.fromName  || '',
+              fromAvatar:   notif.fromAvatar || '',
+              read:         false,
+              createdAt:    serverTimestamp(),
+              // type-specific payload fields
+              postId:       notif.postId       || null,
+              commentText:  notif.commentText  || null,
+              preview:      notif.preview      || null,
+              roomId:       notif.roomId       || null,
+              roomTitle:    notif.roomTitle    || null,
+              body:         notif.body         || null,
+              message:      notif.message      || null,
+              channelName:  notif.channelName  || null,
+              liveId:       notif.liveId       || null,
+              deepLink:     notif.deepLink     || null,
+              replayId:     notif.replayId     || null,
+              replayTitle:  notif.replayTitle  || null,
+              game:         notif.game         || null,
+              gameId:       notif.gameId       || null,
+              // Keep fromUid alias for renderer compat
+              fromUid:      notif.fromUid      || currentUser.uid,
+          };
+          // Remove null fields to keep docs lean
+          Object.keys(_notifDoc).forEach(k => { if (_notifDoc[k] === null) delete _notifDoc[k]; });
+          await addDoc(collection(db, 'notifications', targetUid, 'items'), _notifDoc);
+          console.log('[SNS-NOTIFY] notification-created', notif.type, '→', targetUid);
+      } catch(e) {
+          console.error('[SNS-NOTIFY][ERROR] notification-created', { op:'pushNotification', code:e.code, msg:e.message });
+      }
 
       // 2. Fire FCM push — completely non-blocking, never throws
       const pushTitles = {
@@ -15389,10 +15471,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (theirSnap.data()?.privacySettings?.sendRequests==='nobody') { toastNotification("This user isn't accepting requests."); return; }
       await updateDoc(doc(db,"users",currentUser.uid), { friendRequestsSent: arrayUnion(targetUid) });
       await updateDoc(doc(db,"users",targetUid), {
-          friendRequestsReceived: arrayUnion(currentUser.uid),
-          notifications: arrayUnion({ id:Date.now()+Math.random().toString(36), type:'friendRequest', fromUid:currentUser.uid, fromName:userData.displayName, fromAvatar:userData.avatar||'', ts:Date.now(), read:false })
+          friendRequestsReceived: arrayUnion(currentUser.uid)
       });
-      // Push notification so the recipient gets an OS alert
+      // Canonical in-app notification (subcollection)
+      pushNotification(targetUid, { type:'friendRequest', fromUid:currentUser.uid, fromName:userData.displayName, fromAvatar:userData.avatar||'' }).catch(()=>{});
+      // FCM push notification so the recipient gets an OS alert
       sendPushToUser(targetUid, {
           title: '🦋 Friend Request',
           body:  `${userData.displayName} sent you a friend request`,
@@ -15408,14 +15491,21 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       const md = myS.data(), td = thS.data();
       await updateDoc(doc(db,"users",currentUser.uid), {
           friends: arrayUnion(fromUid),
-          friendRequestsReceived: (md.friendRequestsReceived||[]).filter(x=>x!==fromUid),
-          notifications: arrayUnion({ id:Date.now()+Math.random().toString(36), type:'friendAccepted', fromUid, fromName:td.displayName, fromAvatar:td.avatar||'', ts:Date.now(), read:false })
+          friendRequestsReceived: (md.friendRequestsReceived||[]).filter(x=>x!==fromUid)
       });
       await updateDoc(doc(db,"users",fromUid), {
           friends: arrayUnion(currentUser.uid),
-          friendRequestsSent: (td.friendRequestsSent||[]).filter(x=>x!==currentUser.uid),
-          notifications: arrayUnion({ id:Date.now()+Math.random().toString(36), type:'friendAccepted', fromUid:currentUser.uid, fromName:userData.displayName, fromAvatar:userData.avatar||'', ts:Date.now(), read:false })
+          friendRequestsSent: (td.friendRequestsSent||[]).filter(x=>x!==currentUser.uid)
       });
+      // Canonical in-app notifications (subcollection) for both parties
+      // Self-notify (accepter sees "accepted" in their bell); pushNotification blocks self-notif,
+      // so we use addDoc directly for the current user's own notification.
+      addDoc(collection(db, 'notifications', currentUser.uid, 'items'), {
+          recipientUid: currentUser.uid, actorUid: fromUid, type:'friendAccepted',
+          fromUid, fromName: td.displayName, fromAvatar: td.avatar||'',
+          read: false, createdAt: serverTimestamp()
+      }).catch(()=>{});
+      pushNotification(fromUid, { type:'friendAccepted', fromUid:currentUser.uid, fromName:userData.displayName, fromAvatar:userData.avatar||'' }).catch(()=>{});
       // Push notification to the person whose request was accepted
       sendPushToUser(fromUid, {
           title: '✅ Friend Request Accepted',
@@ -15500,13 +15590,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           familyInvitesReceived: arrayUnion({
               fromUid: currentUser.uid, fromName: md.displayName||md.username||'Someone',
               fromAvatar: md.avatar||'', message: optionalMsg||'', ts: Date.now()
-          }),
-          notifications: arrayUnion({
-              id: Date.now()+Math.random().toString(36), type:'familyInvite',
-              fromUid: currentUser.uid, fromName: md.displayName||md.username||'Someone',
-              fromAvatar: md.avatar||'', message: optionalMsg||'', ts: Date.now(), read: false
           })
       });
+      // Canonical in-app notification (subcollection)
+      pushNotification(targetUid, { type:'familyInvite', fromUid:currentUser.uid, fromName:md.displayName||md.username||'Someone', fromAvatar:md.avatar||'', message:optionalMsg||'' }).catch(()=>{});
       sendPushToUser(targetUid, {
           title: '❤️ Family Request',
           body:  `${md.displayName||'Someone'} sent you a Family request`,
@@ -15530,22 +15617,19 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       const theirName = td.displayName||td.username||'Someone';
       await updateDoc(doc(db,"users",currentUser.uid), {
           family: arrayUnion(fromUid),
-          familyInvitesReceived: (md.familyInvitesReceived||[]).filter(x=>x.fromUid!==fromUid),
-          notifications: arrayUnion({
-              id: Date.now()+Math.random().toString(36), type:'familyAccepted',
-              fromUid, fromName: theirName, fromAvatar:td.avatar||'',
-              ts: Date.now(), read: false
-          })
+          familyInvitesReceived: (md.familyInvitesReceived||[]).filter(x=>x.fromUid!==fromUid)
       });
       await updateDoc(doc(db,"users",fromUid), {
           family: arrayUnion(currentUser.uid),
-          familyInvitesSent: (td.familyInvitesSent||[]).filter(x=>x!==currentUser.uid),
-          notifications: arrayUnion({
-              id: Date.now()+Math.random().toString(36), type:'familyAccepted',
-              fromUid: currentUser.uid, fromName: myName,
-              fromAvatar: md.avatar||'', ts: Date.now(), read: false
-          })
+          familyInvitesSent: (td.familyInvitesSent||[]).filter(x=>x!==currentUser.uid)
       });
+      // Canonical in-app notifications (subcollection)
+      addDoc(collection(db, 'notifications', currentUser.uid, 'items'), {
+          recipientUid: currentUser.uid, actorUid: fromUid, type:'familyAccepted',
+          fromUid, fromName: theirName, fromAvatar: td.avatar||'',
+          read: false, createdAt: serverTimestamp()
+      }).catch(()=>{});
+      pushNotification(fromUid, { type:'familyAccepted', fromUid:currentUser.uid, fromName:myName, fromAvatar:md.avatar||'' }).catch(()=>{});
       sendPushToUser(fromUid, {
           title: '❤️ Family Request Accepted',
           body:  `You and @${md.username||myName} are now Family on Shadow Nexus Social`,
@@ -15566,14 +15650,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           familyInvitesReceived: (md.familyInvitesReceived||[]).filter(x=>x.fromUid!==fromUid)
       });
       await updateDoc(doc(db,"users",fromUid), {
-          familyInvitesSent: (thS.data().familyInvitesSent||[]).filter(x=>x!==currentUser.uid),
-          // optional decline notification to sender
-          notifications: arrayUnion({
-              id: Date.now()+Math.random().toString(36), type:'familyDeclined',
-              fromUid: currentUser.uid, fromName: md.displayName||md.username||'Someone',
-              fromAvatar: md.avatar||'', ts: Date.now(), read: false
-          })
+          familyInvitesSent: (thS.data().familyInvitesSent||[]).filter(x=>x!==currentUser.uid)
       });
+      // Canonical in-app notification (subcollection)
+      pushNotification(fromUid, { type:'familyDeclined', fromUid:currentUser.uid, fromName:md.displayName||md.username||'Someone', fromAvatar:md.avatar||'' }).catch(()=>{});
       toastNotification("Family request declined."); renderFriendsPage();
   };
 
@@ -15722,10 +15802,71 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   }
 
   /* ═══════════════════════════════════════════════════════════
-     NOTIFICATIONS
-     Rendering + mark-read helpers.  Real-time badge updates and
-     push-queue processing are handled inside userDataUnsubscribe.
+     [SNS-NOTIFY] NOTIFICATIONS
+     Rendering + mark-read helpers.
+     Real-time listener: _startNotifListener() / _notifUnsubscribe.
+     Firebase path: notifications/{uid}/items/{docId}
      ═══════════════════════════════════════════════════════════ */
+
+  /* ── [SNS-NOTIFY] Dedicated real-time notification listener ──────────────
+     Called once per authenticated session.
+     Subscribes to notifications/{uid}/items ordered by createdAt desc (limit 50).
+     Drives renderNotifications() and all badge counts in real time.
+  ─────────────────────────────────────────────────────────────────────────── */
+  function _startNotifListener(uid) {
+      if (!uid) return;
+      // Tear down any previous listener first (re-login guard)
+      if (_notifUnsubscribe) { _notifUnsubscribe(); _notifUnsubscribe = null; }
+      console.log('[SNS-NOTIFY] listener-start uid:', uid);
+      try {
+          const _nq = query(
+              collection(db, 'notifications', uid, 'items'),
+              orderBy('createdAt', 'desc'),
+              limit(50)
+          );
+          _notifUnsubscribe = onSnapshot(_nq, (snap) => {
+              console.log('[SNS-NOTIFY] snapshot docs:', snap.size);
+              // Map Firestore docs → renderer-compatible notification objects
+              const list = snap.docs.map(d => {
+                  const data = d.data();
+                  return {
+                      // Stable ID from Firestore doc
+                      id:          d.id,
+                      // Renderer fields (keep exact names renderNotifications() expects)
+                      type:        data.type        || 'system',
+                      fromUid:     data.fromUid     || data.actorUid || '',
+                      fromName:    data.fromName    || '',
+                      fromAvatar:  data.fromAvatar  || '',
+                      read:        data.read        || false,
+                      // Timestamp: prefer Firestore serverTimestamp, fall back to local ts
+                      ts:          data.createdAt?.toMillis ? data.createdAt.toMillis() : (data.ts || Date.now()),
+                      // Type-specific fields
+                      postId:      data.postId      || '',
+                      commentText: data.commentText || '',
+                      preview:     data.preview     || '',
+                      roomId:      data.roomId      || '',
+                      roomTitle:   data.roomTitle   || '',
+                      body:        data.body        || data.text || '',
+                      message:     data.message     || '',
+                      channelName: data.channelName || '',
+                      liveId:      data.liveId      || '',
+                      deepLink:    data.deepLink    || '',
+                      replayId:    data.replayId    || '',
+                      replayTitle: data.replayTitle || '',
+                      game:        data.game        || '',
+                      gameId:      data.gameId      || '',
+                  };
+              });
+              // Newest-first order already ensured by orderBy desc; pass directly
+              renderNotifications(list);
+              _snxRefreshNotifBadges(list);
+          }, (err) => {
+              console.error('[SNS-NOTIFY][ERROR] snapshot', { op:'onSnapshot', code:err.code, msg:err.message });
+          });
+      } catch(e) {
+          console.error('[SNS-NOTIFY][ERROR] listener-start', { op:'_startNotifListener', code:e.code, msg:e.message });
+      }
+  }
 
 
   /* Current active filter for the notifications tab */
@@ -15957,62 +16098,45 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       });
   }
 
-  /* ── Notification helpers — always use stable ID, never array index ── */
+  /* ── [SNS-NOTIFY] Notification helpers ─────────────────────────────────────
+     All operations target: notifications/{uid}/items/{docId}
+  ─────────────────────────────────────────────────────────────────────────── */
 
-  /* Mark a notification read by its stable ID */
+  /* Mark one notification read by its Firestore doc ID */
   window.markNotifById = async function(nid) {
       if (!nid || !currentUser) return;
-      const snap = await getDoc(doc(db,"users",currentUser.uid));
-      const notifs = snap.data().notifications||[];
-      let changed = false;
-      const updated = notifs.map(n => {
-          if (n.id === nid && !n.read) { changed = true; return {...n, read:true}; }
-          return n;
-      });
-      if (changed) await updateDoc(doc(db,"users",currentUser.uid),{notifications:updated});
-  };
-
-  /* Legacy index-based helper kept for any remaining internal callers */
-  window.markNotifRead = async function(idx) {
-      const snap = await getDoc(doc(db,"users",currentUser.uid));
-      const notifs = snap.data().notifications||[];
-      if(notifs[idx] && !notifs[idx].read){
-          notifs[idx].read=true;
-          await updateDoc(doc(db,"users",currentUser.uid),{notifications:notifs});
+      try {
+          await updateDoc(doc(db, 'notifications', currentUser.uid, 'items', nid), { read: true });
+          console.log('[SNS-NOTIFY] marked-read', nid);
+      } catch(e) {
+          console.error('[SNS-NOTIFY][ERROR] marked-read', { op:'markNotifById', code:e.code, msg:e.message });
       }
   };
 
-  /* Delete a single notification by its stable Firestore ID.
-     Immediately removes the item from the rendered list and updates
-     all badge counts — no page refresh required. */
-  window.deleteNotifById = async function(nid) {
-      if (!nid || !currentUser) return;
-      const snap = await getDoc(doc(db,"users",currentUser.uid));
-      const notifs = snap.data().notifications||[];
-      const updated = notifs.filter(n => n.id !== nid);
-      if (updated.length === notifs.length) return; // not found — nothing to do
-      await updateDoc(doc(db,"users",currentUser.uid),{notifications:updated});
-      // Immediately update UI — no refresh required
-      window._lastNotifList = updated;
-      renderNotifications(updated);
-      _snxRefreshNotifBadges(updated);
+  /* Legacy alias — index-based callers now treated as no-op for safety.
+     The subcollection listener will auto-update the UI on any server change. */
+  window.markNotifRead = async function(idx) {
+      // No-op: index-based reads are not valid for subcollection docs.
+      // markNotifById(nid) is the canonical path.
   };
 
-  /* Legacy index-based delete — uses stable ID internally so deletion is
-     always correct even when the rendered order differs from the array. */
+  /* Delete one notification by its Firestore doc ID */
+  window.deleteNotifById = async function(nid) {
+      if (!nid || !currentUser) return;
+      try {
+          await deleteDoc(doc(db, 'notifications', currentUser.uid, 'items', nid));
+          // The onSnapshot listener will automatically re-render the list
+      } catch(e) {
+          console.error('[SNS-NOTIFY][ERROR] deleteNotifById', { op:'deleteNotifById', code:e.code, msg:e.message });
+      }
+  };
+
+  /* Legacy index-based delete — delegate to stable-ID path via cached list */
   window.deleteNotifByIdx = async function(idx) {
-      const snap = await getDoc(doc(db,"users",currentUser.uid));
-      const notifs = snap.data().notifications||[];
-      if (idx < 0 || idx >= notifs.length) return;
-      // Prefer stable-ID path when available
-      const targetId = notifs[idx] && notifs[idx].id;
-      if (targetId) { return window.deleteNotifById(targetId); }
-      // Fallback: splice by index (no stable ID present)
-      notifs.splice(idx, 1);
-      await updateDoc(doc(db,"users",currentUser.uid),{notifications:notifs});
-      window._lastNotifList = notifs;
-      renderNotifications(notifs);
-      _snxRefreshNotifBadges(notifs);
+      const list = window._lastNotifList || [];
+      const target = list[idx];
+      if (target && target.id) { return window.deleteNotifById(target.id); }
+      // If no ID available, nothing safe to do
   };
 
   /* Refresh sidebar/mobile notification badges from the current list (no Firestore read) */
@@ -16037,21 +16161,39 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   }
 
   window.markAllNotifsRead = async function() {
-      const snap = await getDoc(doc(db,"users",currentUser.uid));
-      const notifs = (snap.data().notifications||[]).map(n => ({...n, read:true}));
-      await updateDoc(doc(db,"users",currentUser.uid),{notifications:notifs});
-      _snxRefreshNotifBadges(notifs);
-      toastNotification("All notifications marked as read.");
+      if (!currentUser) return;
+      try {
+          const _snap = await getDocs(query(collection(db, 'notifications', currentUser.uid, 'items'), where('read', '==', false)));
+          if (_snap.empty) return;
+          const _batch = writeBatch(db);
+          _snap.docs.forEach(d => _batch.update(d.ref, { read: true }));
+          await _batch.commit();
+          toastNotification("All notifications marked as read.");
+          console.log('[SNS-NOTIFY] marked-all-read count:', _snap.size);
+      } catch(e) {
+          console.error('[SNS-NOTIFY][ERROR] markAllNotifsRead', { op:'markAllNotifsRead', code:e.code, msg:e.message });
+      }
   };
 
   window.clearAllNotifs = async function() {
+      if (!currentUser) return;
       const ok = await snxConfirm({ title: 'Clear All Notifications', body: 'Clear all notifications? This cannot be undone.', confirmText: 'Clear All', danger: true });
       if (!ok) return;
-      await updateDoc(doc(db,"users",currentUser.uid),{notifications:[]});
-      window._lastNotifList = [];
-      renderNotifications([]);    // immediately clear the rendered list
-      _snxRefreshNotifBadges([]); // zero all badges — never leave ghost counts
-      toastNotification("✓ Notifications cleared.");
+      try {
+          const _snap = await getDocs(query(collection(db, 'notifications', currentUser.uid, 'items')));
+          if (!_snap.empty) {
+              const _batch = writeBatch(db);
+              _snap.docs.forEach(d => _batch.delete(d.ref));
+              await _batch.commit();
+          }
+          window._lastNotifList = [];
+          renderNotifications([]);    // immediately clear the rendered list
+          _snxRefreshNotifBadges([]); // zero all badges
+          toastNotification("✓ Notifications cleared.");
+          console.log('[SNS-NOTIFY] all-cleared');
+      } catch(e) {
+          console.error('[SNS-NOTIFY][ERROR] clearAllNotifs', { op:'clearAllNotifs', code:e.code, msg:e.message });
+      }
   };
 
   function fmtTimeAgo(ts) {
@@ -17442,8 +17584,16 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                 const othUid = parts.find(uid => uid !== currentUser.uid) || '';
                 const uInfo = userMap[othUid] || {};
                 const msgs = data.messages || [];
-                const lastMsg = msgs[msgs.length - 1];
-                const lastText = lastMsg ? (lastMsg.deleted ? '(deleted)' : (lastMsg.text || (lastMsg.type === 'image' ? '📷 Image' : lastMsg.type === 'video' ? '🎥 Video' : lastMsg.type === 'audio' ? '🎵 Audio' : '[message]'))) : '';
+                // Find the last message visible to this user (skip ones soft-deleted for them)
+                let lastMsg = null;
+                for (let _i = msgs.length - 1; _i >= 0; _i--) {
+                    if (!msgs[_i][`deletedFor_${currentUser.uid}`]) { lastMsg = msgs[_i]; break; }
+                }
+                const lastText = lastMsg
+                    ? (lastMsg.deleted
+                        ? '(deleted)'
+                        : (lastMsg.text || (lastMsg.type === 'image' ? '📷 Image' : lastMsg.type === 'video' ? '🎥 Video' : lastMsg.type === 'audio' ? '🎵 Audio' : '[message]')))
+                    : '';
                 const unread = data[`unread_${currentUser.uid}`] || 0;
                 const pinned   = !!(data[`pinned_${currentUser.uid}`]);
                 const muted    = !!(data[`muted_${currentUser.uid}`]);
@@ -17529,15 +17679,18 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         const capturedChId  = _ibActiveChId;
         const capturedTgtUid = targetUid;
 
-        // Mark notifications from this user as read
+        // Mark message notifications from this sender as read (subcollection)
         try {
-            if (userData && Array.isArray(userData.notifications)) {
-                let changed = false;
-                const updated = userData.notifications.map(n => {
-                    if (n.type === 'message' && n.fromUid === targetUid && !n.read) { changed = true; return { ...n, read: true }; }
-                    return n;
-                });
-                if (changed) updateDoc(doc(db, 'users', currentUser.uid), { notifications: updated }).catch(()=>{});
+            const _nSnap = await getDocs(query(
+                collection(db, 'notifications', currentUser.uid, 'items'),
+                where('type', '==', 'message'),
+                where('fromUid', '==', targetUid),
+                where('read', '==', false)
+            ));
+            if (!_nSnap.empty) {
+                const _b = writeBatch(db);
+                _nSnap.docs.forEach(d => _b.update(d.ref, { read: true }));
+                _b.commit().catch(() => {});
             }
         } catch(_) {}
 
@@ -18124,14 +18277,21 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         if (!uid || !currentUser) return;
         const chId = [currentUser.uid, uid].sort().join('_');
         try {
-            // Soft-delete: mark as deleted/hidden for this user only
+            // Soft-delete: mark as hidden for this user only.
+            // The other participant's copy is unaffected.
+            // When B sends a new message, deleted_{uid} and archived_{uid} are
+            // reset to false automatically by the send transaction (_ibSend).
             const upd = {};
             upd[`deleted_${currentUser.uid}`] = true;
             upd[`archived_${currentUser.uid}`] = true;
             await updateDoc(doc(db, 'chats', chId), upd);
-            toastNotification('🗑 Conversation deleted.');
+            console.log('[SNS-MSG-DELETE] remove-conversation-for-me', { chatId: chId });
+            toastNotification('🗑 Conversation removed from your Inbox.');
             if (_ibActiveUid === uid) inboxBackToList();
-        } catch(e) { toastNotification('Could not delete: ' + e.message); }
+        } catch(e) {
+            console.error('[SNS-MSG-DELETE][ERROR] remove-conversation', { chatId: chId, code: e.code, msg: e.message });
+            toastNotification("Couldn't remove conversation. Please try again.");
+        }
     };
 
     // ── New Message modal ─────────────────────────────────────
@@ -18365,65 +18525,72 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     // deleteMessage(chatId, msgIndex, forEveryone)
     //   chatId      — Firestore chats/{chatId} document ID
     //   msgIndex    — index of the message in the messages[] array
-    //   forEveryone — true = unsend (marks deleted:true for both users)
-    //                 false/omitted = delete for me only (sets deletedFor_<uid>:true)
+    //   forEveryone — true = tombstone for both (sender only); false = hide for current user only
     //
-    // Messages are stored as an array inside chats/{chatId}, not as individual
-    // docs, so deleteDoc() on a messages/{id} path will never work here.
-    // This function does the correct array update directly.
+    // [SNS-MSG-DELETE] canonical public deletion API — uses runTransaction to prevent races.
     window.deleteMessage = async function(chatId, msgIndex, forEveryone) {
-        if (!currentUser) { console.warn('[SNX] deleteMessage: no current user'); return; }
-        if (!chatId || msgIndex == null) { console.warn('[SNX] deleteMessage: missing chatId or msgIndex'); return; }
+        if (!currentUser) {
+            console.warn('[SNS-MSG-DELETE] deleteMessage: no current user');
+            return;
+        }
+        if (!chatId || msgIndex == null) {
+            console.warn('[SNS-MSG-DELETE] deleteMessage: missing chatId or msgIndex', { chatId, msgIndex });
+            return;
+        }
         try {
-            const ref  = doc(db, 'chats', chatId);
-            const snap = await getDoc(ref);
-            if (!snap.exists()) { console.warn('[SNX] deleteMessage: chat doc not found'); return; }
-            const msgs = [...(snap.data().messages || [])];
-            if (!msgs[msgIndex]) { console.warn('[SNX] deleteMessage: message index out of range'); return; }
+            let otherUid = null;
+            await runTransaction(db, async (tx) => {
+                const ref  = doc(db, 'chats', chatId);
+                const snap = await tx.get(ref);
+                if (!snap.exists()) throw new Error('conversation-not-found');
+                const msgs = [...(snap.data().messages || [])];
+                if (!msgs[msgIndex]) throw new Error('message-not-found');
+                const parts = snap.data().participants || [];
+                if (!parts.includes(currentUser.uid)) throw new Error('not-a-participant');
+                otherUid = parts.find(p => p !== currentUser.uid) || null;
 
-            if (forEveryone) {
-                // Delete for everyone — only allowed if the caller is the sender
-                if (msgs[msgIndex].sender !== currentUser.uid) {
-                    toastNotification('⛔ You can only delete your own messages for everyone.');
-                    return;
+                if (forEveryone) {
+                    if (msgs[msgIndex].sender !== currentUser.uid) throw new Error('not-sender');
+                    msgs[msgIndex] = {
+                        sender:    msgs[msgIndex].sender,
+                        type:      'deleted',
+                        text:      null,
+                        timestamp: msgs[msgIndex].timestamp,
+                        deleted:   true,
+                        deletedAt: Date.now(),
+                        deletedBy: currentUser.uid
+                    };
+                } else {
+                    msgs[msgIndex] = { ...msgs[msgIndex], [`deletedFor_${currentUser.uid}`]: true };
                 }
-                msgs[msgIndex] = {
-                    sender:    msgs[msgIndex].sender,
-                    type:      'text',
-                    text:      '',
-                    timestamp: msgs[msgIndex].timestamp,
-                    deleted:   true
-                };
-                await updateDoc(ref, { messages: msgs });
-                // Update linked message notifications on recipient side
-                try {
-                    const chatData = snap.data();
-                    const senderUid = currentUser.uid;
-                    const otherUid = (chatData.participants || []).find(p => p !== senderUid);
-                    if (otherUid) {
-                        const otherSnap = await getDoc(doc(db, 'users', otherUid));
-                        if (otherSnap.exists()) {
-                            const otherNotifs = otherSnap.data().notifications || [];
-                            let changed = false;
-                            const updatedNotifs = otherNotifs.map(n => {
-                                if (n.type === 'message' && n.fromUid === senderUid && n.preview && n.preview !== 'Message deleted') {
-                                    changed = true;
-                                    return { ...n, preview: 'Message deleted' };
-                                }
-                                return n;
-                            });
-                            if (changed) await updateDoc(doc(db, 'users', otherUid), { notifications: updatedNotifs });
-                        }
+                const upd = { messages: msgs, ..._ibLastMsgUpdate(msgs, msgIndex, currentUser.uid) };
+                tx.update(ref, upd);
+            });
+            console.log('[SNS-MSG-DELETE]', forEveryone ? 'delete-for-everyone' : 'delete-for-me', { chatId, msgIdx: msgIndex });
+            // Update notification preview on recipient side — best-effort
+            if (forEveryone && otherUid) {
+                getDocs(query(
+                    collection(db, 'notifications', otherUid, 'items'),
+                    where('type', '==', 'message'),
+                    where('fromUid', '==', currentUser.uid)
+                )).then(_nSnap => {
+                    if (!_nSnap.empty) {
+                        const _b = writeBatch(db);
+                        _nSnap.docs.forEach(d => {
+                            if ((d.data().preview || '') !== 'Message deleted')
+                                _b.update(d.ref, { preview: 'Message deleted' });
+                        });
+                        _b.commit().catch(() => {});
                     }
-                } catch(_) {}
-            } else {
-                // Soft delete — hide for this user only
-                msgs[msgIndex] = { ...msgs[msgIndex], [`deletedFor_${currentUser.uid}`]: true };
-                await updateDoc(ref, { messages: msgs });
+                }).catch(() => {});
             }
         } catch (err) {
-            toastNotification('❌ Delete failed: ' + err.message);
-            console.error('[SNX] deleteMessage:', err);
+            if (err.message === 'not-sender') {
+                toastNotification('⛔ You can only delete your own messages for everyone.');
+            } else {
+                console.error('[SNS-MSG-DELETE][ERROR] deleteMessage', { chatId, msgIdx: msgIndex, op: forEveryone ? 'for-everyone' : 'for-me', code: err.code, msg: err.message });
+                toastNotification("Couldn't delete message. Please try again.");
+            }
         }
     };
 
@@ -18613,61 +18780,117 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         } catch(e) { toastNotification('Edit failed: ' + e.message); }
     };
 
+    /* ── [SNS-MSG-DELETE] Helper: recalculate lastMsgTs after deletion ──────────
+       Called after mutating the messages array so the inbox preview stays accurate.
+       Returns an update object to merge into the chat doc, or {} if no update needed.
+    ─────────────────────────────────────────────────────────────────────────── */
+    function _ibLastMsgUpdate(msgs, deletedIdx, currentUid) {
+        const isLast = deletedIdx === msgs.length - 1;
+        if (!isLast) return {}; // not the last message — no preview change needed
+        // Scan backwards for the latest non-fully-deleted message
+        for (let i = msgs.length - 1; i >= 0; i--) {
+            const m = msgs[i];
+            if (!m) continue;
+            // For delete-for-everyone tombstones: show "(deleted)" preview
+            // For delete-for-me: the deleted message is still visible to the other user
+            // so we still show it as the last message unless it's also deleted for everyone
+            const ts = m.timestamp || 0;
+            if (m.deleted) {
+                return { lastMsgTs: ts };
+            }
+            // If this message exists and isn't a full tombstone, use it
+            if (!m[`deletedFor_${currentUid}`] || m.sender !== currentUid) {
+                return { lastMsgTs: ts };
+            }
+        }
+        return { lastMsgTs: 0 }; // no visible messages left
+    }
+
     window.msgCtxDeleteMe = async function() {
         _ctxHide();
-        if (_ctxChId === null || _ctxIdx === null) return;
+        if (_ctxChId === null || _ctxIdx === null || !currentUser) return;
+        const capturedChId = _ctxChId;
+        const capturedIdx  = _ctxIdx;
         try {
-            const snap = await getDoc(doc(db, 'chats', _ctxChId));
-            if (!snap.exists()) return;
-            const msgs = [...(snap.data().messages || [])];
-            if (!msgs[_ctxIdx]) return;
-            msgs[_ctxIdx] = { ...msgs[_ctxIdx], [`deletedFor_${currentUser.uid}`]: true };
-            await updateDoc(doc(db, 'chats', _ctxChId), { messages: msgs });
-        } catch(e) { toastNotification('Delete failed: ' + e.message); }
+            await runTransaction(db, async (tx) => {
+                const ref  = doc(db, 'chats', capturedChId);
+                const snap = await tx.get(ref);
+                if (!snap.exists()) throw new Error('conversation-not-found');
+                const msgs = [...(snap.data().messages || [])];
+                if (!msgs[capturedIdx]) throw new Error('message-not-found');
+                // Verify this user is a participant
+                const parts = snap.data().participants || [];
+                if (!parts.includes(currentUser.uid)) throw new Error('not-a-participant');
+                msgs[capturedIdx] = { ...msgs[capturedIdx], [`deletedFor_${currentUser.uid}`]: true };
+                const upd = { messages: msgs, ..._ibLastMsgUpdate(msgs, capturedIdx, currentUser.uid) };
+                tx.update(ref, upd);
+            });
+            console.log('[SNS-MSG-DELETE] delete-for-me', { chatId: capturedChId, msgIdx: capturedIdx });
+        } catch(e) {
+            console.error('[SNS-MSG-DELETE][ERROR] delete-for-me', { chatId: capturedChId, msgIdx: capturedIdx, code: e.code, msg: e.message });
+            toastNotification("Couldn't delete message. Please try again.");
+        }
     };
 
     window.msgCtxDeleteAll = async function() {
         _ctxHide();
-        if (!_ctxMine || _ctxChId === null || _ctxIdx === null) return;
+        if (!_ctxMine || _ctxChId === null || _ctxIdx === null || !currentUser) return;
         const ok = await snxConfirm({ title: '🗑 Delete for Everyone', body: 'This message will be removed for both you and the recipient. This cannot be undone.', confirmText: 'Delete for Everyone', danger: true });
         if (!ok) return;
+        const capturedChId = _ctxChId;
+        const capturedIdx  = _ctxIdx;
         try {
-            const snap = await getDoc(doc(db, 'chats', _ctxChId));
-            if (!snap.exists()) return;
-            const msgs = [...(snap.data().messages || [])];
-            if (!msgs[_ctxIdx]) return;
-            // Security: verify the current user is the original sender before deleting for everyone
-            if (msgs[_ctxIdx].sender !== currentUser.uid) { toastNotification('⛔ You can only delete your own messages for everyone.'); return; }
-            const deletedMsg = { sender: msgs[_ctxIdx].sender, type: 'text', text: '', timestamp: msgs[_ctxIdx].timestamp, deleted: true };
-            msgs[_ctxIdx] = deletedMsg;
-            await updateDoc(doc(db, 'chats', _ctxChId), { messages: msgs });
-            // Update any linked message notifications to show "Message deleted" preview
-            // so the Notification Center does not expose the original content
-            try {
-                const senderUid = currentUser.uid;
-                // Determine the other participant (recipient)
-                const chatData = snap.data();
-                const otherUid = (chatData.participants || []).find(p => p !== senderUid);
-                if (otherUid) {
-                    const otherSnap = await getDoc(doc(db, 'users', otherUid));
-                    if (otherSnap.exists()) {
-                        const otherNotifs = otherSnap.data().notifications || [];
-                        let changed = false;
-                        const updatedNotifs = otherNotifs.map(n => {
-                            if (n.type === 'message' && n.fromUid === senderUid && n.preview && n.preview !== 'Message deleted') {
-                                changed = true;
-                                return { ...n, preview: 'Message deleted' };
-                            }
-                            return n;
-                        });
-                        if (changed) {
-                            await updateDoc(doc(db, 'users', otherUid), { notifications: updatedNotifs });
-                        }
-                    }
-                }
-            } catch(_) {} // best-effort — don't block the main deletion
+            let otherUid = null;
+            await runTransaction(db, async (tx) => {
+                const ref  = doc(db, 'chats', capturedChId);
+                const snap = await tx.get(ref);
+                if (!snap.exists()) throw new Error('conversation-not-found');
+                const msgs = [...(snap.data().messages || [])];
+                if (!msgs[capturedIdx]) throw new Error('message-not-found');
+                // Security: only the sender may delete for everyone
+                if (msgs[capturedIdx].sender !== currentUser.uid) throw new Error('not-sender');
+                const parts = snap.data().participants || [];
+                otherUid = parts.find(p => p !== currentUser.uid) || null;
+                // Tombstone — preserve sender + timestamp, wipe content
+                msgs[capturedIdx] = {
+                    sender:    msgs[capturedIdx].sender,
+                    type:      'deleted',
+                    text:      null,
+                    timestamp: msgs[capturedIdx].timestamp,
+                    deleted:   true,
+                    deletedAt: Date.now(),
+                    deletedBy: currentUser.uid
+                };
+                const upd = { messages: msgs, ..._ibLastMsgUpdate(msgs, capturedIdx, currentUser.uid) };
+                tx.update(ref, upd);
+            });
+            console.log('[SNS-MSG-DELETE] delete-for-everyone', { chatId: capturedChId, msgIdx: capturedIdx });
             toastNotification('✓ Message deleted for everyone.');
-        } catch(e) { toastNotification('Delete failed: ' + e.message); }
+            // Update notification preview — best-effort, non-blocking
+            if (otherUid) {
+                getDocs(query(
+                    collection(db, 'notifications', otherUid, 'items'),
+                    where('type', '==', 'message'),
+                    where('fromUid', '==', currentUser.uid)
+                )).then(_nSnap => {
+                    if (!_nSnap.empty) {
+                        const _b = writeBatch(db);
+                        _nSnap.docs.forEach(d => {
+                            if ((d.data().preview || '') !== 'Message deleted')
+                                _b.update(d.ref, { preview: 'Message deleted' });
+                        });
+                        _b.commit().catch(() => {});
+                    }
+                }).catch(() => {});
+            }
+        } catch(e) {
+            if (e.message === 'not-sender') {
+                toastNotification('⛔ You can only delete your own messages for everyone.');
+            } else {
+                console.error('[SNS-MSG-DELETE][ERROR] delete-for-everyone', { chatId: capturedChId, msgIdx: capturedIdx, code: e.code, msg: e.message });
+                toastNotification("Couldn't delete message. Please try again.");
+            }
+        }
     };
 
     window.msgCtxReportMsg = function() {
@@ -18974,24 +19197,19 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       if (!currentUser) { console.warn('[Chat] Not logged in'); return; }
       if (targetUid === currentUser.uid) return; // can't message yourself
 
-      // Mark any unread message notifications from this user as read
-      // (best-effort — does not block opening the chat)
-      try {
-          if (userData && Array.isArray(userData.notifications)) {
-              const notifs = userData.notifications;
-              let changed = false;
-              const updated = notifs.map(n => {
-                  if (n.type === 'message' && n.fromUid === targetUid && !n.read) {
-                      changed = true;
-                      return { ...n, read: true };
-                  }
-                  return n;
-              });
-              if (changed) {
-                  updateDoc(doc(db, 'users', currentUser.uid), { notifications: updated }).catch(() => {});
-              }
+      // Mark any unread message notifications from this user as read (subcollection, best-effort)
+      getDocs(query(
+          collection(db, 'notifications', currentUser.uid, 'items'),
+          where('type', '==', 'message'),
+          where('fromUid', '==', targetUid),
+          where('read', '==', false)
+      )).then(_nSnap => {
+          if (!_nSnap.empty) {
+              const _b = writeBatch(db);
+              _nSnap.docs.forEach(d => _b.update(d.ref, { read: true }));
+              _b.commit().catch(() => {});
           }
-      } catch(_) {}
+      }).catch(() => {});
 
       const newChId = [currentUser.uid, targetUid].sort().join('_');
 
@@ -20659,27 +20877,28 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           });
           await adminAuditLog('EMERGENCY_ANNOUNCEMENT', `[${type.toUpperCase()}] ${text.slice(0, 80)}`);
 
-          // 2. Push a 'system' notification into every user's notifications array
+          // 2. Push a 'system' notification into every user's notification subcollection
           //    so it shows up in the Notification Center 🔔 → ⚙️ System tab
           try {
               const _allUsers = await getDocs(collection(db, 'users'));
-              const _notifPayload = {
-                  id:       `system-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
-                  type:     'system',
-                  body:     text,
-                  fromName: userData.displayName,
-                  fromUid:  userData.uid,
-                  ts:       Date.now(),
-                  read:     false
-              };
-              const _batch = writeBatch(db);
+              const _notifWrites = [];
               _allUsers.forEach(uDoc => {
                   if (uDoc.id === userData.uid) return; // skip self
-                  _batch.update(doc(db, 'users', uDoc.id), {
-                      notifications: arrayUnion(_notifPayload)
-                  });
+                  _notifWrites.push(
+                      addDoc(collection(db, 'notifications', uDoc.id, 'items'), {
+                          recipientUid: uDoc.id,
+                          actorUid:     userData.uid,
+                          type:         'system',
+                          body:         text,
+                          fromName:     userData.displayName,
+                          fromAvatar:   userData.avatar || '',
+                          fromUid:      userData.uid,
+                          read:         false,
+                          createdAt:    serverTimestamp()
+                      }).catch(() => {})
+                  );
               });
-              await _batch.commit();
+              await Promise.all(_notifWrites);
           } catch(_) { /* best-effort — announcement was still saved */ }
 
           toastNotification('🚨 Emergency announcement sent to all users!');
@@ -25843,13 +26062,19 @@ function _supportStopCanvas() {
           const batch_promises = [];
           snap.forEach(d => {
               if (d.id === window._snxCurrentUser?.uid) return;
-              batch_promises.push(updateDoc(doc(db,'users',d.id), {
-                  notifications: arrayUnion({
-                      id: 'ann-'+Date.now()+'-'+Math.random().toString(36).slice(2,5),
-                      type:'announcement', text: '📢 ' + text.slice(0,100),
-                      read: false, ts: Date.now()
-                  })
-              }).catch(()=>{}));
+              // Route through canonical notification subcollection
+              batch_promises.push(
+                  addDoc(collection(db, 'notifications', d.id, 'items'), {
+                      recipientUid: d.id,
+                      actorUid: window._snxCurrentUser?.uid || '',
+                      type: 'announcement',
+                      body: '📢 ' + text.slice(0,100),
+                      fromName: 'Shadow Nexus Social Admin',
+                      fromAvatar: '',
+                      read: false,
+                      createdAt: serverTimestamp()
+                  }).catch(() => {})
+              );
           });
           await Promise.all(batch_promises);
           await admAuditLog('Announcement sent', text.slice(0,80));
@@ -27153,25 +27378,20 @@ async function _csSend() {
 }
 
 async function _csSendNotification(toUid, toName, gameId) {
-  const fs = _fs();
-  if (!fs || !_me()) return;
-  try {
-    const { db, doc, updateDoc, arrayUnion } = fs;
-    const gd   = ARCADE_GAMES.find(x => x.id === gameId) || { name: gameId };
-    const notif = {
-      id:     'gi_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-      type:   'game_challenge',
-      fromUid:_me().uid,
-      fromName:_myData().displayName || 'Player',
+  // Route through the canonical pushNotification helper (subcollection)
+  if (typeof pushNotification === 'function' && _me()) {
+    const gd = typeof ARCADE_GAMES !== 'undefined'
+        ? (ARCADE_GAMES.find(x => x.id === gameId) || { name: gameId })
+        : { name: gameId };
+    pushNotification(toUid, {
+      type:       'game_challenge',
+      fromUid:    _me().uid,
+      fromName:   _myData().displayName || 'Player',
       fromAvatar: _myData().avatar || '',
-      game:   gd.name,
+      game:       gd.name,
       gameId,
-      text:   `${_myData().displayName || 'Someone'} challenged you to ${gd.name}!`,
-      ts:     Date.now(),
-      read:   false,
-    };
-    await updateDoc(doc(db,'users',toUid), { notifications: arrayUnion(notif) });
-  } catch(e) { /* silent */ }
+    }).catch(() => {});
+  }
 }
 
 /* Legacy entry-point: called from profile Arcade section */
