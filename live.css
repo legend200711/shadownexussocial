@@ -1752,3 +1752,135 @@
     grid-template-rows: 1fr 130px;
   }
 }
+
+/* ══════════════════════════════════════════════════════════
+   SHADOW CHAT BOT — LIVE AI MODERATION PANEL
+   Host-only. Visible only inside .snx-live-stage.is-host.
+══════════════════════════════════════════════════════════ */
+
+/* Panel root — positioned top-left of host stage */
+.snx-live-mod-panel {
+  display: none;          /* hidden on non-host stages */
+  position: absolute;
+  top: 54px;
+  left: 10px;
+  z-index: 35;
+  width: 180px;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Only render inside .is-host */
+.snx-live-stage.is-host .snx-live-mod-panel {
+  display: block;
+}
+
+/* ── Toggle button ── */
+.snx-mod-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(0, 10, 30, 0.72);
+  border: 1px solid rgba(0, 174, 239, 0.30);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: background 0.15s, border-color 0.15s;
+}
+.snx-mod-toggle-btn:hover {
+  background: rgba(0, 40, 80, 0.85);
+  border-color: rgba(0, 174, 239, 0.55);
+}
+.snx-mod-btn-icon { font-size: 12px; }
+.snx-mod-btn-label { text-transform: uppercase; }
+
+/* Status dot on toggle button */
+.snx-mod-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #555;
+}
+.snx-mod-status-dot.on  { background: #39FF14; box-shadow: 0 0 5px rgba(57,255,20,0.8); }
+.snx-mod-status-dot.off { background: #ff5566; box-shadow: 0 0 5px rgba(255,51,85,0.7); }
+
+/* ── Drawer (expands below toggle button) ── */
+.snx-mod-drawer {
+  display: none;
+  margin-top: 6px;
+  background: rgba(0, 10, 30, 0.88);
+  border: 1px solid rgba(0, 174, 239, 0.28);
+  border-radius: 12px;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.55);
+}
+.snx-mod-drawer.open { display: block; }
+
+.snx-mod-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.15);
+}
+.snx-mod-title {
+  font-size: 10px;
+  font-weight: 900;
+  color: #00aeef;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.snx-mod-badge {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+/* Flags list */
+.snx-mod-flags {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+.snx-mod-empty,
+.snx-mod-unavail {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+  padding: 8px 0;
+}
+.snx-mod-unavail { color: #ff9966; }
+
+/* Individual flag row */
+.snx-mod-flag-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 2px solid transparent;
+}
+.snx-mod-flag-row.snx-mod-flag-warn  { border-left-color: #ffd966; }
+.snx-mod-flag-row.snx-mod-flag-block { border-left-color: #ff5566; background: rgba(255, 51, 85, 0.07); }
+.snx-mod-flag-icon  { font-size: 12px; flex-shrink: 0; margin-top: 1px; }
+.snx-mod-flag-body  { min-width: 0; }
+.snx-mod-flag-cat   { font-size: 10px; font-weight: 800; color: #c8e8ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.snx-mod-flag-user  { font-size: 9px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.snx-mod-flag-age   { font-size: 9px; color: rgba(255, 255, 255, 0.28); }
+
+.snx-mod-footer {
+  padding: 5px 10px 7px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: center;
+}

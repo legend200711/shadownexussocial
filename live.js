@@ -823,6 +823,9 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
 
   // ── Start host-side request listener ──
   _startHostRequestListener(roomId, user.uid, db);
+
+  // ── Shadow Chat Bot AI moderation panel (host only) ──
+  _initLiveModerationPanel(roomId);
 }
 
 // NOTE: _attachBoxesOnStageOpen is defined later in this file (SNS-2026-BOXES-002).
@@ -914,6 +917,7 @@ async function _endLive(user, roomId, db, presRef, presCb) {
   _S.hostRoomId    = null;
   _S.hostSessionId = null;
   _boxState.clear();   // clear box layout state on live end
+  _destroyLiveModerationPanel();
 
   _showOverlay(_buildEndedHTML(true));
   const backBtn = _el('snxLiveEndedBack');
@@ -1484,9 +1488,28 @@ function _initChat(user, roomId, db, isHost, storeUnsub) {
     if (inputEl) inputEl.value = '';
     const ud = _userData();
     const username = ud.displayName || ud.username || user.displayName || 'User';
+
+    // ── Shadow Chat Bot AI moderation — asynchronous, non-blocking ──────────
+    // Runs AFTER the comment is cleared from the input so there is no
+    // perceptible delay. snxAIScan writes to aiModerationLog, issues warnings,
+    // and may return true (blocked) for hard violations.
+    // If AI is unavailable Live continues normally — this is fire-and-forget.
+    let _aiBlocked = false;
+    if (typeof window.snxAIScan === 'function' && window._aiModerationEnabled !== false) {
+      try {
+        _aiBlocked = await window.snxAIScan(text, 'live comment');
+      } catch (_) { /* AI failure never blocks Live */ }
+    }
+    if (_aiBlocked) return;   // hard-blocked by AI (e.g. threats) — do not send
+
     try {
       await set(push(chatRef), { uid: user.uid, username, text, createdAt: Date.now() });
     } catch (e) { _err('chat','RTDB','push', e.name, e.message); }
+
+    // ── Notify host moderation panel of any flag ──────────────────────────
+    // _aiBlocked is already false here (returned above if true).
+    // snxAIScan warns for warn-severity content but still returns false —
+    // surface those flags in the host panel via the moderation log listener.
   }
 
   if (sendBtn) sendBtn.addEventListener('click', _sendMsg);
@@ -2962,6 +2985,187 @@ function _guestViewerCleanup() {
   _guestViewerUid    = null;
 
   console.log('[SNX-GUEST] viewer guest cleanup complete');
+}
+
+/* ══════════════════════════════════════════════════════════
+   SHADOW CHAT BOT — LIVE AI MODERATION PANEL
+   Host-only compact moderation status panel.
+
+   Architecture:
+   • Reads window._aiModerationEnabled (set by Firestore siteSettings listener
+     in index.html — same global used by all other snxAIScan call sites).
+   • Polls the existing Firestore aiModerationLog collection (limit 8, desc)
+     to show recent Live-comment flags surfaced by snxAIScan.
+   • Injected into .snx-live-stage.is-host — invisible on viewer/guest stage.
+   • No new Firebase paths. No new AI system. Uses existing snxAIScan only.
+   • Live media path (WebRTC, ICE, signaling, boxes) is completely untouched.
+   • AI failure never blocks Live.
+════════════════════════════════════════════════════════════ */
+
+let _liveModPanelEl     = null;   // DOM element
+let _liveModPollTimer   = null;   // setInterval for log refresh
+let _liveModPanelOpen   = false;  // toggle state
+const _LIVE_MOD_POLL_MS = 20_000; // refresh every 20 s
+
+/** Inject the panel into the host stage and start polling. */
+function _initLiveModerationPanel(roomId) {
+  // Destroy any stale panel from a previous session
+  _destroyLiveModerationPanel();
+
+  // Defer until the stage DOM is ready (same pattern as _attachBoxesOnStageOpen)
+  setTimeout(() => {
+    const stage = _getStage();
+    if (!stage || !stage.classList.contains('is-host')) return;
+    if (stage.querySelector('.snx-live-mod-panel')) return;
+
+    const panel = document.createElement('div');
+    panel.className = 'snx-live-mod-panel';
+    panel.id = 'snxLiveModPanel';
+    panel.innerHTML = _buildModPanelHTML();
+    stage.appendChild(panel);
+    _liveModPanelEl = panel;
+
+    // Toggle button
+    const toggleBtn = panel.querySelector('.snx-mod-toggle-btn');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _liveModPanelOpen = !_liveModPanelOpen;
+        _renderModPanelState(panel);
+      });
+    }
+
+    // Initial render
+    _renderModPanelState(panel);
+
+    // Poll moderation log
+    _liveModPollTimer = setInterval(() => _refreshModPanelLog(panel, roomId), _LIVE_MOD_POLL_MS);
+    // Immediate first load
+    _refreshModPanelLog(panel, roomId);
+
+    _log('Live mod panel initialised');
+  }, 150);
+}
+
+/** Tear down the panel and stop polling. */
+function _destroyLiveModerationPanel() {
+  if (_liveModPollTimer) { clearInterval(_liveModPollTimer); _liveModPollTimer = null; }
+  if (_liveModPanelEl)   { try { _liveModPanelEl.remove(); } catch (_) {} _liveModPanelEl = null; }
+  _liveModPanelOpen = false;
+}
+
+/** Build the initial static HTML skeleton for the panel. */
+function _buildModPanelHTML() {
+  return `
+<button class="snx-mod-toggle-btn" aria-label="AI Moderation Panel">
+  <span class="snx-mod-btn-icon">🤖</span>
+  <span class="snx-mod-btn-label">AI MOD</span>
+  <span class="snx-mod-status-dot" id="snxModStatusDot"></span>
+</button>
+<div class="snx-mod-drawer" id="snxModDrawer">
+  <div class="snx-mod-header">
+    <span class="snx-mod-title">🤖 AI Moderation</span>
+    <span class="snx-mod-badge" id="snxModBadge">—</span>
+  </div>
+  <div class="snx-mod-flags" id="snxModFlags">
+    <div class="snx-mod-empty">No flags in this session.</div>
+  </div>
+  <div class="snx-mod-footer">AI assists — host retains control.</div>
+</div>`;
+}
+
+/** Sync the panel's open/closed state and AI on/off status. */
+function _renderModPanelState(panel) {
+  if (!panel) return;
+  const drawer = panel.querySelector('#snxModDrawer');
+  const dot    = panel.querySelector('#snxModStatusDot');
+  const badge  = panel.querySelector('#snxModBadge');
+  const isOn   = window._aiModerationEnabled !== false;
+
+  if (drawer) drawer.classList.toggle('open', _liveModPanelOpen);
+  if (dot) {
+    dot.className = 'snx-mod-status-dot ' + (isOn ? 'on' : 'off');
+    dot.title     = isOn ? 'AI Moderation ON' : 'AI Moderation OFF';
+  }
+  if (badge) {
+    badge.textContent  = isOn ? '🟢 ON' : '🔴 OFF';
+    badge.style.color  = isOn ? '#39FF14' : '#ff5566';
+  }
+}
+
+/** Refresh the recent flags list from the existing aiModerationLog. */
+async function _refreshModPanelLog(panel, roomId) {
+  if (!panel) return;
+  const flagsEl = panel.querySelector('#snxModFlags');
+  if (!flagsEl) return;
+
+  // Sync status badge in case AI was toggled externally
+  _renderModPanelState(panel);
+
+  // If AI is off, show a clear note and stop
+  if (window._aiModerationEnabled === false) {
+    flagsEl.innerHTML = '<div class="snx-mod-unavail">⚠️ AI Moderation is OFF</div>';
+    return;
+  }
+
+  // Use the existing window._snxFirestore (same as the rest of the app)
+  const fs = window._snxFirestore;
+  if (!fs || !fs.db || !fs.collection || !fs.query || !fs.orderBy || !fs.limit || !fs.getDocs) {
+    flagsEl.innerHTML = '<div class="snx-mod-unavail">AI MODERATION TEMPORARILY UNAVAILABLE</div>';
+    return;
+  }
+
+  try {
+    const { db, collection, query, orderBy, limit, getDocs } = fs;
+    // Read the last 8 entries from the shared aiModerationLog — same path used by
+    // the Founder dashboard and moderator panel. No new collection.
+    const snap = await getDocs(
+      query(collection(db, 'aiModerationLog'), orderBy('createdAt', 'desc'), limit(8))
+    );
+
+    if (snap.empty) {
+      flagsEl.innerHTML = '<div class="snx-mod-empty">No recent flags.</div>';
+      return;
+    }
+
+    const rows = [];
+    snap.forEach(doc => {
+      const d = doc.data();
+      // Show Live-comment flags first, then any other recent flags
+      const isLive = (d.context || '').includes('live');
+      const tsMs = d.createdAt && typeof d.createdAt.toMillis === 'function'
+        ? d.createdAt.toMillis()
+        : (d.ts || 0);
+      const age = _fmtModAge(tsMs);
+      const sevClass = d.type === 'action' ? 'snx-mod-flag-block' : 'snx-mod-flag-warn';
+      const icon = d.type === 'escalated' ? '🚨' : d.type === 'action' ? '🚫' : '⚠️';
+      rows.push({ isLive, html:
+        `<div class="snx-mod-flag-row ${sevClass}">
+          <span class="snx-mod-flag-icon">${icon}</span>
+          <div class="snx-mod-flag-body">
+            <div class="snx-mod-flag-cat">${_esc(d.category || d.type || '—')}</div>
+            <div class="snx-mod-flag-user">${_esc(d.username || d.authorName || d.uid || '—')}${isLive ? ' · 🔴 Live' : ''}</div>
+            <div class="snx-mod-flag-age">${age}</div>
+          </div>
+        </div>` });
+    });
+
+    // Live flags first
+    rows.sort((a, b) => (b.isLive ? 1 : 0) - (a.isLive ? 1 : 0));
+    flagsEl.innerHTML = rows.map(r => r.html).join('');
+  } catch (e) {
+    flagsEl.innerHTML = '<div class="snx-mod-unavail">AI MODERATION TEMPORARILY UNAVAILABLE</div>';
+    _log('Live mod panel: Firestore read failed (' + e.message + ') — Live unaffected');
+  }
+}
+
+/** Format a Firestore timestamp into a human-readable age string. */
+function _fmtModAge(tsMs) {
+  if (!tsMs) return '';
+  const diff = Date.now() - tsMs;
+  if (diff < 60_000)   return 'just now';
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
+  return Math.floor(diff / 3_600_000) + 'h ago';
 }
 
 _log('live.js loaded — SNS-2026-LIVE-008');
