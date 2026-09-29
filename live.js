@@ -2207,8 +2207,14 @@ function _startHostRequestListener(roomId, hostUid, db) {
 // ══════════════════════════════════════════════════════════
 window.snxBoxManager = {
 
-  /** Add a guest box. stream may be null → connecting state shown. */
-  addGuest(uid, name, stream) {
+  /**
+   * Add a guest box in CONNECTING state.
+   * Stream is attached later via setGuestStream() once WebRTC tracks arrive.
+   * @param {string} uid
+   * @param {string} name
+   * @param {string} [avatarUrl]  — optional avatar URL for camera-off placeholder
+   */
+  addGuest(uid, name, avatarUrl) {
     if (!uid) return;
     const guests = [..._boxState.values()].filter(b => b.role === 'guest');
     if (guests.length >= MAX_GUEST_BOXES) {
@@ -2223,11 +2229,6 @@ window.snxBoxManager = {
     grid.appendChild(box.el);
     _boxState.set(uid, box);
 
-    if (stream) {
-      box.videoEl.srcObject = stream;
-      box.videoEl.play().catch(() => {});
-      _setBxState(uid, 'ready');
-    }
     _recalcLayout();
     _log('Box added uid=' + uid + ' total=' + _boxState.size);
   },
@@ -2507,8 +2508,17 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
   console.log('[DIAG-7] HOST GUEST PEER CREATED — roomId:', roomId, 'guestUid:', guestUid,
     'signalingState:', pc.signalingState, 'iceConnectionState:', pc.iceConnectionState);
 
+  // ── FIX: Explicitly create recvonly transceivers BEFORE createOffer.
+  //    Do NOT rely on deprecated offerToReceiveVideo / offerToReceiveAudio.
+  //    These transceivers tell the browser to include both audio and video
+  //    m-lines in the offer SDP so the guest's tracks have a negotiated channel.
+  //    The host guest peer is RECEIVE-ONLY — we do not add host camera/mic here.
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  pc.addTransceiver('audio', { direction: 'recvonly' });
+  console.log('[DIAG-7] HOST recvonly TRANSCEIVERS ADDED — video: PASS, audio: PASS');
+
   // Add to box manager immediately (connecting state — no stream yet)
-  window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', null);
+  window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', req.avatar || '');
   console.log('[SNX-HOST-GUEST] guest added to box (connecting) — roomId:', roomId, 'guestUid:', guestUid);
 
   // ── CONNECTING timeout — 35 s: if still no connected state, mark as failed ──
@@ -2658,13 +2668,32 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
   };
 
   // ── Create offer ──
+  // NOTE: offerToReceiveVideo/offerToReceiveAudio are NOT passed — transceivers
+  //       were already added above with direction:'recvonly'.
   let offer;
   try {
-    offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+    offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    // ── DIAG STEP 8 — HOST OFFER CREATED ──
+
+    // ── DIAG STEP 8 — VERIFY OFFER SDP M-LINES (no full SDP logged) ──
+    const sdpLines  = offer.sdp || '';
+    const hasAudio  = /^m=audio/m.test(sdpLines);
+    const hasVideo  = /^m=video/m.test(sdpLines);
+    console.log('[DIAG-8] HOST GUEST OFFER:');
+    console.log('[DIAG-8] AUDIO M-LINE:', hasAudio ? 'YES' : 'NO');
+    console.log('[DIAG-8] VIDEO M-LINE:', hasVideo ? 'YES' : 'NO');
     console.log('[DIAG-8] HOST OFFER CREATED — roomId:', roomId, 'guestUid:', guestUid,
-      'type:', offer.type, 'sdp lines:', offer.sdp.split('\n').length);
+      'type:', offer.type, 'sdp lines:', sdpLines.split('\n').length);
+
+    if (!hasAudio || !hasVideo) {
+      console.error('[DIAG-8] OFFER M-LINE FAILURE — audio:', hasAudio, 'video:', hasVideo,
+        '— roomId:', roomId, 'guestUid:', guestUid,
+        '— Connection cannot proceed: offer is missing required media section(s).');
+      if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
+      try { pc.close(); } catch (_) {}
+      window.snxBoxManager.removeGuest(guestUid);
+      return;
+    }
   } catch (e) {
     console.error('[DIAG-8] HOST OFFER CREATION FAILED — roomId:', roomId, 'guestUid:', guestUid, e.name, e.message);
     if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
