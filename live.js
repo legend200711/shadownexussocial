@@ -696,44 +696,45 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
 }
 
 function _buildHostStageHTML(hostName, title, camOn, micOn) {
+  const ud = _userData();
+  const avatarUrl = ud.profileImage || ud.photoURL || '';
+  const avatarStyle = avatarUrl ? 'background-image:url(' + _esc(avatarUrl) + ')' : '';
+  const avatarText  = avatarUrl ? '' : (hostName ? hostName.charAt(0).toUpperCase() : '?');
   return `
-<div class="snx-live-stage">
-  <div class="snx-live-stage-video-wrap">
-    <video id="snxLiveStageVideo" playsinline muted autoplay></video>
-    <div class="snx-live-cam-off-overlay${camOn ? '' : ' show'}" id="snxLiveStageCamOff">
-      <span class="snx-live-cam-off-icon">📷</span><span>Camera off</span>
+<div class="snx-live-stage is-host">
+  <video id="snxLiveStageVideo" playsinline muted autoplay></video>
+  <div class="snx-live-cam-off-overlay${camOn ? '' : ' show'}" id="snxLiveStageCamOff">
+    <span class="snx-live-cam-off-icon">📷</span><span>Camera off</span>
+  </div>
+  <div class="snx-live-top-bar">
+    <div class="snx-live-host-avatar" style="${avatarStyle}" title="${_esc(hostName)}">${avatarText}</div>
+    <div class="snx-live-badge"><span class="live-dot"></span>LIVE</div>
+    <div class="snx-live-top-info">
+      <div class="snx-live-host-name">${_esc(hostName)}</div>
+      ${title ? '<div class="snx-live-stage-title">' + _esc(title) + '</div>' : ''}
     </div>
-    <div class="snx-live-top-bar">
-      <div class="snx-live-badge"><span class="live-dot"></span>LIVE</div>
-      <div class="snx-live-top-info">
-        <div class="snx-live-host-name">${_esc(hostName)}</div>
-        ${title ? '<div class="snx-live-stage-title">' + _esc(title) + '</div>' : ''}
-      </div>
+    <div class="snx-live-top-stats">
       <div class="snx-live-viewer-count" id="snxLiveViewerCount">👁 0</div>
+      <div class="snx-live-like-count-top" id="snxLiveLikeCount">⚡ 0</div>
       <div class="snx-live-timer" id="snxLiveTimer">00:00</div>
     </div>
-    <div class="snx-live-host-controls">
-      <button class="snx-live-ctrl-btn${camOn ? '' : ' off'}" id="snxLiveHostCamBtn">${camOn ? '📷' : '🚫'}</button>
-      <button class="snx-live-ctrl-btn${micOn ? '' : ' off'}" id="snxLiveHostMicBtn">${micOn ? '🎤' : '🔇'}</button>
-      <button class="snx-live-end-btn" id="snxLiveEndBtn">⏹ END LIVE</button>
-    </div>
-    <div class="snx-live-like-zone">
-      <div class="snx-live-like-count" id="snxLiveLikeCount">0</div>
-    </div>
-    <div class="snx-live-confirm" id="snxLiveEndConfirm">
-      <div class="snx-live-confirm-title">End your Live?</div>
-      <div class="snx-live-confirm-sub">Your broadcast will end for all viewers.</div>
-      <div class="snx-live-confirm-btns">
-        <button class="snx-live-confirm-end" id="snxLiveConfirmEnd">⏹ END LIVE</button>
-        <button class="snx-live-confirm-cancel" id="snxLiveConfirmCancel">Keep Live</button>
-      </div>
-    </div>
   </div>
-  <div class="snx-live-chat">
-    <div class="snx-live-chat-messages" id="snxLiveChatMessages"></div>
-    <div class="snx-live-chat-input-row">
-      <input class="snx-live-chat-input" id="snxLiveChatInput" type="text" maxlength="200" placeholder="Say something…" autocomplete="off">
-      <button class="snx-live-chat-send" id="snxLiveChatSend">➤</button>
+  <div class="snx-live-comments-overlay" id="snxLiveChatMessages"></div>
+  <div class="snx-live-chat-input-row">
+    <input class="snx-live-chat-input" id="snxLiveChatInput" type="text" maxlength="200" placeholder="Say something…" autocomplete="off">
+    <button class="snx-live-chat-send" id="snxLiveChatSend">➤</button>
+  </div>
+  <div class="snx-live-host-controls">
+    <button class="snx-live-ctrl-btn${camOn ? '' : ' off'}" id="snxLiveHostCamBtn">${camOn ? '📷' : '🚫'}</button>
+    <button class="snx-live-ctrl-btn${micOn ? '' : ' off'}" id="snxLiveHostMicBtn">${micOn ? '🎤' : '🔇'}</button>
+    <button class="snx-live-end-btn" id="snxLiveEndBtn">⏹ END LIVE</button>
+  </div>
+  <div class="snx-live-confirm" id="snxLiveEndConfirm">
+    <div class="snx-live-confirm-title">End your Live?</div>
+    <div class="snx-live-confirm-sub">Your broadcast will end for all viewers.</div>
+    <div class="snx-live-confirm-btns">
+      <button class="snx-live-confirm-end" id="snxLiveConfirmEnd">⏹ END LIVE</button>
+      <button class="snx-live-confirm-cancel" id="snxLiveConfirmCancel">Keep Live</button>
     </div>
   </div>
 </div>`;
@@ -1149,10 +1150,37 @@ async function _openViewerScreen(roomId) {
     _S.viewUnsubs.push(unsub);
   });
 
-  _watchLikes(roomId, db);
-  const likeBtn = _el('snxViewerLikeBtn');
-  if (likeBtn) likeBtn.addEventListener('click', () => _sendLike(roomId, db));
+  // Reset local like counters for this session
+  _S._likeLocalCount  = 0;
+  _S._likeServerCount = 0;
+  _S._likePending     = 0;
+  if (_S._likeFlushTimer) { clearTimeout(_S._likeFlushTimer); _S._likeFlushTimer = null; }
 
+  _watchLikes(roomId, db);
+
+  // ── Multi-tap reaction zone (covers video body) ──
+  const tapZone = _el('snxViewerTapZone');
+  if (tapZone) {
+    let _tapCount = 0;
+    let _tapResetTimer = null;
+    const _onTap = (e) => {
+      // Block taps that originate on interactive elements
+      const tag = (e.target || e.srcElement || {}).tagName || '';
+      if (['BUTTON','INPUT','A'].includes(tag.toUpperCase())) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      _tapCount++;
+      const rapid = _tapCount >= 4;
+      _tapLike(roomId, db, clientX, clientY, rapid);
+      // Reset rapid-tap counter after 800ms of no taps
+      if (_tapResetTimer) clearTimeout(_tapResetTimer);
+      _tapResetTimer = setTimeout(() => { _tapCount = 0; }, 800);
+    };
+    tapZone.addEventListener('click',      _onTap, { passive: true });
+    tapZone.addEventListener('touchstart', _onTap, { passive: true });
+  }
+
+  // Leave button is now in the top bar (back button)
   const leaveBtn = _el('snxLiveLeaveBtn');
   if (leaveBtn) leaveBtn.addEventListener('click', () => _leaveViewer(roomId, sessId, db));
 }
@@ -1211,6 +1239,8 @@ function _onViewerHostEnded() {
 
 function _cleanupViewer() {
   _clearViewerTimeout();
+  // Flush any pending batched likes immediately on cleanup
+  if (_S._likeFlushTimer) { clearTimeout(_S._likeFlushTimer); _S._likeFlushTimer = null; }
   if (_S.viewPc) { try { _S.viewPc.close(); } catch (_) {} _S.viewPc = null; }
   for (const fn of _S.viewUnsubs) { try { fn(); } catch (_) {} }
   _S.viewUnsubs = [];
@@ -1224,45 +1254,50 @@ async function _leaveViewer(roomId, sessId, db) {
 }
 
 function _buildViewerHTML(room) {
+  const avatarUrl  = room.hostAvatar || '';
+  const avatarStyle = avatarUrl ? 'background-image:url(' + _esc(avatarUrl) + ')' : '';
+  const avatarText  = avatarUrl ? '' : ((room.hostName || 'C').charAt(0).toUpperCase());
   return `
 <div class="snx-live-stage">
-  <div class="snx-live-stage-video-wrap">
-    <video id="snxLiveViewerVideo" playsinline autoplay></video>
-    <div class="snx-live-top-bar">
-      <div class="snx-live-badge"><span class="live-dot"></span>LIVE</div>
-      <div class="snx-live-top-info">
-        <div class="snx-live-host-name">${_esc(room.hostName || 'Creator')}</div>
-        ${room.title ? '<div class="snx-live-stage-title">' + _esc(room.title) + '</div>' : ''}
-      </div>
+  <video id="snxLiveViewerVideo" playsinline autoplay></video>
+  <div class="snx-live-tap-zone" id="snxViewerTapZone"></div>
+  <div class="snx-live-top-bar">
+    <button class="snx-live-back-btn" id="snxLiveLeaveBtn">←</button>
+    <div class="snx-live-host-avatar" style="${avatarStyle}">${avatarText}</div>
+    <div class="snx-live-badge"><span class="live-dot"></span>LIVE</div>
+    <div class="snx-live-top-info">
+      <div class="snx-live-host-name">${_esc(room.hostName || 'Creator')}</div>
+      ${room.title ? '<div class="snx-live-stage-title">' + _esc(room.title) + '</div>' : ''}
+    </div>
+    <div class="snx-live-top-stats">
       <div class="snx-live-viewer-count" id="snxViewerCount">👁 0</div>
-    </div>
-    <div class="snx-live-host-controls">
-      <button class="snx-live-leave-btn" id="snxLiveLeaveBtn">↩ Leave</button>
-    </div>
-    <div class="snx-live-like-zone">
-      <button class="snx-live-like-btn" id="snxViewerLikeBtn">❤️</button>
-      <div class="snx-live-like-count" id="snxLiveLikeCount">0</div>
-    </div>
-    <div class="snx-live-loader show" id="snxViewerLoader">
-      <div class="snx-live-spinner"></div>
-      <div class="snx-live-loader-text" id="snxViewerLoaderText">Connecting to live…</div>
-    </div>
-    <button id="snxViewerTapToPlay" style="display:none;position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:40;padding:12px 28px;background:rgba(0,174,239,0.92);color:#fff;border:none;border-radius:30px;font-size:14px;font-weight:800;letter-spacing:1px;cursor:pointer;backdrop-filter:blur(8px);">▶ TAP TO PLAY LIVE</button>
-    <div id="snxViewerMsg" style="display:none;position:absolute;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;z-index:40;white-space:nowrap;"></div>
-  </div>
-  <div class="snx-live-chat">
-    <div class="snx-live-chat-messages" id="snxLiveChatMessages"></div>
-    <div class="snx-live-chat-input-row">
-      <input class="snx-live-chat-input" id="snxLiveChatInput" type="text" maxlength="200" placeholder="Say something…" autocomplete="off">
-      <button class="snx-live-chat-send" id="snxLiveChatSend">➤</button>
+      <div class="snx-live-like-count-top" id="snxLiveLikeCount">⚡ 0</div>
     </div>
   </div>
+  <div class="snx-live-comments-overlay" id="snxLiveChatMessages"></div>
+  <div class="snx-live-chat-input-row">
+    <input class="snx-live-chat-input" id="snxLiveChatInput" type="text" maxlength="200" placeholder="Say something…" autocomplete="off">
+    <button class="snx-live-chat-send" id="snxLiveChatSend">➤</button>
+  </div>
+  <div class="snx-live-loader show" id="snxViewerLoader">
+    <div class="snx-live-loader-brand">Shadow Nexus</div>
+    <div class="snx-live-nexus-ring"></div>
+    <div class="snx-live-loader-title">NEXUS <span>LIVE</span></div>
+    <div class="snx-live-loader-text" id="snxViewerLoaderText">Connecting to broadcast…</div>
+  </div>
+  <button id="snxViewerTapToPlay" style="display:none;position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:40;padding:12px 28px;background:rgba(0,174,239,0.92);color:#fff;border:none;border-radius:30px;font-size:14px;font-weight:800;letter-spacing:1px;cursor:pointer;backdrop-filter:blur(8px);">▶ TAP TO PLAY LIVE</button>
+  <div id="snxViewerMsg" style="display:none;position:absolute;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;z-index:40;white-space:nowrap;"></div>
 </div>`;
 }
 
 /* ══════════════════════════════════════════════════════════
    STAGE 6 — CHAT
 ════════════════════════════════════════════════════════════ */
+/* Max visible comment nodes in the overlay */
+const _CHAT_MAX_VISIBLE = 12;
+/* After this many ms a comment starts fading */
+const _CHAT_MSG_TTL_MS  = 15_000;
+
 function _initChat(user, roomId, db, isHost, storeUnsub) {
   const msgsEl  = _el('snxLiveChatMessages');
   const inputEl = _el('snxLiveChatInput');
@@ -1272,15 +1307,26 @@ function _initChat(user, roomId, db, isHost, storeUnsub) {
   const chatRef = ref(db, 'liveChats/' + roomId);
   const q = query(chatRef, limitToLast(100));
   const cb = onValue(q, (snap) => {
-    msgsEl.innerHTML = '';
     if (!snap.exists()) return;
-    Object.values(snap.val()).forEach(msg => {
+    const msgs = Object.values(snap.val());
+    const recent = msgs.slice(-_CHAT_MAX_VISIBLE);
+    // Rebuild only if content changed (avoid flicker on every new message)
+    msgsEl.innerHTML = '';
+    recent.forEach(msg => {
       const div = document.createElement('div');
       div.className = 'snx-live-chat-msg';
       div.innerHTML = '<span class="msg-user">' + _esc(msg.username || 'User') + '</span>' + _esc(msg.text || '');
       msgsEl.appendChild(div);
+      // Schedule fade-out for older messages
+      if (_CHAT_MSG_TTL_MS > 0) {
+        setTimeout(() => {
+          if (div.parentNode) {
+            div.classList.add('fading-out');
+            setTimeout(() => { if (div.parentNode) div.remove(); }, 500);
+          }
+        }, _CHAT_MSG_TTL_MS);
+      }
     });
-    msgsEl.scrollTop = msgsEl.scrollHeight;
   });
 
   if (!isHost && storeUnsub) storeUnsub(() => off(q, 'value', cb));
@@ -1303,31 +1349,65 @@ function _initChat(user, roomId, db, isHost, storeUnsub) {
 /* ══════════════════════════════════════════════════════════
    STAGE 7 — LIKES
 ════════════════════════════════════════════════════════════ */
+/* ── Like count display helper ── */
+function _fmtLikes(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1000)      return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
 function _watchLikes(roomId, db) {
   const likeRef = ref(db, 'liveRooms/' + roomId + '/likeCount');
   onValue(likeRef, (snap) => {
-    const count = snap.exists() ? (snap.val() || 0) : 0;
+    const serverCount = snap.exists() ? (snap.val() || 0) : 0;
+    // Reconcile: show max(server, local optimistic) so UI never jumps backwards
+    _S._likeServerCount = serverCount;
+    const display = Math.max(serverCount, _S._likeLocalCount || 0);
     const el = _el('snxLiveLikeCount');
-    if (el) el.textContent = count >= 1000 ? (count/1000).toFixed(1) + 'k' : String(count);
+    if (el) el.textContent = '⚡ ' + _fmtLikes(display);
   });
 }
 
-async function _sendLike(roomId, db) {
-  _animateHeart();
+/* ── Multi-tap like state ── */
+const _LIKE_FLUSH_MS = 1200; // debounce window before writing to Firebase
+
+function _tapLike(roomId, db, x, y, rapid) {
+  // 1. Increment local optimistic counter immediately
+  _S._likeLocalCount = (_S._likeLocalCount || 0) + 1;
+  const display = Math.max(_S._likeLocalCount, _S._likeServerCount || 0);
+  const el = _el('snxLiveLikeCount');
+  if (el) el.textContent = '⚡ ' + _fmtLikes(display);
+
+  // 2. Spawn Nexus energy burst at tap location
+  _animateNexusBurst(x, y, rapid);
+
+  // 3. Accumulate pending likes for batched Firebase write
+  _S._likePending = (_S._likePending || 0) + 1;
+  if (_S._likeFlushTimer) clearTimeout(_S._likeFlushTimer);
+  _S._likeFlushTimer = setTimeout(() => _flushLikes(roomId, db), _LIKE_FLUSH_MS);
+}
+
+async function _flushLikes(roomId, db) {
+  const pending = _S._likePending || 0;
+  if (!pending) return;
+  _S._likePending = 0;
+  _S._likeFlushTimer = null;
   const likeRef = ref(db, 'liveRooms/' + roomId + '/likeCount');
   try {
     const snap = await get(likeRef);
-    await set(likeRef, (snap.exists() ? (snap.val() || 0) : 0) + 1);
+    const current = snap.exists() ? (snap.val() || 0) : 0;
+    await set(likeRef, current + pending);
   } catch (_) {}
 }
 
-function _animateHeart() {
-  const heart = document.createElement('div');
-  heart.className = 'snx-live-heart';
-  heart.textContent = '❤️';
-  heart.style.cssText = 'position:fixed;right:' + (20 + Math.random()*20) + 'px;bottom:200px;z-index:10010;pointer-events:none;font-size:20px;animation:heartFloat 1.4s ease-out forwards;';
-  document.body.appendChild(heart);
-  setTimeout(() => heart.remove(), 1500);
+/* ── Shadow Nexus energy burst animation ── */
+function _animateNexusBurst(x, y, strong) {
+  const burst = document.createElement('div');
+  burst.className = 'snx-nexus-burst' + (strong ? ' strong' : '');
+  burst.style.left = x + 'px';
+  burst.style.top  = y + 'px';
+  document.body.appendChild(burst);
+  setTimeout(() => burst.remove(), 600);
 }
 
 /* ══════════════════════════════════════════════════════════
