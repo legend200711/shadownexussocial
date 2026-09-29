@@ -10,11 +10,11 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SHADOW-TV-2026-GLOBAL-UPDATE-01
+ * Build: SNS-2026-GUEST-MODE-001
  */
 
-const CACHE_VERSION = 'v85';
-const BUILD_ID      = 'SHADOW-TV-2026-GLOBAL-UPDATE-01';
+const CACHE_VERSION = 'v87';
+const BUILD_ID      = 'SNS-2026-GUEST-MODE-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -74,6 +74,7 @@ const NETWORK_FIRST_PATHS = [];
  * The browser must NEVER prefer a stale cached TV engine over the deployed version.
  */
 const TV_NETWORK_FIRST_FILES = [
+  // 24-Hour TV engine files
   'snx-ch-adapter.js',
   'snx-tv-network.js',
   'snx-tv-network.css',
@@ -86,9 +87,9 @@ const TV_NETWORK_FIRST_FILES = [
   'snx-ch-firebase.js',
   'snx-ch-engine.js',
   'channel.html',
-  // snx-tv-live-view.js removed — SNS Live viewer shell, not a TV file
-  // snx-creator-live.js removed — SNS Live broadcaster, not a TV file
-  // snx-creator-live-viewer.js removed — SNS Live viewer, not a TV file
+  // SNS Live engine files — always network-first so fixes are never stale
+  'live.js',
+  'live.css',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

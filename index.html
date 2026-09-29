@@ -11917,8 +11917,8 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div><!-- end livePage -->
 
 <!-- ── Shadow Nexus Live — CSS + Engine ── -->
-<link rel="stylesheet" href="live.css?v=SNS-2026-LIVE-002">
-<script type="module" src="live.js?v=SNS-2026-LIVE-002"></script>
+<link rel="stylesheet" href="live.css?v=SNS-2026-LIVE-003">
+<script type="module" src="live.js?v=SNS-2026-LIVE-003"></script>
 
 <!-- ── Load 24-Hour TV adapter as ES module (no second Firebase init, no second login) ── -->
 <script type="module" src="snx-ch-adapter.js"></script>
@@ -11933,7 +11933,7 @@ body.arcade-fs-ios body::after { display:none !important; }
  * Auth is read from window._snxCurrentUser (set by the main SNS auth block).
  * No second login, no second Firebase init.
  *
- * Build: SHADOW-TV-2026-GLOBAL-UPDATE-01
+ * Build: SHADOW-TV-2026-GLOBAL-UPDATE-02
  *
  * TABS: WATCH | TV STUDIO (founder only)
  * Removed: GUIDE tab, MORE tab, Channels tab, My Channel tab, Go Live.
@@ -12826,15 +12826,39 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       );
     }
 
-    // Start watcher once auth resolves and a user is present.
-    window._snxOnAuthReady(function() {
-      if (!window._snxCurrentUser) return;
-      _attachRtdbWatcher();
-    });
+    // Start watcher once RTDB is ready.
+    // liveRooms is publicly readable (no auth required) — guests and signed-in users
+    // both get the live room list. The auth gate was removed in the RTDB rules update
+    // for guest-mode support. _attachRtdbWatcher() guards against double-attach.
+    function _startWatcherWhenReady() {
+      if (window._snxLiveDB && window._snxRtdbApi) {
+        _attachRtdbWatcher();
+      } else {
+        // RTDB API not injected yet — wait for auth-ready or a short poll
+        window._snxOnAuthReady(function() { _attachRtdbWatcher(); });
+        // Also retry for guests who never hit auth-ready (RTDB API is set after module load)
+        setTimeout(function() {
+          if (!_rtdbUnsub) _attachRtdbWatcher();
+        }, 1500);
+      }
+    }
+    _startWatcherWhenReady();
   }
 
   // ── Invoke Feed Live Banner watcher (defined above) ──
   initFeedLiveBanner();
+
+  // ── Expose public-content starters for guest mode ──
+  // initTimelineStream and initStoryBar are module-scoped; the guest system
+  // calls these via window after the user presses CONTINUE AS GUEST.
+  window.initTimelineStream = initTimelineStream;
+  // snxStartFeedLiveBanner: starts the RTDB liveRooms watcher without needing auth.
+  // liveRooms is now publicly readable in RTDB rules (guest-mode update).
+  window.snxStartFeedLiveBanner = function() {
+    if (window._snxFeedLiveBannerStarted) return; // already running
+    window._snxFeedLiveBannerStarted = true;
+    initFeedLiveBanner();
+  };
 
   window.handleLogout = async () => {
       // ── Timing: logout initiated ──
@@ -14170,15 +14194,16 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           if (loadingEl) loadingEl.remove();
           if (!container.querySelector('.postBox')) {
               const isPermission = feedErr.code === 'permission-denied';
-              container.innerHTML = `
-                <div style="text-align:center;padding:48px 20px;color:#3a5a7a;">
-                    <div style="font-size:36px;margin-bottom:14px;">${isPermission ? '🔒' : '📡'}</div>
-                    <div style="font-size:14px;font-weight:700;color:#ff6680;margin-bottom:8px;">
-                        ${isPermission ? 'Access denied — please sign out and sign back in.' : 'Could not load posts — check your connection.'}
-                    </div>
-                    <div style="font-size:12px;color:#3a5a7a;margin-bottom:16px;">${(feedErr.message || feedErr.code || 'Unknown error').replace(/</g,'&lt;')}</div>
-                    <button onclick="initTimelineStream()" style="padding:8px 20px;border-radius:20px;border:1px solid rgba(0,174,239,0.5);background:rgba(0,30,70,0.7);color:#00AEEF;font-size:12px;cursor:pointer;">🔄 Retry</button>
-                </div>`;
+              const isGuest = typeof window.snxIsGuest === 'function' && window.snxIsGuest();
+                 container.innerHTML = `
+                   <div style="text-align:center;padding:48px 20px;color:#3a5a7a;">
+                       <div style="font-size:36px;margin-bottom:14px;">${isPermission ? '📡' : '📡'}</div>
+                       <div style="font-size:14px;font-weight:700;color:#ff6680;margin-bottom:8px;">
+                           ${'Could not load posts — check your connection.'}
+                       </div>
+                       <div style="font-size:12px;color:#3a5a7a;margin-bottom:16px;">${(feedErr.message || feedErr.code || 'Unknown error').replace(/</g,'&lt;')}</div>
+                       <button onclick="initTimelineStream()" style="padding:8px 20px;border-radius:20px;border:1px solid rgba(0,174,239,0.5);background:rgba(0,30,70,0.7);color:#00AEEF;font-size:12px;cursor:pointer;">🔄 Retry</button>
+                   </div>`;
           }
       });
   }
@@ -34184,11 +34209,11 @@ window.snxFounderPanelCleanup = (function() {
 </div>
 
 <!-- 3. JOIN SHADOW NEXUS MODAL (reusable — one instance) -->
-<div id="snxJoinModal" style="display:none;position:fixed;inset:0;z-index:8300;background:rgba(0,3,15,0.90);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;backdrop-filter:blur(6px);">
+<div id="snxJoinModal" style="display:none;position:fixed;inset:0;z-index:8300;background:rgba(0,3,15,0.92);align-items:center;justify-content:center;padding:20px;box-sizing:border-box;backdrop-filter:blur(6px);">
   <div style="background:#060d1e;border:1px solid rgba(0,174,239,0.38);border-radius:18px;width:100%;max-width:400px;padding:28px 22px 22px;box-sizing:border-box;box-shadow:0 0 60px rgba(0,100,255,0.22);animation:deleteModalIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both;text-align:center;">
     <div style="font-size:32px;margin-bottom:10px;">⚡</div>
-    <h2 style="margin:0 0 8px;color:#fff;font-size:18px;font-weight:800;letter-spacing:1px;">JOIN SHADOW NEXUS</h2>
-    <p style="color:#6a90b8;font-size:13px;margin:0 0 14px;line-height:1.6;">You're exploring Shadow Nexus as a guest.<br>Create your free account to unlock the full Nexus.</p>
+    <h2 id="snxJoinModalTitle" style="margin:0 0 8px;color:#fff;font-size:18px;font-weight:800;letter-spacing:1px;">SHADOW NEXUS SOCIAL</h2>
+    <p id="snxJoinModalDesc" style="color:#6a90b8;font-size:13px;margin:0 0 14px;line-height:1.6;">Want to join in?<br>Create an account or sign in to interact with the Shadow Nexus community.</p>
     <div style="background:rgba(0,40,100,0.30);border:1px solid rgba(0,174,239,0.18);border-radius:10px;padding:12px 16px;margin-bottom:18px;text-align:left;">
       <div style="font-size:11px;font-weight:700;color:#00AEEF;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:8px;">UNLOCK FULL ACCESS</div>
       <div style="font-size:12px;color:#7a9ab8;line-height:2;display:grid;grid-template-columns:1fr 1fr;gap:0;">
@@ -34198,12 +34223,14 @@ window.snxFounderPanelCleanup = (function() {
         <span>✓ Live Chat</span>
         <span>✓ Creator Channel</span>
         <span>✓ Notifications</span>
+        <span>✓ Go Live</span>
         <span>✓ Stories</span>
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;">
       <button onclick="snxJoinGoRegister()" style="width:100%;padding:12px;border-radius:10px;background:linear-gradient(135deg,#003d99,#0066cc);border:1px solid rgba(0,174,239,0.65);color:#fff;font-size:14px;font-weight:800;">⚡ CREATE ACCOUNT</button>
-      <button onclick="snxJoinClose()" id="snxJoinExploreBtn" style="width:100%;padding:10px;border-radius:10px;background:transparent;border:1px solid rgba(57,255,20,0.28);color:#39FF14;font-size:13px;font-weight:700;">👁 KEEP EXPLORING</button>
+      <button onclick="snxJoinGoSignIn()" style="width:100%;padding:12px;border-radius:10px;background:rgba(0,60,120,0.35);border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:14px;font-weight:800;">🔑 SIGN IN</button>
+      <button onclick="snxJoinClose()" id="snxJoinExploreBtn" style="width:100%;padding:10px;border-radius:10px;background:transparent;border:1px solid rgba(57,255,20,0.28);color:#39FF14;font-size:13px;font-weight:700;">👁 NOT NOW</button>
     </div>
   </div>
 </div>
@@ -34374,6 +34401,10 @@ window.snxFounderPanelCleanup = (function() {
         if (menuBtn) menuBtn.style.display = 'flex';
 
         _updateIndicator();
+
+        // Apply nav lock hints and start public content listeners
+        _applyNavLockHints();
+        setTimeout(_initGuestPublicContent, 300);
     };
 
     /* Show the indicator once guest is active */
@@ -34407,19 +34438,44 @@ window.snxFounderPanelCleanup = (function() {
        JOIN MODAL — one reusable instance
     ───────────────────────────────────────────────────────── */
 
-    /* Open Join modal. mediaProtect=true → KEEP EXPLORING won't stop media. */
-    window.snxJoinOpen = function(mediaProtect) {
+    /* Reset modal title/desc to default copy */
+    function _resetJoinModal() {
+        const title = document.getElementById('snxJoinModalTitle');
+        const desc  = document.getElementById('snxJoinModalDesc');
+        if (title) title.textContent = 'SHADOW NEXUS SOCIAL';
+        if (desc)  desc.innerHTML = "Want to join in?<br>Create an account or sign in to interact with the Shadow Nexus community.";
+    }
+
+    /* Open Join modal.
+       opts.title / opts.desc override the copy for context-specific prompts.
+       opts.mediaProtect  → NOT NOW label stays as music variant. */
+    window.snxJoinOpen = function(optsOrMediaProtect) {
         const modal = document.getElementById('snxJoinModal');
         if (!modal) return;
+        _resetJoinModal();
+        let mediaProtect = false;
+        if (optsOrMediaProtect && typeof optsOrMediaProtect === 'object') {
+            mediaProtect = !!optsOrMediaProtect.mediaProtect;
+            if (optsOrMediaProtect.title) {
+                const title = document.getElementById('snxJoinModalTitle');
+                if (title) title.textContent = optsOrMediaProtect.title;
+            }
+            if (optsOrMediaProtect.desc) {
+                const desc = document.getElementById('snxJoinModalDesc');
+                if (desc) desc.innerHTML = optsOrMediaProtect.desc;
+            }
+        } else {
+            mediaProtect = !!optsOrMediaProtect;
+        }
         modal.style.display = 'flex';
-        // KEEP EXPLORING button — label varies but always closes modal
         const btn = document.getElementById('snxJoinExploreBtn');
-        if (btn) btn.textContent = mediaProtect ? '🎵 KEEP EXPLORING' : '👁 KEEP EXPLORING';
+        if (btn) btn.textContent = mediaProtect ? '🎵 NOT NOW' : '👁 NOT NOW';
     };
 
     window.snxJoinClose = function() {
         const modal = document.getElementById('snxJoinModal');
         if (modal) modal.style.display = 'none';
+        _resetJoinModal();
     };
 
     window.snxJoinGoRegister = function() {
@@ -34428,6 +34484,14 @@ window.snxFounderPanelCleanup = (function() {
         // Scroll to register form
         const regBtn = document.getElementById('btnRegister');
         if (regBtn) setTimeout(() => regBtn.click(), 100);
+    };
+
+    /* SIGN IN button in join modal */
+    window.snxJoinGoSignIn = function() {
+        snxJoinClose();
+        snxGuestExit();
+        // Show sign-in form (not register)
+        if (typeof show === 'function') show('login');
     };
 
     /* ─────────────────────────────────────────────────────────
@@ -34628,27 +34692,12 @@ window.snxFounderPanelCleanup = (function() {
         }
     }
 
-    /* Show a channel-specific JOIN prompt for guests — not a generic modal.
-       Called when a guest taps "My Channel" in the Nexus page nav. */
+    /* Show a channel-specific JOIN prompt for guests — not a generic modal. */
     function _showGuestChannelBlock() {
-        // Customise the join modal title for the channel context
-        const modal = document.getElementById('snxJoinModal');
-        if (modal) {
-            const title = modal.querySelector('h2');
-            if (title) title.textContent = '📺 CREATE YOUR CHANNEL';
-            const desc = modal.querySelector('p');
-            if (desc) desc.textContent = 'Join Shadow Nexus to create your own Creator Channel.';
-        }
-        snxJoinOpen();
-        // Restore default title after closing
-        setTimeout(function() {
-            const m2 = document.getElementById('snxJoinModal');
-            if (!m2) return;
-            const t2 = m2.querySelector('h2');
-            if (t2) t2.textContent = '⚡ JOIN SHADOW NEXUS';
-            const d2 = m2.querySelector('p');
-            if (d2) d2.textContent = "You're exploring Shadow Nexus as a guest.\nCreate your free account to unlock the full Nexus.";
-        }, 600);
+        snxJoinOpen({
+            title: '📺 CREATE YOUR CHANNEL',
+            desc:  'Join Shadow Nexus to create your own Creator Channel and broadcast to the community.'
+        });
     }
 
     /* ── Guard: Live Chat write (ipcModalInput send button) ── */
@@ -34752,13 +34801,43 @@ window.snxFounderPanelCleanup = (function() {
         window._snxGuestGoLiveHooked = true;
         const _wrappedGoLive = function() {
             if (!_isAuthUser() && window.snxIsGuest && window.snxIsGuest()) {
-                if (typeof window.snxJoinOpen === 'function') window.snxJoinOpen();
+                snxJoinOpen({ title: '🔴 GO LIVE', desc: 'Sign in to start your Shadow Nexus Live broadcast.' });
                 return;
             }
             return orig.apply(this, arguments);
         };
         if (window.snxLiveOpenGoLive) window.snxLiveOpenGoLive = _wrappedGoLive;
         if (window.goLiveOrWatch) window.goLiveOrWatch = _wrappedGoLive;
+    }
+
+    /* ── Guard: TV Studio tab (snxTvNetworkInit wraps the studio tab display) ── */
+    function _hookTvStudio() {
+        if (window._snxGuestTvStudioHooked) return;
+        // The TV network shows TV STUDIO only to founders via _refreshStudioTab().
+        // For guests who somehow navigate directly, guard snxOpen24HourTV result
+        // by intercepting the TV Network's openStudio / switchToStudio methods.
+        const tryHookStudio = function() {
+            if (window._snxGuestTvStudioHooked) return;
+            const m = window._tvNetworkModule;
+            if (!m) return;
+            // Hook switchTab so clicking TV STUDIO tab shows login prompt
+            const origSwitch = m.switchTab || m._switchTab;
+            if (origSwitch) {
+                window._snxGuestTvStudioHooked = true;
+                const guarded = function(tabId) {
+                    if ((tabId === 'tv-studio' || tabId === 'studio') && !_isAuthUser() && window.snxIsGuest()) {
+                        snxJoinOpen({ title: '📺 TV STUDIO', desc: 'TV Studio is available to authorized staff. Sign in to continue.' });
+                        return;
+                    }
+                    return origSwitch.apply(this, arguments);
+                };
+                if (m.switchTab) m.switchTab = guarded;
+                if (m._switchTab) m._switchTab = guarded;
+            }
+        };
+        tryHookStudio();
+        setTimeout(tryHookStudio, 1500);
+        setTimeout(tryHookStudio, 3000);
     }
 
     /* ─────────────────────────────────────────────────────────
@@ -34787,6 +34866,7 @@ window.snxFounderPanelCleanup = (function() {
         _tryHook(_hookInboxPage);
         _tryHook(_hookNotificationsPage);
         _tryHook(_hookMyChannel);
+        _tryHook(_hookTvStudio);
 
         // Guard _startInboxListener so it never queries Firestore for guests
         function _hookInboxListener() {
@@ -34800,6 +34880,95 @@ window.snxFounderPanelCleanup = (function() {
             };
         }
         _tryHook(_hookInboxListener);
+
+        // Apply navigation lock visual hints for guest users
+        _applyNavLockHints();
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       NAVIGATION LOCK HINTS
+       Adds subtle lock indicator to account-only nav items.
+       Only visible when in guest mode.
+    ───────────────────────────────────────────────────────── */
+    function _applyNavLockHints() {
+        // Lock badge CSS (injected once)
+        if (!document.getElementById('snxGuestNavLockStyle')) {
+            const s = document.createElement('style');
+            s.id = 'snxGuestNavLockStyle';
+            s.textContent = `
+                .snx-guest-lock-badge {
+                    display: inline-block;
+                    font-size: 9px;
+                    opacity: 0.55;
+                    margin-left: 3px;
+                    vertical-align: middle;
+                    pointer-events: none;
+                }
+            `;
+            document.head.appendChild(s);
+        }
+        // Add lock icon to specific nav buttons (idempotent)
+        const lockItems = [
+            { id: 'scNavInbox',   label: '💬 Inbox 🔒' },
+            { id: 'scNavNotifs',  label: '🔔 Notifications 🔒' },
+            { id: 'navInbox',     label: '💬 Inbox 🔒' },
+            { id: 'navNotifs',    label: '🔔 Notifications 🔒' },
+        ];
+        // Only apply when guest mode is active
+        if (!window.snxIsGuest()) return;
+        lockItems.forEach(function(item) {
+            const el = document.getElementById(item.id);
+            if (!el || el.dataset.snxGuestLocked) return;
+            el.dataset.snxGuestLocked = '1';
+            // Add a small lock span inside the label
+            const labelEl = el.querySelector('.sc-item-label, .nav-item-label');
+            if (labelEl && !labelEl.querySelector('.snx-guest-lock-badge')) {
+                const lock = document.createElement('span');
+                lock.className = 'snx-guest-lock-badge';
+                lock.textContent = '🔒';
+                labelEl.appendChild(lock);
+            }
+        });
+    }
+
+    /* Remove lock hints when user signs in */
+    function _removeNavLockHints() {
+        document.querySelectorAll('[data-snx-guest-locked]').forEach(function(el) {
+            el.removeAttribute('data-snx-guest-locked');
+        });
+        document.querySelectorAll('.snx-guest-lock-badge').forEach(function(el) {
+            el.remove();
+        });
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       GUEST FEED & STORY BAR INIT
+       Calls initTimelineStream() and initStoryBar() for guests
+       so public content is visible without authentication.
+    ───────────────────────────────────────────────────────── */
+    function _initGuestPublicContent() {
+        if (_isAuthUser()) return;  // auth user handles their own init
+        if (!window.snxIsGuest()) return;
+
+        // Start feed (public posts — Firestore posts collection now allows public read)
+        if (typeof window.initTimelineStream === 'function') {
+            window.initTimelineStream();
+        }
+
+        // Start story bar (public stories — Firestore stories collection now allows public read)
+        if (typeof window._initStorySystem === 'function') {
+            window._initStorySystem();
+        } else if (typeof window.initStoryBar === 'function') {
+            window.initStoryBar();
+        }
+
+        // Start Feed Live Banner RTDB watcher (liveRooms now publicly readable)
+        // The watcher is defined in the inline module script and calls _attachRtdbWatcher.
+        // We call it indirectly — if initFeedLiveBanner is exposed, call it.
+        // It guards internally against double-init via the watcher flag.
+        if (typeof window.snxStartFeedLiveBanner === 'function') {
+            window.snxStartFeedLiveBanner();
+        }
     }
 
     /* ─────────────────────────────────────────────────────────
@@ -34812,6 +34981,7 @@ window.snxFounderPanelCleanup = (function() {
             _clearSession();
             _updateIndicator();
             _restoreInbox();
+            _removeNavLockHints();
         }
     });
 
@@ -34846,7 +35016,10 @@ window.snxFounderPanelCleanup = (function() {
             const menuBtn = document.getElementById('menuButton');
             if (menuBtn) menuBtn.style.display = 'flex';
             _updateIndicator();
+            _applyNavLockHints();
             if (typeof navTo === 'function') navTo('feed');
+            // Kick off public feed + story listeners for resumed guest session
+            setTimeout(_initGuestPublicContent, 500);
         });
     }
 

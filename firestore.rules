@@ -225,9 +225,13 @@ service cloud.firestore {
     }
 
     // ── Stories ───────────────────────────────────────────────────────────────
+    //
+    // READ: public (no auth required) — guests can view the public story bar.
+    //       Stories only contain public broadcast content, no private DMs.
+    // WRITE: signed-in users only.
 
     match /stories/{storyId} {
-      allow read:   if isSignedIn();
+      allow read:   if true;
       allow create: if isSignedIn();
       allow update: if isSignedIn();
       allow delete: if isSignedIn()
@@ -237,9 +241,14 @@ service cloud.firestore {
     }
 
     // ── Posts ─────────────────────────────────────────────────────────────────
+    //
+    // READ: public (no auth required) — guests can browse the public Feed.
+    //       The Feed is the main public content surface of Shadow Nexus.
+    //       No private information is stored in post documents.
+    // WRITE: signed-in users only.
 
     match /posts/{postId} {
-      allow read:   if isSignedIn();
+      allow read:   if true;
       allow create: if isSignedIn();
       allow update: if isSignedIn()
         && (resource.data.uid == request.auth.uid
@@ -383,9 +392,13 @@ service cloud.firestore {
     }
 
     // ── Announcements ─────────────────────────────────────────────────────────
+    //
+    // READ: public — site-wide announcements are shown to all visitors including
+    //       guests. No private information stored here.
+    // WRITE: Founder only.
 
     match /announcements/{docId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create, update, delete: if isFounder();
     }
 
@@ -459,14 +472,16 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.ownerUid == request.auth.uid;
 
-      allow read: if isSignedIn()
-        && (resource.data.ownerUid == request.auth.uid
-            || isFounder()
-            || resource.data.privacy == 'public'
-            || (resource.data.privacy == 'followers'
-                && isFollowerOf(resource.data.ownerUid))
-            || (resource.data.privacy == 'friends'
-                && isFriendOf(resource.data.ownerUid)));
+      // Unauthenticated guests can read photos explicitly marked public.
+      // Signed-in users follow the full privacy model.
+      allow read: if resource.data.privacy == 'public'
+        || (isSignedIn()
+            && (resource.data.ownerUid == request.auth.uid
+                || isFounder()
+                || resource.data.privacy == 'followers'
+                    && isFollowerOf(resource.data.ownerUid)
+                || resource.data.privacy == 'friends'
+                    && isFriendOf(resource.data.ownerUid)));
 
       // Owner / Founder can update anything.
       // Any signed-in user can update only the social reaction fields (like/comment counts).

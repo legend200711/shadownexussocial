@@ -33,7 +33,7 @@
     },
 
     "liveRooms": {
-      ".read":   "auth != null",
+      ".read":   true,
       "$roomId": {
         ".write": "auth != null && (root.child('liveRooms').child($roomId).child('hostId').val() == auth.uid || !root.child('liveRooms').child($roomId).exists())"
       }

@@ -1,9 +1,11 @@
 {
-  "buildId": "SHADOW-TV-2026-GLOBAL-UPDATE-01",
-  "swVersion": "v85",
+  "buildId": "SNS-2026-GUEST-MODE-001",
+  "swVersion": "v87",
   "deployedAt": "2026-10-02T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
-  "note": "SHADOW-TV-2026-GLOBAL-UPDATE-01: Global update. 24-Hour TV tabs confirmed WATCH + TV STUDIO only. Removed GUIDE tab, MORE tab, Channels tab, My Channel tab, Go Live from 24-Hour TV UI. Removed stale viewer deep-links (snxOpenTvLive/snxOpenTvReplay no longer launch WebRTC viewer). snx:openCreatorChannel now navigates to WATCH tab only. VIEW CHANNEL button now uses snxOpen24HourTV() directly. Comments and sequence labels updated throughout index.html. SW v85 cache bust."
+  "liveVersion": "SNS-2026-LIVE-003",
+  "guestModeVersion": "SNS-2026-GUEST-MODE-001",
+  "note": "SNS-2026-GUEST-MODE-001: Complete Guest Mode experience. Firestore: posts + stories public read for guest feed/story bar. announcements public read. albumPhotos public-privacy photos readable without auth. RTDB: liveRooms public read for Feed Live Banner. JS: initTimelineStream + _initStorySystem exposed on window for guest init. snxJoinModal upgraded with SIGN IN button + context-aware title/desc. _hookTvStudio guard added. Nav lock hints (Inbox/Notifications). snxJoinGoSignIn added. _initGuestPublicContent starts feed+stories+live banner for guests. _removeNavLockHints on auth login. Feed error message no longer shows Access Denied to guests."
 }
