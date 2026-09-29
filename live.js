@@ -1,6 +1,6 @@
 /**
  * Shadow Nexus Social — Live System
- * live.js  (SNS-2026-LIVE-006)
+ * live.js  (SNS-2026-LIVE-008)
  *
  * ONE canonical Live engine for Shadow Nexus Social.
  * ES module — loaded as <script type="module"> in index.html.
@@ -28,6 +28,33 @@
  *   - VIEWER: _setViewerStatus extended with NEGOTIATING state
  *   - VIEWER: connTimeout cleared in _cleanupViewer
  *   - ALL: checkpoint labels match spec exactly
+ *
+ * FIXES (SNS-2026-LIVE-008):
+ *   - PART 5 (complete): _fetchTurnConfig() added — fetches short-lived TURN
+ *     credentials from /turn-credentials on the Cloudflare Worker (backed by
+ *     LiveKit RTCService/GetICEServers). Called once at host _startLive() and
+ *     once at guest _guestJoinAsViewer(). Credentials never hardcoded.
+ *     Falls back to STUN-only silently if the fetch fails.
+ *   - upload-worker.js: /turn-credentials endpoint added (handleTurnCredentials).
+ *     Requires LIVEKIT_API_KEY + LIVEKIT_API_SECRET Worker secrets (already set).
+ *     Requires Firebase ID token — unauthenticated callers get 401.
+ *     Returns short-lived ICE servers with private, max-age=3000 Cache-Control.
+ *
+ * FIXES (SNS-2026-LIVE-007):
+ *   - PART 1:  Production version tag updated to LIVE-006 in index.html.
+ *   - PART 3:  Black-box ontrack race fixed. setGuestStream() is now called only
+ *              after a live video track (readyState !== 'ended') exists in the
+ *              remote stream. Per-UID remote streams are assembled additively as
+ *              tracks arrive. Duplicate track insertion prevented. If only audio
+ *              arrives first the box stays in CONNECTING state.
+ *   - PART 4:  Host-only Remove Guest button added to each guest box.
+ *              Uses existing _hostCleanupGuest(). Guests and plain viewers cannot
+ *              see or trigger this control.
+ *   - PART 5:  TURN configuration hook added to _ICE_CONFIG via window.__snxTurnConfig.
+ *              STUN fallback preserved. No credentials hardcoded.
+ *   - PART 6:  Guest media constraints already include echoCancellation,
+ *              noiseSuppression, autoGainControl. Verified local guest preview
+ *              video element is muted. No duplicate remote audio elements.
  *
  * FIXES (SNS-2026-LIVE-006):
  *   - GUEST BOX WEBRTC HANDOFF (SNX-GUEST-001):
@@ -63,14 +90,88 @@ import {
 
 /* ══════════════════════════════════════════════════════════
    ICE CONFIGURATION
+   STUN servers are always present.
+   TURN servers are fetched once per session from the Cloudflare
+   Worker endpoint /turn-credentials (backed by LiveKit) and stored
+   in window.__snxTurnConfig.  _buildIceConfig() merges them in.
+   Short-lived credentials (~1 h TTL) are fetched fresh each Live
+   session so they are never stale or hardcoded.
 ════════════════════════════════════════════════════════════ */
-const _ICE_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-  ],
-};
+const _STUN_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+];
+
+// Worker base URL — matches the existing upload worker used by the project.
+const _WORKER_BASE = 'https://yellow-term-11e6.nthntjrn.workers.dev';
+
+function _buildIceConfig() {
+  const turn = window.__snxTurnConfig;
+  const extra = Array.isArray(turn) && turn.length ? turn : [];
+  return { iceServers: [..._STUN_SERVERS, ...extra] };
+}
+
+// Re-evaluated each time a new RTCPeerConnection is created so that
+// a late-arriving __snxTurnConfig is picked up automatically.
+const _ICE_CONFIG = { iceServers: _STUN_SERVERS };  // kept for backward compat; peers call _buildIceConfig()
+
+/**
+ * Fetch short-lived TURN credentials from the worker and store them in
+ * window.__snxTurnConfig.  Called once at the start of each Live session
+ * (host) and once when a viewer is accepted as a guest.
+ *
+ * Silently falls back to STUN-only if the request fails — the session
+ * still works on same-network; cross-NAT may fail without TURN.
+ */
+async function _fetchTurnConfig() {
+  try {
+    const user = _user();
+    if (!user) return;
+
+    // Get the Firebase ID token to authenticate the worker request
+    let idToken = null;
+    try {
+      const auth = window._snxAuth;
+      if (auth && auth.currentUser && typeof auth.currentUser.getIdToken === 'function') {
+        idToken = await auth.currentUser.getIdToken();
+      }
+    } catch (_) {}
+
+    if (!idToken) {
+      _log('TURN: no ID token — skipping, STUN-only');
+      return;
+    }
+
+    const resp = await fetch(_WORKER_BASE + '/turn-credentials', {
+      method:  'GET',
+      headers: { 'Authorization': 'Bearer ' + idToken },
+    });
+
+    if (!resp.ok) {
+      _log('TURN: worker returned ' + resp.status + ' — STUN-only fallback');
+      return;
+    }
+
+    const data = await resp.json();
+    const servers = data.iceServers;
+    if (!Array.isArray(servers) || !servers.length) {
+      _log('TURN: empty iceServers from worker — STUN-only fallback');
+      return;
+    }
+
+    // Filter to TURN entries only (STUN entries from LiveKit are redundant with ours)
+    const turnOnly = servers.filter(s => {
+      const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+      return urls.some(u => typeof u === 'string' && u.startsWith('turn:'));
+    });
+
+    window.__snxTurnConfig = turnOnly.length ? turnOnly : servers;
+    _log('TURN: configured — ' + (window.__snxTurnConfig.length) + ' TURN server(s) from LiveKit');
+  } catch (e) {
+    _log('TURN: fetch failed (' + e.message + ') — STUN-only fallback');
+  }
+}
 
 /* ══════════════════════════════════════════════════════════
    STALE SESSION DETECTION
@@ -419,6 +520,10 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   const db = _db();
   if (!db) throw new Error('Firebase RTDB not initialised');
 
+  // Fetch fresh TURN credentials before creating any peer connections.
+  // Non-blocking: if it fails we fall back to STUN-only transparently.
+  await _fetchTurnConfig();
+
   await _endAbandonedRooms(user.uid, db);
 
   const ud         = _userData();
@@ -505,7 +610,7 @@ function _startHostWebRTC(user, roomId, localStream, db) {
 }
 
 async function _hostConnectViewer(viewerId, roomId, localStream, db) {
-  const pc = new RTCPeerConnection(_ICE_CONFIG);
+  const pc = new RTCPeerConnection(_buildIceConfig());
   _S.hostPeers[viewerId] = pc;
   _hLog('peer-created', 'viewerId=' + viewerId + ' roomId=' + roomId);
 
@@ -1010,7 +1115,7 @@ async function _openViewerScreen(roomId) {
     _setViewerStatus('negotiating');
 
     try {
-      pc = new RTCPeerConnection(_ICE_CONFIG);
+      pc = new RTCPeerConnection(_buildIceConfig());
       _S.viewPc = pc;
       _vLog('peer-created', 'roomId=' + roomId);
 
@@ -1563,6 +1668,8 @@ function _buildBox(uid, name, role) {
   const videoEl = document.createElement('video');
   videoEl.setAttribute('playsinline', '');
   videoEl.setAttribute('autoplay', '');
+  // Host box is always muted (prevents local echo).
+  // Guest boxes are NOT muted — host must hear guest audio.
   if (role === 'host') videoEl.muted = true;
   el.appendChild(videoEl);
 
@@ -1607,6 +1714,30 @@ function _buildBox(uid, name, role) {
     }
   });
   el.appendChild(tapEl);
+
+  // HOST-ONLY: Remove Guest button
+  // Visible only when the stage has class .is-host (CSS) AND only present
+  // in the DOM when role === 'guest' — host cannot remove themselves.
+  if (role === 'guest') {
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'snx-box-remove-btn';
+    removeBtn.setAttribute('aria-label', 'Remove guest');
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Double-check we are on the host stage before acting
+      const stage = _getStage();
+      if (!stage || !stage.classList.contains('is-host')) return;
+      // Use existing backend cleanup
+      const roomId = _S.hostRoomId;
+      const db     = _db();
+      if (roomId && db) {
+        _hostCleanupGuest(uid, roomId, db);
+      }
+      window.snxBoxManager.removeGuest(uid);
+    });
+    el.appendChild(removeBtn);
+  }
 
   return { uid, name, role, state: 'connecting', el, videoEl };
 }
@@ -2311,7 +2442,7 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
   console.log('[SNX-HOST-GUEST] creating peer for guestUid:', guestUid);
 
   const sigRef  = ref(db, 'guestSignaling/' + roomId + '/' + guestUid);
-  const pc      = new RTCPeerConnection(_ICE_CONFIG);
+  const pc      = new RTCPeerConnection(_buildIceConfig());
 
   // Add to box manager immediately (connecting state — no stream yet)
   window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', null);
@@ -2336,20 +2467,54 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
   };
 
   // ── ontrack: guest stream arrived ──
+  // Each UID has its own persistent remoteStream so tracks from different
+  // guests are never mixed. Tracks are added additively — audio and video
+  // may arrive in separate ontrack events.
+  //
+  // setGuestStream() is called ONLY after a live video track exists.
+  // If only an audio track has arrived so far the box stays in CONNECTING
+  // state (no unexplained black rectangle).
   const remoteStream = new MediaStream();
-  let   trackTimer   = null;
+  let   videoReadyTimer = null;
+
+  function _trySetGuestStream() {
+    // Require at least one video track that is not ended
+    const videoTracks = remoteStream.getVideoTracks().filter(t => t.readyState !== 'ended');
+    if (!videoTracks.length) {
+      console.log('[SNX-HOST-GUEST] ontrack — waiting for live video track, guestUid:', guestUid,
+        'current tracks:', remoteStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', '));
+      return;
+    }
+    console.log('[SNX-HOST-GUEST] remote stream ready — guestUid:', guestUid,
+      'tracks:', remoteStream.getTracks().length);
+    window.snxBoxManager.setGuestStream(guestUid, remoteStream);
+    console.log('[SNX-HOST-GUEST] guest box stream set — guestUid:', guestUid);
+  }
 
   pc.ontrack = (e) => {
     const track = e.track;
-    if (!remoteStream.getTracks().includes(track)) remoteStream.addTrack(track);
-    // Defer 150 ms so both audio+video are collected before attaching
-    if (trackTimer) return;
-    trackTimer = setTimeout(() => {
-      trackTimer = null;
-      console.log('[SNX-HOST-GUEST] remote track received — guestUid:', guestUid, 'tracks:', remoteStream.getTracks().length);
-      window.snxBoxManager.setGuestStream(guestUid, remoteStream);
-      console.log('[SNX-HOST-GUEST] guest added to box (stream ready) — guestUid:', guestUid);
+    // Prevent duplicate track insertion into this guest's remote stream
+    if (remoteStream.getTracks().some(t => t.id === track.id)) return;
+    remoteStream.addTrack(track);
+
+    console.log('[SNX-HOST-GUEST] ontrack kind=' + track.kind + ' readyState=' + track.readyState +
+      ' guestUid:', guestUid);
+
+    // Re-evaluate readiness on a short debounce so that audio + video
+    // tracks arriving close together are both present before we attach.
+    if (videoReadyTimer) clearTimeout(videoReadyTimer);
+    videoReadyTimer = setTimeout(() => {
+      videoReadyTimer = null;
+      _trySetGuestStream();
     }, 150);
+
+    // Also re-evaluate if the video track's readyState changes
+    if (track.kind === 'video') {
+      track.addEventListener('unmute', () => {
+        if (videoReadyTimer) clearTimeout(videoReadyTimer);
+        videoReadyTimer = setTimeout(() => { videoReadyTimer = null; _trySetGuestStream(); }, 50);
+      });
+    }
   };
 
   // ── Connection state ──
@@ -2535,6 +2700,9 @@ async function _guestJoinAsViewer(roomId, db, btn) {
   const user = _user();
   if (!user || !roomId || !db) return;
 
+  // Fetch fresh TURN credentials for the guest peer connection.
+  await _fetchTurnConfig();
+
   console.log('[SNX-GUEST] accepted — acquiring camera + microphone');
 
   // ── Request camera + microphone ──
@@ -2593,7 +2761,7 @@ async function _guestJoinAsViewer(roomId, db, btn) {
   }
 
   // ── Create peer connection ──
-  const pc = new RTCPeerConnection(_ICE_CONFIG);
+  const pc = new RTCPeerConnection(_buildIceConfig());
   _guestViewerPc = pc;
 
   // Add local tracks to send to host
@@ -2796,4 +2964,4 @@ function _guestViewerCleanup() {
   console.log('[SNX-GUEST] viewer guest cleanup complete');
 }
 
-_log('live.js loaded — SNS-2026-LIVE-006');
+_log('live.js loaded — SNS-2026-LIVE-008');

@@ -13,8 +13,8 @@
  * Build: SNS-2026-GUEST-MODE-001
  */
 
-const CACHE_VERSION = 'v87';
-const BUILD_ID      = 'SNS-2026-GUEST-MODE-001';
+const CACHE_VERSION = 'v89';
+const BUILD_ID      = 'SNS-2026-LIVE-008';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 

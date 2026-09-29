@@ -1359,14 +1359,111 @@ async function handleSupabaseDelete(request, env, cors, sec) {
   }
 }
 
+// ── LiveKit TURN credential provider ─────────────────────────────────────────
+// GET /turn-credentials
+//   Returns short-lived ICE server entries (STUN + TURN) from LiveKit.
+//   Credentials expire in 1 hour (3600 s) — never cached beyond that.
+//   Requires: Authorization: Bearer <firebase-id-token>   (authenticated users only)
+//
+// LiveKit RTCService.GetICEServers is a Twirp/JSON endpoint that returns:
+//   { iceServers: [ { urls, username, credential } ] }
+// Docs: https://docs.livekit.io/reference/server-apis/
+async function handleTurnCredentials(request, env, cors, sec) {
+  // Only allow authenticated users
+  let uid;
+  try { uid = await _requireAuth(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.status || 401,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
 
-// ── Admin endpoints ──
+  const apiKey    = env.LIVEKIT_API_KEY;
+  const apiSecret = env.LIVEKIT_API_SECRET;
+  const livekitUrl = (env.LIVEKIT_URL || '')
+    .replace('wss://', 'https://')
+    .replace('ws://',  'http://');
+
+  if (!apiKey || !apiSecret) {
+    return new Response(JSON.stringify({ error: 'LiveKit credentials not configured' }), {
+      status: 500,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  // Mint a minimal LiveKit JWT with no room/publish grants — only used to
+  // authenticate the GetICEServers call. Valid for 65 seconds (enough for one call).
+  const now = Math.floor(Date.now() / 1000);
+  const token = await signLiveKitJwt(apiKey, apiSecret, {
+    iss: apiKey,
+    sub: uid,
+    iat: now,
+    exp: now + 65,
+    nbf: now,
+    video: {},   // no room grants needed for GetICEServers
+  });
+
+  let lkResp;
+  try {
+    lkResp = await fetch(`${livekitUrl}/twirp/livekit.RTCService/GetICEServers`, {
+      method:  'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'LiveKit TURN API unreachable: ' + e.message }), {
+      status: 502,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  if (!lkResp.ok) {
+    const errBody = await lkResp.text();
+    return new Response(JSON.stringify({ error: 'LiveKit TURN API error: ' + errBody }), {
+      status: lkResp.status,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
+  const lkData = await lkResp.json();
+  // lkData.iceServers is an array of { urls, username, credential }
+  const iceServers = lkData.iceServers || [];
+
+  return new Response(JSON.stringify({ iceServers }), {
+    status: 200,
+    headers: mergeHeaders(cors, sec, {
+      'Content-Type':  'application/json',
+      // Allow clients to cache the response for up to 50 minutes (credentials are valid 1 h)
+      'Cache-Control': 'private, max-age=3000',
+    })
+  });
+}
+
+
+export default {
+  async fetch(request, env, ctx) {
+    const url    = new URL(request.url);
+    const origin = request.headers.get('Origin') || '';
+    const cors   = corsHeaders(origin);
+    const sec    = securityHeaders();
+
+    // OPTIONS preflight
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: mergeHeaders(cors, sec) });
+    }
+
+    // ── Admin endpoints ──
     if (url.pathname === '/admin/delete-user' && request.method === 'POST') return handleAdminDeleteUser(request, env, cors, sec);
 
 
     // ── LiveKit endpoints ──
     if (url.pathname === '/livekit-room')  return handleLiveKitRoom(request, env, cors, sec);
     if (url.pathname === '/livekit-token') return handleLiveKitToken(request, env, cors, sec);
+    if (url.pathname === '/turn-credentials') return handleTurnCredentials(request, env, cors, sec);
 
     // ── Chunked / resumable upload endpoints ──
     if (url.pathname === '/upload-chunk')    return handleUploadChunk(request, env, cors, sec);
@@ -1729,5 +1826,6 @@ async function handleSupabaseDelete(request, env, cors, sec) {
       status: 200,
       headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
     });
-  }
-};
+
+  }, // end async fetch
+}; // end export default

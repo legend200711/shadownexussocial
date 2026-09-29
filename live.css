@@ -1441,6 +1441,42 @@
   text-align: center;
 }
 
+/* ── Remove Guest button — host-only, top-right of each guest box ──
+   .is-host ensures it is invisible on viewer/guest stage.            */
+.snx-box-remove-btn {
+  display: none;          /* hidden unless on host stage */
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 20;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+  font-size: 11px;
+  font-weight: 900;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+/* Visible only on host stage */
+.snx-live-stage.is-host .snx-box-remove-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.snx-live-stage.is-host .snx-box-remove-btn:hover,
+.snx-live-stage.is-host .snx-box-remove-btn:active {
+  background: rgba(220, 50, 50, 0.75);
+  border-color: rgba(255, 80, 80, 0.5);
+  color: #fff;
+}
+
 /* ══════════════════════════════════════════════════════════
    REQUEST TO JOIN BUTTON (viewer side)
 ══════════════════════════════════════════════════════════ */
