@@ -272,17 +272,19 @@ service cloud.firestore {
     // ── Chats (Direct Messages — primary DM collection) ──────────────────────
     //
     //   /chats/{chatId}
-    //     chatId = sorted(uidA, uidB).join('_')
+    //     chatId = sorted(uidA, uidB).join('_')    ← deterministic
     //     participants: [uidA, uidB]
     //     messages: [ { sender, type, text, timestamp, deleted?,
     //                   deletedFor_<uid>?, reactions?, replyIdx?, replyPreview?,
-    //                   imageUrl?, edited? } ]
-    //     lastMsgTs, readReceipt,
+    //                   imageUrl?, edited? } ]       ← array, trimmed at 1000
+    //     lastMsgTs,
+    //     readReceipt,                              ← legacy boolean (kept for compat)
+    //     readBy_<uid>: true/false,                 ← canonical per-user read flag (SNS-2026-INBOX-001)
     //     unread_<uid>, typing_<uid>,
     //     pinned_<uid>, muted_<uid>, archived_<uid>, deleted_<uid>
     //
     // Only participants (or Founder) may read.
-    // Any signed-in user may create (setDoc with merge to initialise a chat doc).
+    // Any signed-in user may create (runTransaction creates on first message).
     // Only participants or moderator may update (covers message array writes,
     //   typing indicators, read receipts, pin/mute/archive flags).
     // Only a participant or Founder may delete the whole conversation doc.

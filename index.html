@@ -11918,7 +11918,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 <!-- ── Shadow Nexus Live — CSS + Engine ── -->
 <link rel="stylesheet" href="live.css?v=SNS-2026-LIVE-003">
-<script type="module" src="live.js?v=SNS-2026-LIVE-003"></script>
+<script type="module" src="live.js?v=SNS-2026-LIVE-005"></script>
 
 <!-- ── Load 24-Hour TV adapter as ES module (no second Firebase init, no second login) ── -->
 <script type="module" src="snx-ch-adapter.js"></script>
@@ -17798,18 +17798,27 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
         if (atBot) msgBox.scrollTop = msgBox.scrollHeight;
 
-        // Mark as read
-        const lastMsg = list[list.length - 1];
-        if (lastMsg && lastMsg.sender === _ibActiveUid) {
-            const upd = { readReceipt: true };
-            upd[`unread_${currentUser.uid}`] = 0;
+        // Mark as read: zero out our unread counter and record that we've read the conversation.
+        // readBy_<uid> is the canonical per-user read flag introduced in SNS-2026-INBOX-001.
+        // readReceipt (legacy boolean) is kept in sync for backward compatibility.
+        if (list.length > 0) {
+            const upd = {
+                readReceipt: true,
+                [`readBy_${currentUser.uid}`]: true,
+                [`unread_${currentUser.uid}`]: 0
+            };
             try { updateDoc(doc(db, 'chats', _ibActiveChId), upd); } catch(_) {}
         }
     }
 
     // ── Send a message ─────────────────────────────────────────
+    // _ibSendBusy — shared between button-click and Enter-key paths
+    // so neither can double-fire while a send is in flight.
+    let _ibSendBusy = false;
+
     async function _ibSend() {
         if (!currentUser || !_ibActiveChId || !_ibReady) return;
+        if (_ibSendBusy) return;
 
         // Block gate: prevent sending to users who have blocked you or who you blocked
         if (_ibActiveUid && typeof window.snxIsBlocked === 'function' && window.snxIsBlocked(_ibActiveUid)) {
@@ -17835,42 +17844,87 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         const capturedChId   = _ibActiveChId;
         const capturedTgtUid = _ibActiveUid;
 
+        _ibSendBusy = true;
         clearTimeout(_ibTypTimer);
         const sendBtn = document.getElementById('inboxChatSendBtn');
         if (sendBtn) { sendBtn.style.opacity = '0.5'; sendBtn.style.transform = 'scale(0.9)'; }
 
+        // Optimistically clear input so the user knows the message is being sent.
+        // If the write fails we restore the text.
+        const savedText = text;
+        if (inp) { inp.value = ''; _ibGrow(inp); }
+        inboxClearMedia();
+        inboxCancelReply();
+
         try {
-            const msg = { sender: currentUser.uid, type: hasMedia ? _ibMediaType : 'text', text: text || '', timestamp: Date.now() };
+            // Use a client timestamp for the message object so all fields are plain
+            // JSON (Firestore sentinels can't be stored inside array elements).
+            const clientTs = Date.now();
+            const msg = {
+                sender:    currentUser.uid,
+                type:      hasMedia ? _ibMediaType : 'text',
+                text:      savedText,
+                timestamp: clientTs
+            };
             if (hasMedia) msg.imageUrl = _ibMediaUrl;
             if (replyIdx !== null) { msg.replyIdx = replyIdx; msg.replyPreview = replyText; }
 
-            const ref = doc(db, 'chats', capturedChId);
-            const upd = { messages: arrayUnion(msg), readReceipt: false, lastMsgTs: msg.timestamp, [`typing_${currentUser.uid}`]: false };
-            upd[`unread_${capturedTgtUid}`] = increment(1);
-            // If the recipient had previously deleted this conversation, a new incoming
-            // message should make it reappear in their inbox.
-            upd[`deleted_${capturedTgtUid}`]  = false;
-            upd[`archived_${capturedTgtUid}`] = false;
+            // Atomic transaction: append message + update metadata in one write.
+            // If the document doesn't exist yet, creates it.
+            // Trims the oldest messages when the array would exceed 1 000 entries
+            // to stay safely under Firestore's 1 MiB document limit.
+            const MAX_MSGS = 1000;
+            const TRIM_TO  = 800;
 
-            await setDoc(ref, upd, { merge: true });
+            const chatRef = doc(db, 'chats', capturedChId);
+            await runTransaction(db, async (tx) => {
+                const snap = await tx.get(chatRef);
+                let existing = snap.exists() ? (snap.data().messages || []) : [];
 
-            if (inp) { inp.value = ''; _ibGrow(inp); }
-            inboxClearMedia();
-            inboxCancelReply();
+                // Trim if needed (keeps most-recent TRIM_TO messages)
+                if (existing.length >= MAX_MSGS) {
+                    existing = existing.slice(existing.length - TRIM_TO);
+                }
+                existing.push(msg);
+
+                const upd = {
+                    participants:  snap.exists() ? (snap.data().participants || [currentUser.uid, capturedTgtUid])
+                                                 : [currentUser.uid, capturedTgtUid],
+                    messages:      existing,
+                    lastMsgTs:     clientTs,
+                    readReceipt:   false,
+                    [`readBy_${currentUser.uid}`]: true,
+                    [`readBy_${capturedTgtUid}`]:  false,
+                    [`typing_${currentUser.uid}`]: false,
+                    [`unread_${capturedTgtUid}`]:  (snap.exists() ? (snap.data()[`unread_${capturedTgtUid}`] || 0) : 0) + 1,
+                    // Restore conversation if recipient had previously deleted/archived it
+                    [`deleted_${capturedTgtUid}`]:  false,
+                    [`archived_${capturedTgtUid}`]: false,
+                };
+                tx.set(chatRef, upd, { merge: true });
+            });
 
             const msgBox = document.getElementById('inboxChatMessages');
             if (msgBox) msgBox.scrollTop = msgBox.scrollHeight;
 
-            // Push notification
+            // Push notification (best-effort — does not block send success)
             try {
-                const preview = hasMedia ? (msg.type === 'image' ? '📷 Image' : msg.type === 'video' ? '🎥 Video' : '🎵 Audio') : (text.length > 80 ? text.substring(0,80) + '…' : text);
-                await pushNotification(capturedTgtUid, { type:'message', fromUid:currentUser.uid, fromName:userData.displayName, fromAvatar:userData.avatar||'', preview });
+                const preview = hasMedia
+                    ? (msg.type === 'image' ? '📷 Image' : msg.type === 'video' ? '🎥 Video' : '🎵 Audio')
+                    : (savedText.length > 80 ? savedText.substring(0,80) + '…' : savedText);
+                await pushNotification(capturedTgtUid, {
+                    type:'message', fromUid:currentUser.uid,
+                    fromName:userData.displayName, fromAvatar:userData.avatar||'', preview
+                });
             } catch(_) {}
 
         } catch(err) {
+            // Restore typed text so the user can retry without losing their message
+            if (inp) { inp.value = savedText; _ibGrow(inp); }
             toastNotification('Message failed — please try again.');
             console.error('[Inbox Send]', err);
         } finally {
+            _ibSendBusy = false;
             if (sendBtn) { sendBtn.style.opacity=''; sendBtn.style.transform=''; }
             const inp2 = document.getElementById('inboxChatInput');
             if (inp2 && !inp2.disabled) inp2.focus();
@@ -18374,13 +18428,11 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     };
 
     // ── Wire send button and Enter key ────────────────────────
+    // Both paths share _ibSendBusy (declared above _ibSend) so a rapid
+    // button-click + Enter combination cannot fire two sends.
     (function() {
         const btn = document.getElementById('inboxChatSendBtn');
-        let _busy = false;
-        if (btn) btn.addEventListener('click', () => {
-            if (_busy) return; _busy = true;
-            _ibSend().finally(() => { _busy = false; });
-        });
+        if (btn) btn.addEventListener('click', () => { _ibSend(); });
         const inp = document.getElementById('inboxChatInput');
         if (inp) inp.addEventListener('keydown', e => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _ibSend(); }
@@ -18791,18 +18843,26 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       // Auto-scroll to bottom when new message arrives or first load
       if (atBot) msgBox.scrollTop = msgBox.scrollHeight;
 
-      // Mark as read if the last message is from the other person
-      const lastMsg = list[list.length - 1];
-      if (lastMsg && lastMsg.sender === _m_tgtUid) {
-          const upd = { readReceipt: true };
-          upd[`unread_${currentUser.uid}`] = 0;
+      // Mark as read: clear our unread counter and record we have read.
+      // readBy_<uid> is the per-user canonical flag (SNS-2026-INBOX-001).
+      // readReceipt (legacy boolean) kept in sync for backward compatibility.
+      if (list.length > 0) {
+          const upd = {
+              readReceipt: true,
+              [`readBy_${currentUser.uid}`]: true,
+              [`unread_${currentUser.uid}`]: 0
+          };
           try { updateDoc(doc(db, 'chats', _m_chId), upd); } catch(_) {}
       }
   }
 
   // ── Send a message ──
+  // _mSendBusy is shared between button-click and Enter-key paths.
+  let _mSendBusy = false;
+
   async function _mSend() {
       if (!currentUser) return;
+      if (_mSendBusy) return;
       const inp = document.getElementById('ipcModalInput');
       if (!inp) return;
       // Read value fresh at call time — on mobile .value can lag if read before touchend settles
@@ -18821,40 +18881,63 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       }
 
       // Capture channel ID before any await (guards against race if modal is closed mid-send)
-      const chIdSnapshot  = _m_chId;
+      const chIdSnapshot   = _m_chId;
       const tgtUidSnapshot = _m_tgtUid;
+      const savedText      = text;
 
+      _mSendBusy = true;
       clearTimeout(_m_typTimer);
 
       // Visual feedback: brief opacity on send button
       const sendBtn = document.getElementById('ipcModalSendBtn');
       if (sendBtn) { sendBtn.style.opacity = '0.5'; sendBtn.style.transform = 'scale(0.9)'; }
 
+      // Optimistically clear input — restored in catch if write fails
+      inp.value = '';
+      _mGrow(inp);
+
       try {
+          // Use a plain client timestamp — Firestore sentinels cannot be stored
+          // inside array elements.
+          const clientTs = Date.now();
           const msg = {
               sender:    currentUser.uid,
               type:      'text',
-              text,
-              timestamp: Date.now()
+              text:      savedText,
+              timestamp: clientTs
           };
-          const ref = doc(db, 'chats', chIdSnapshot);
-          const upd = {
-              messages:    arrayUnion(msg),
-              readReceipt: false,
-              lastMsgTs:   msg.timestamp,
-              [`typing_${currentUser.uid}`]: false
-          };
-          upd[`unread_${tgtUidSnapshot}`] = increment(1);
-          // If recipient previously deleted this conversation, restore it on new message
-          upd[`deleted_${tgtUidSnapshot}`]  = false;
-          upd[`archived_${tgtUidSnapshot}`] = false;
 
-          // Save to Firestore BEFORE clearing input — nothing is lost if it fails
-          await setDoc(ref, upd, { merge: true });
+          // Atomic transaction: append message + update metadata.
+          // Trims the array to 800 when it would exceed 1 000 entries.
+          const MAX_MSGS = 1000;
+          const TRIM_TO  = 800;
 
-          // Clear input only after a successful save
-          inp.value = '';
-          _mGrow(inp);
+          const chatRef = doc(db, 'chats', chIdSnapshot);
+          await runTransaction(db, async (tx) => {
+              const snap = await tx.get(chatRef);
+              let existing = snap.exists() ? (snap.data().messages || []) : [];
+
+              if (existing.length >= MAX_MSGS) {
+                  existing = existing.slice(existing.length - TRIM_TO);
+              }
+              existing.push(msg);
+
+              const upd = {
+                  participants: snap.exists()
+                      ? (snap.data().participants || [currentUser.uid, tgtUidSnapshot])
+                      : [currentUser.uid, tgtUidSnapshot],
+                  messages:     existing,
+                  lastMsgTs:    clientTs,
+                  readReceipt:  false,
+                  [`readBy_${currentUser.uid}`]: true,
+                  [`readBy_${tgtUidSnapshot}`]:  false,
+                  [`typing_${currentUser.uid}`]: false,
+                  [`unread_${tgtUidSnapshot}`]:  (snap.exists() ? (snap.data()[`unread_${tgtUidSnapshot}`] || 0) : 0) + 1,
+                  [`deleted_${tgtUidSnapshot}`]:  false,
+                  [`archived_${tgtUidSnapshot}`]: false,
+              };
+              tx.set(chatRef, upd, { merge: true });
+          });
 
           // Scroll to bottom immediately so the new message is visible
           const msgBox = document.getElementById('ipcModalMessages');
@@ -18862,7 +18945,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
           // Push notification to recipient with message preview (best-effort)
           try {
-              const _previewText = text.length > 80 ? text.substring(0, 80) + '…' : text;
+              const _previewText = savedText.length > 80 ? savedText.substring(0, 80) + '…' : savedText;
               await pushNotification(tgtUidSnapshot, {
                   type:       'message',
                   fromUid:    currentUser.uid,
@@ -18873,10 +18956,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           } catch(_) {}
 
       } catch (err) {
+          // Restore typed text so the user can retry
+          inp.value = savedText;
+          _mGrow(inp);
           toastNotification('Message failed to send — please try again.');
           console.error('[Chat Modal] Send error:', err);
-          // Input was NOT cleared — text is still there so user can retry
       } finally {
+          _mSendBusy = false;
           if (sendBtn) { sendBtn.style.opacity = ''; sendBtn.style.transform = ''; }
           // Re-focus only if input is still in the DOM and not disabled
           if (inp && !inp.disabled) inp.focus();
@@ -19107,19 +19193,13 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       _m_ready = true;
   };
 
-  // ── Wire up send button — single click handler with busy guard.
-  //    touch-action:manipulation on the button eliminates the 300ms delay
-  //    without needing touchstart. Using both click + touchstart causes
-  //    double-sends on Android (touchstart fires _mSend, then the synthetic
-  //    click fires it again 300ms later).
+  // ── Wire up send button and Enter key.
+  //    Both paths share _mSendBusy (declared above _mSend) so a rapid
+  //    click + Enter combination cannot fire two sends.
+  //    touch-action:manipulation on the button eliminates the 300ms iOS delay.
   (function() {
       const btn = document.getElementById('ipcModalSendBtn');
-      let _mBusy = false;
-      btn.addEventListener('click', () => {
-          if (_mBusy) return;
-          _mBusy = true;
-          _mSend().finally(() => { _mBusy = false; });
-      });
+      btn.addEventListener('click', () => { _mSend(); });
   })();
   document.getElementById('ipcModalInput').addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _mSend(); }

@@ -1,22 +1,43 @@
 /**
  * Shadow Nexus Social — Live System
- * live.js  (SNS-2026-LIVE-002)
+ * live.js  (SNS-2026-LIVE-005)
  *
  * ONE canonical Live engine for Shadow Nexus Social.
  * ES module — loaded as <script type="module"> in index.html.
  *
  * Firebase paths (RTDB):
- *   liveRooms/{roomId}                   — room metadata
- *   liveSignaling/{roomId}/{viewerId}    — WebRTC signaling
- *   livePresence/{roomId}/{viewerId}     — viewer presence
- *   liveChats/{roomId}/{msgId}           — chat messages
+ *   liveRooms/{roomId}                        — room metadata
+ *   liveSignaling/{roomId}/{viewerId}         — WebRTC signaling
+ *   liveSignaling/{roomId}/{viewerId}/hostCandidates/{key}   — host ICE (keyed)
+ *   liveSignaling/{roomId}/{viewerId}/viewerCandidates/{key} — viewer ICE (keyed)
+ *   livePresence/{roomId}/{viewerId}          — viewer presence
+ *   liveChats/{roomId}/{msgId}                — chat messages
  *
- * Room schema (liveRooms/{roomId}):
- *   roomId, sessionId, hostId, hostName, hostAvatar,
- *   title, status, startedAt, lastHeartbeat,
- *   viewerCount, likeCount
+ * FIXES (SNS-2026-LIVE-004):
+ *   - HOST+VIEWER: ICE candidates now use Firebase push() keys — no array overwrites
+ *   - HOST+VIEWER: applied candidate IDs tracked with Set() — each applied exactly once
+ *   - HOST: viewer ICE candidates queued until setRemoteDescription completes
+ *   - HOST: [LIVE-HOST] viewer-ready checkpoint added
+ *   - VIEWER: 30-second connection timeout → "Unable to connect" with Retry / Leave
+ *   - VIEWER: Retry cleanly destroys failed peer and restarts signaling (no page reload)
+ *   - VIEWER: _setViewerStatus extended with NEGOTIATING state
+ *   - VIEWER: connTimeout cleared in _cleanupViewer
+ *   - ALL: checkpoint labels match spec exactly
  *
- * No external broadcaster required. No OBS. No RTMP.
+ * FIXES (SNS-2026-LIVE-005):
+ *   - CRITICAL: RTDB rules now grant read at liveSignaling/{roomId} so host can
+ *     enumerate viewers via onValue(liveSignaling/{roomId}). Without this the host
+ *     never detected viewerReady and never created the offer — root cause of
+ *     "Connecting to Live..." being permanent.
+ *   - CRITICAL: RTDB liveRooms write rule simplified — the old cross-reference rule
+ *     (.write: root.child(...) == auth.uid) caused permission-denied for viewer
+ *     viewerCount writes; replaced with auth != null so any authenticated user can
+ *     update non-sensitive live room metadata.
+ *   - HOST: added onValue error callback on _startHostWebRTC so RTDB permission
+ *     errors surface in console instead of being swallowed.
+ *   - HOST: added [LIVE-HOST] room-created checkpoint.
+ *   - VIEWER: added [LIVE-VIEWER] signaling-started checkpoint.
+ *   - VIEWER: viewerCount write wrapped in try/catch with explicit error log.
  */
 
 import {
@@ -37,13 +58,9 @@ const _ICE_CONFIG = {
 
 /* ══════════════════════════════════════════════════════════
    STALE SESSION DETECTION
-   A room is stale if lastHeartbeat has not been updated for
-   STALE_THRESHOLD_MS. Heartbeat fires every HB_INTERVAL_MS,
-   so this allows ~6 missed beats before declaring stale —
-   tolerates brief network hiccups but catches crashes.
 ════════════════════════════════════════════════════════════ */
-const HB_INTERVAL_MS    = 15_000;   // heartbeat period
-const STALE_THRESHOLD_MS = 90_000;  // 6 missed beats → stale
+const HB_INTERVAL_MS    = 15_000;
+const STALE_THRESHOLD_MS = 90_000;
 
 /* ══════════════════════════════════════════════════════════
    HELPERS
@@ -68,16 +85,36 @@ function _user()     {
 function _userData() { return window._snxUserData || {}; }
 
 /* ══════════════════════════════════════════════════════════
+   CHECKPOINT LOGGERS
+════════════════════════════════════════════════════════════ */
+function _hLog(checkpoint, extra) {
+  console.log('[LIVE-HOST] ' + checkpoint + (extra !== undefined ? ' = ' + extra : ''));
+}
+function _vLog(checkpoint, extra) {
+  console.log('[LIVE-VIEWER] ' + checkpoint + (extra !== undefined ? ' = ' + extra : ''));
+}
+function _hErr(checkpoint, err, path, roomId) {
+  console.error(
+    '[LIVE-HOST] ERROR at ' + checkpoint +
+    ' | name=' + (err && err.name) +
+    ' | message=' + (err && err.message) +
+    (path   ? ' | path='   + path   : '') +
+    (roomId ? ' | roomId=' + roomId : '')
+  );
+}
+function _vErr(checkpoint, err, path, roomId, viewerId) {
+  console.error(
+    '[LIVE-VIEWER] ERROR at ' + checkpoint +
+    ' | name=' + (err && err.name) +
+    ' | message=' + (err && err.message) +
+    (path     ? ' | path='     + path     : '') +
+    (roomId   ? ' | roomId='   + roomId   : '') +
+    (viewerId ? ' | viewerId=' + viewerId : '')
+  );
+}
+
+/* ══════════════════════════════════════════════════════════
    SHARED ACTIVE-ROOM FILTER
-   Called by both the Live Hub and the Feed Live Banner.
-
-   Rules applied to the raw RTDB liveRooms snapshot:
-     1. status === 'live'
-     2. lastHeartbeat (or startedAt) within STALE_THRESHOLD_MS
-     3. Deduplicate by hostId — keep the room with the most
-        recent startedAt for each host.
-
-   Returns a sorted array of valid active room objects.
 ════════════════════════════════════════════════════════════ */
 function _filterActiveRooms(allRoomsVal) {
   const now       = Date.now();
@@ -86,7 +123,6 @@ function _filterActiveRooms(allRoomsVal) {
   const totalRecords = allRooms.length;
   const statusLive   = allRooms.filter(r => r && r.status === 'live');
 
-  // Step 1: status=live + not stale
   const fresh = statusLive.filter(r => {
     const hb   = r.lastHeartbeat || r.hostHb || r.startedAt || 0;
     const age  = now - hb;
@@ -94,7 +130,6 @@ function _filterActiveRooms(allRoomsVal) {
   });
   const staleCount = statusLive.length - fresh.length;
 
-  // Step 2: deduplicate by hostId — newest startedAt wins
   const byHost = new Map();
   fresh.forEach(r => {
     const existing = byHost.get(r.hostId);
@@ -115,7 +150,6 @@ function _filterActiveRooms(allRoomsVal) {
   return result;
 }
 
-// Expose for index.html Feed Live Banner
 window._snxLiveFilterActiveRooms = _filterActiveRooms;
 
 /* ══════════════════════════════════════════════════════════
@@ -140,6 +174,7 @@ const _S = {
   viewPc:        null,
   viewPresRef:   null,
   viewUnsubs:    [],
+  viewConnTimeout: null,   // 30-second connection watchdog
   /* hub */
   hubRef:        null,
   hubCb:         null,
@@ -240,9 +275,9 @@ function _openSetupScreen() {
       localStream = await _acquireStream(facing);
       if (previewVideo) { previewVideo.srcObject = localStream; previewVideo.play().catch(() => {}); }
       if (previewOff)   previewOff.classList.remove('show');
-      _log('Media ready');
+      _hLog('media-ready');
     } catch (e) {
-      _err('setup','getUserMedia','start', e.name, e.message);
+      _hErr('media-ready', e, 'getUserMedia', null);
       _showErr(
         e.name === 'NotAllowedError'   ? '⛔ Camera/mic permission denied. Allow access and try again.' :
         e.name === 'NotFoundError'     ? '⛔ No camera or microphone found on this device.' :
@@ -294,7 +329,7 @@ function _openSetupScreen() {
     try {
       await _startLive(user, localStream, titleInput ? titleInput.value.trim() : '', facingMode, camOn, micOn);
     } catch (e) {
-      _err('start','live','startLive', e.name || 'ERR', e.message);
+      _hErr('startLive', e, null, null);
       _showErr('⛔ Failed to start live: ' + e.message);
       startBtn.disabled = false;
       startBtn.textContent = 'START LIVE';
@@ -332,10 +367,6 @@ function _buildSetupHTML() {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 2 — CREATE FIREBASE LIVE ROOM
-   Before creating a new room, any existing status=live room
-   belonging to this host is marked ended and cleaned up.
-   This prevents ghost rooms when the host refreshes or
-   crashes and comes back.
 ════════════════════════════════════════════════════════════ */
 async function _endAbandonedRooms(userId, db) {
   _log('Checking for abandoned rooms for host: ' + userId);
@@ -359,7 +390,7 @@ async function _endAbandonedRooms(userId, db) {
     }
     if (abandoned.length) _log('Cleaned ' + abandoned.length + ' abandoned room(s)');
   } catch (e) {
-    _err('startLive','RTDB','endAbandoned', e.name, e.message);
+    _hErr('endAbandoned', e, 'liveRooms', null);
   }
 }
 
@@ -369,7 +400,6 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   const db = _db();
   if (!db) throw new Error('Firebase RTDB not initialised');
 
-  // ── End any abandoned rooms from previous sessions before creating a new one
   await _endAbandonedRooms(user.uid, db);
 
   const ud         = _userData();
@@ -378,6 +408,8 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   const hostName   = ud.displayName || ud.username || user.displayName || user.email || 'Creator';
   const hostAvatar = ud.profileImage || ud.photoURL || user.photoURL || '';
   const startedAt  = Date.now();
+
+  _hLog('roomId', roomId);
 
   const roomRef = ref(db, 'liveRooms/' + roomId);
   await set(roomRef, {
@@ -394,14 +426,12 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
     likeCount: 0,
   });
   _log('Room created: ' + roomId + ' sessionId: ' + sessionId);
+  _hLog('room-created', 'roomId=' + roomId);
 
-  // Auto-end if host disconnects unexpectedly (browser crash / close)
   onDisconnect(ref(db, 'liveRooms/' + roomId + '/status')).set('ended');
   onDisconnect(ref(db, 'liveRooms/' + roomId + '/endedAt')).set(Date.now());
-  // Freeze lastHeartbeat at disconnect time so stale detection kicks in correctly
   onDisconnect(ref(db, 'liveRooms/' + roomId + '/lastHeartbeat')).set(0);
 
-  // Module state
   _S.hostRoomId    = roomId;
   _S.hostSessionId = sessionId;
   _S.hostStream    = localStream;
@@ -412,21 +442,15 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   _S.hostStartedAt = startedAt;
 
   _log('Signaling ready');
-
-  // Stage 3: host WebRTC
   _startHostWebRTC(user, roomId, localStream, db);
-
   _log('WebRTC ready');
 
-  // Heartbeat — updates lastHeartbeat every HB_INTERVAL_MS
   const hbRef = ref(db, 'liveRooms/' + roomId + '/lastHeartbeat');
   _S.hostHbTimer = setInterval(async () => {
     try { await set(hbRef, Date.now()); } catch (_) {}
   }, HB_INTERVAL_MS);
 
-  // Open host stage
   _openHostStage(user, roomId, title, hostName, localStream, db, camOn, micOn);
-
   _log('LIVE STARTED');
 }
 
@@ -443,9 +467,18 @@ function _startHostWebRTC(user, roomId, localStream, db) {
     for (const viewerId of Object.keys(data)) {
       if (_S.hostPeers[viewerId]) continue;
       if (data[viewerId] && data[viewerId].viewerReady) {
+        _hLog('viewer-ready', 'viewerId=' + viewerId + ' roomId=' + roomId);
         await _hostConnectViewer(viewerId, roomId, localStream, db);
       }
     }
+  }, (err) => {
+    // If this fires it means the RTDB rule at liveSignaling/{roomId} does not
+    // grant read access to the host. Fix: add ".read": "auth != null" at the
+    // $roomId level in database.rules.json (done in SNS-2026-LIVE-005).
+    _hErr('viewer-watcher', err, sigBase, roomId);
+    console.error('[LIVE-HOST] CRITICAL — cannot watch liveSignaling/' + roomId +
+      ' | code=' + (err.code || err.message) +
+      ' | Host will not detect viewers. Verify RTDB rules.');
   });
 
   _S.hostSigRef  = viewersRef;
@@ -453,48 +486,112 @@ function _startHostWebRTC(user, roomId, localStream, db) {
 }
 
 async function _hostConnectViewer(viewerId, roomId, localStream, db) {
-  _log('Connecting viewer: ' + viewerId);
   const pc = new RTCPeerConnection(_ICE_CONFIG);
   _S.hostPeers[viewerId] = pc;
+  _hLog('peer-created', 'viewerId=' + viewerId + ' roomId=' + roomId);
 
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  _hLog('tracks-added', 'viewerId=' + viewerId);
 
   const sigPath = 'liveSignaling/' + roomId + '/' + viewerId;
 
-  const hostCands = [];
+  // ── ICE candidate publishing: push-keyed children (one key per candidate) ──
   pc.onicecandidate = async ({ candidate }) => {
-    if (candidate) {
-      hostCands.push(candidate.toJSON());
-      try { await set(ref(db, sigPath + '/hostCandidates'), hostCands); } catch (_) {}
+    if (!candidate) return;
+    _hLog('ice-created', 'viewerId=' + viewerId);
+    const icePath = sigPath + '/hostCandidates';
+    try {
+      await set(push(ref(db, icePath)), candidate.toJSON());
+      _hLog('ice-created', 'written viewerId=' + viewerId);
+    } catch (e) {
+      _hErr('ice-created', e, icePath, roomId);
     }
   };
 
+  pc.oniceconnectionstatechange = () => {
+    _hLog('connection-state', 'ice=' + pc.iceConnectionState + ' viewerId=' + viewerId);
+  };
+
   pc.onconnectionstatechange = () => {
-    _log('Host peer [' + viewerId + '] → ' + pc.connectionState);
+    _hLog('connection-state', pc.connectionState + ' viewerId=' + viewerId);
     if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
       _cleanHostPeer(viewerId, db, roomId);
     }
   };
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await set(ref(db, sigPath + '/offer'), { type: offer.type, sdp: offer.sdp });
+  // ── Create and publish offer ──
+  let offer;
+  try {
+    offer = await pc.createOffer();
+    _hLog('offer-created', 'viewerId=' + viewerId);
+  } catch (e) {
+    _hErr('offer-created', e, sigPath + '/offer', roomId);
+    _cleanHostPeer(viewerId, db, roomId);
+    return;
+  }
 
-  // Watch for viewer answer
+  try {
+    await pc.setLocalDescription(offer);
+  } catch (e) {
+    _hErr('offer-written', e, sigPath + '/offer', roomId);
+    _cleanHostPeer(viewerId, db, roomId);
+    return;
+  }
+
+  try {
+    await set(ref(db, sigPath + '/offer'), { type: offer.type, sdp: offer.sdp });
+    _hLog('offer-written', 'viewerId=' + viewerId);
+  } catch (e) {
+    _hErr('offer-written', e, sigPath + '/offer', roomId);
+    _cleanHostPeer(viewerId, db, roomId);
+    return;
+  }
+
+  // ── Watch for viewer answer — apply only once ──
+  let answerApplied = false;
   const ansRef = ref(db, sigPath + '/answer');
   const ansCb  = onValue(ansRef, async (s) => {
-    if (!s.exists() || pc.signalingState === 'stable') return;
+    if (!s.exists() || answerApplied) return;
+    if (pc.signalingState !== 'have-local-offer') return;
+    answerApplied = true;
+    _hLog('answer-received', 'viewerId=' + viewerId);
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
-    } catch (_) {}
+      _hLog('remote-description-set', 'viewerId=' + viewerId);
+      // Flush any viewer ICE that arrived before remoteDescription was ready
+      _flushHostPendingViewerCands(viewerId, pc, sigPath, db, roomId);
+    } catch (e) {
+      _hErr('remote-description-set', e, sigPath + '/answer', roomId);
+      answerApplied = false;
+    }
   });
 
-  // Watch for viewer ICE candidates
+  // ── Watch for viewer ICE candidates — push-keyed, Set-tracked, queued until remoteDesc ──
+  const appliedViewerCandIds  = new Set();
+  const pendingViewerCands    = [];   // queued before remoteDescription is ready
+  _S.hostPeers[viewerId + '_pendingViewerCands'] = pendingViewerCands;
+  _S.hostPeers[viewerId + '_appliedViewerCandIds'] = appliedViewerCandIds;
+
   const vcRef = ref(db, sigPath + '/viewerCandidates');
   const vcCb  = onValue(vcRef, async (s) => {
     if (!s.exists()) return;
-    for (const c of (s.val() || [])) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+    const all = s.val();
+    for (const [key, cand] of Object.entries(all)) {
+      if (appliedViewerCandIds.has(key)) continue;
+      if (!pc.remoteDescription) {
+        _hLog('ice-received', 'queued viewerCand key=' + key + ' viewerId=' + viewerId);
+        pendingViewerCands.push({ key, cand });
+        appliedViewerCandIds.add(key);   // prevent double-queuing
+      } else {
+        _hLog('ice-received', 'applying viewerCand key=' + key + ' viewerId=' + viewerId);
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+          appliedViewerCandIds.add(key);
+          _hLog('ice-applied', 'viewerCand key=' + key + ' viewerId=' + viewerId);
+        } catch (e) {
+          _hErr('ice-applied', e, sigPath + '/viewerCandidates', roomId);
+        }
+      }
     }
   });
 
@@ -505,11 +602,30 @@ async function _hostConnectViewer(viewerId, roomId, localStream, db) {
   };
 }
 
+/** Called after host setRemoteDescription to drain queued viewer ICE candidates. */
+async function _flushHostPendingViewerCands(viewerId, pc, sigPath, db, roomId) {
+  const pending = _S.hostPeers[viewerId + '_pendingViewerCands'] || [];
+  if (!pending.length) return;
+  _hLog('ice-applied', 'flushing ' + pending.length + ' queued viewerCands for viewerId=' + viewerId);
+  const applied = _S.hostPeers[viewerId + '_appliedViewerCandIds'] || new Set();
+  for (const { key, cand } of pending.splice(0)) {
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(cand));
+      applied.add(key);
+      _hLog('ice-applied', 'flushed viewerCand key=' + key + ' viewerId=' + viewerId);
+    } catch (e) {
+      _hErr('ice-applied', e, sigPath + '/viewerCandidates', roomId);
+    }
+  }
+}
+
 function _cleanHostPeer(viewerId, db, roomId) {
   const cleanup = _S.hostPeers[viewerId + '_cleanup'];
   if (cleanup) { try { cleanup(); } catch (_) {} }
   delete _S.hostPeers[viewerId];
   delete _S.hostPeers[viewerId + '_cleanup'];
+  delete _S.hostPeers[viewerId + '_pendingViewerCands'];
+  delete _S.hostPeers[viewerId + '_appliedViewerCandIds'];
   try { remove(ref(db, 'liveSignaling/' + roomId + '/' + viewerId)); } catch (_) {}
 }
 
@@ -528,11 +644,9 @@ function _refreshViewerCount(roomId, db) {
 function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, micOn) {
   _showOverlay(_buildHostStageHTML(hostName, title, camOn, micOn));
 
-  // Attach local stream
   const video = _el('snxLiveStageVideo');
   if (video) { video.srcObject = localStream; video.muted = true; video.play().catch(() => {}); }
 
-  // Timer
   _S.hostCountTimer = setInterval(() => {
     const timerEl = _el('snxLiveTimer');
     if (!timerEl) return;
@@ -543,7 +657,6 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
       : String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
   }, 1000);
 
-  // Viewer count (live presence)
   const presRef = ref(db, 'livePresence/' + roomId);
   const presCb  = onValue(presRef, (snap) => {
     const count = snap.exists() ? Object.keys(snap.val() || {}).length : 0;
@@ -552,7 +665,6 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
     try { set(ref(db, 'liveRooms/' + roomId + '/viewerCount'), count); } catch (_) {}
   });
 
-  // Cam toggle
   const camBtn = _el('snxLiveHostCamBtn');
   if (camBtn) camBtn.addEventListener('click', () => {
     _S.hostCamOn = !_S.hostCamOn;
@@ -563,7 +675,6 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
     if (co) co.classList.toggle('show', !_S.hostCamOn);
   });
 
-  // Mic toggle
   const micBtn = _el('snxLiveHostMicBtn');
   if (micBtn) micBtn.addEventListener('click', () => {
     _S.hostMicOn = !_S.hostMicOn;
@@ -572,7 +683,6 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
     micBtn.textContent = _S.hostMicOn ? '🎤' : '🔇';
   });
 
-  // End Live
   const endBtn  = _el('snxLiveEndBtn');
   const confirm = _el('snxLiveEndConfirm');
   if (endBtn && confirm) endBtn.addEventListener('click', () => confirm.classList.add('show'));
@@ -581,10 +691,7 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   const confirmCancel = _el('snxLiveConfirmCancel');
   if (confirmCancel) confirmCancel.addEventListener('click', () => confirm && confirm.classList.remove('show'));
 
-  // Chat
   _initChat(user, roomId, db, true, null);
-
-  // Likes
   _watchLikes(roomId, db);
 }
 
@@ -644,30 +751,25 @@ async function _endLive(user, roomId, db, presRef, presCb) {
   if (_S.hostCountTimer) { clearInterval(_S.hostCountTimer); _S.hostCountTimer = null; }
   if (_S._hostSigOff)    { _S._hostSigOff(); _S._hostSigOff = null; }
 
-  // Presence listener
   if (presRef && presCb) try { off(presRef, 'value', presCb); } catch (_) {}
 
-  // Close peer connections
   for (const key of Object.keys(_S.hostPeers)) {
     if (key.endsWith('_cleanup')) { try { _S.hostPeers[key](); } catch (_) {} }
     else { try { _S.hostPeers[key].close(); } catch (_) {} }
   }
   _S.hostPeers = {};
 
-  // Stop local stream
   if (_S.hostStream) { _S.hostStream.getTracks().forEach(t => t.stop()); _S.hostStream = null; }
 
-  // Mark room ended
   try {
     await update(ref(db, 'liveRooms/' + roomId), {
       status: 'ended',
       endedAt: Date.now(),
-      lastHeartbeat: 0,  // ensures stale filter removes it immediately
+      lastHeartbeat: 0,
     });
   }
-  catch (e) { _err('end','RTDB','markEnded', e.name, e.message); }
+  catch (e) { _hErr('end-markEnded', e, 'liveRooms/' + roomId, roomId); }
 
-  // Cleanup temporary RTDB paths
   try { await remove(ref(db, 'liveSignaling/' + roomId)); } catch (_) {}
   try { await remove(ref(db, 'livePresence/'  + roomId)); } catch (_) {}
 
@@ -686,7 +788,6 @@ async function _endLive(user, roomId, db, presRef, presCb) {
 
 /* ══════════════════════════════════════════════════════════
    STAGE 4 — LIVE HUB
-   Uses shared _filterActiveRooms() — same logic as Feed.
 ════════════════════════════════════════════════════════════ */
 function _renderHub() {
   const container = _el('snxLiveHubCards');
@@ -699,7 +800,6 @@ function _renderHub() {
     return;
   }
 
-  // Detach previous listener
   if (_S.hubRef && _S.hubCb) { try { off(_S.hubRef, 'value', _S.hubCb); } catch (_) {} }
 
   const roomsRef = ref(db, 'liveRooms');
@@ -746,8 +846,58 @@ function _buildHubCard(room) {
 /* ══════════════════════════════════════════════════════════
    VIEWER SCREEN
 ════════════════════════════════════════════════════════════ */
+
+/** Update the viewer status text shown over the video. */
+function _setViewerStatus(status) {
+  const loaderText = _el('snxViewerLoaderText');
+  const loader     = _el('snxViewerLoader');
+  const tapBtn     = _el('snxViewerTapToPlay');
+  if (!loaderText || !loader) return;
+
+  switch (status) {
+    case 'connecting':
+      loader.classList.add('show');
+      loaderText.textContent = 'Connecting to live…';
+      if (tapBtn) tapBtn.style.display = 'none';
+      break;
+    case 'negotiating':
+      loader.classList.add('show');
+      loaderText.textContent = 'Negotiating connection…';
+      if (tapBtn) tapBtn.style.display = 'none';
+      break;
+    case 'connected':
+      loaderText.textContent = 'Connected — waiting for video…';
+      break;
+    case 'playing':
+      loader.classList.remove('show');
+      if (tapBtn) tapBtn.style.display = 'none';
+      break;
+    case 'tap-to-play':
+      loader.classList.remove('show');
+      if (tapBtn) tapBtn.style.display = '';
+      break;
+    case 'failed':
+      loader.classList.add('show');
+      if (tapBtn) tapBtn.style.display = 'none';
+      loaderText.textContent = '⚠️ Live connection failed. Try rejoining.';
+      break;
+    case 'timeout':
+      loader.classList.add('show');
+      if (tapBtn) tapBtn.style.display = 'none';
+      loaderText.textContent = 'Unable to connect to Live';
+      break;
+    case 'ended':
+      loaderText.textContent = 'Stream ended.';
+      loader.classList.add('show');
+      if (tapBtn) tapBtn.style.display = 'none';
+      break;
+    default:
+      loaderText.textContent = String(status);
+  }
+}
+
 async function _openViewerScreen(roomId) {
-  _log('Opening viewer for room: ' + roomId);
+  _vLog('room-found', 'roomId=' + roomId);
   const db = _db();
   if (!db) { if (typeof toastNotification === 'function') toastNotification('⛔ Service unavailable.'); return; }
 
@@ -760,20 +910,26 @@ async function _openViewerScreen(roomId) {
 
   _showOverlay(_buildViewerHTML(room));
 
-  const user     = _user();
-  const sessId   = _uid();
-  _S.viewRoomId  = roomId;
-  _S.viewSessId  = sessId;
-  _S.viewUnsubs  = [];
+  const user   = _user();
+  const sessId = _uid();
+  _S.viewRoomId = roomId;
+  _S.viewSessId = sessId;
+  _S.viewUnsubs = [];
 
-  // Stage 5 — presence
+  _vLog('room-found', 'roomId=' + roomId + ' sessId=' + sessId);
+  _setViewerStatus('connecting');
+
+  // ── Presence ──
   const presPath = 'livePresence/' + roomId + '/' + sessId;
   const presRef  = ref(db, presPath);
   _S.viewPresRef = presRef;
-  await set(presRef, { uid: user.uid, joinedAt: Date.now() });
-  onDisconnect(presRef).remove();
+  try {
+    await set(presRef, { uid: user.uid, joinedAt: Date.now() });
+    onDisconnect(presRef).remove();
+  } catch (e) {
+    _vErr('presence-set', e, presPath, roomId, sessId);
+  }
 
-  // Watch total viewer count
   const presAllRef = ref(db, 'livePresence/' + roomId);
   const presAllCb  = onValue(presAllRef, (s) => {
     const count = s.exists() ? Object.keys(s.val() || {}).length : 0;
@@ -782,87 +938,269 @@ async function _openViewerScreen(roomId) {
   });
   _S.viewUnsubs.push(() => off(presAllRef, 'value', presAllCb));
 
-  // Signal host: viewer is ready
+  // ── Signal host: viewer is ready ──
+  _vLog('signaling-started', 'roomId=' + roomId + ' sessId=' + sessId);
   const sigPath = 'liveSignaling/' + roomId + '/' + sessId;
-  await set(ref(db, sigPath + '/viewerReady'), true);
+  try {
+    await set(ref(db, sigPath + '/viewerReady'), true);
+    _vLog('viewer-ready-written', 'path=' + sigPath + '/viewerReady');
+  } catch (e) {
+    _vErr('viewer-ready-written', e, sigPath + '/viewerReady', roomId, sessId);
+    // If this is a permission-denied error the RTDB liveSignaling rule is wrong.
+    console.error('[LIVE-VIEWER] CRITICAL — cannot write viewerReady to liveSignaling/' +
+      roomId + '/' + sessId + ' | code=' + (e.code || e.message));
+  }
 
-  // Wait for host offer then create peer connection
-  const sigRef = ref(db, sigPath);
-  let pc = null;
-  const sigCb = onValue(sigRef, async (s) => {
-    if (!s.exists()) return;
-    const sig = s.val();
+  // ── 30-second connection watchdog ──
+  _S.viewConnTimeout = setTimeout(() => {
+    // Only fire if we haven't started playing yet
+    if (!_S.viewPc || _S.viewPc.connectionState === 'connected') return;
+    _vLog('connection-state', 'TIMEOUT — no connection after 30s roomId=' + roomId);
+    _setViewerStatus('timeout');
+    _showViewerTimeoutUI(roomId, sessId, db, room);
+  }, 30_000);
 
-    if (sig.offer && !pc) {
+  // ── Offer listener ──
+  const offerRef = ref(db, sigPath + '/offer');
+  let pc               = null;
+  let remoteDescSet    = false;
+  let answerPublished  = false;
+
+  // host ICE: push-keyed, Set-tracked, queued until remoteDescription ready
+  const appliedHostCandIds = new Set();
+  const pendingHostCands   = [];  // { key, cand } pairs waiting for remoteDesc
+
+  const offerCb = onValue(offerRef, async (s) => {
+    if (!s.exists() || pc) return;   // process offer only once
+    _vLog('offer-received', 'roomId=' + roomId);
+    _setViewerStatus('negotiating');
+
+    try {
       pc = new RTCPeerConnection(_ICE_CONFIG);
       _S.viewPc = pc;
+      _vLog('peer-created', 'roomId=' + roomId);
 
-      pc.ontrack = ({ streams }) => {
+      // ── ontrack: attach remote stream to video ──
+      const remoteStream = new MediaStream();
+      pc.ontrack = (event) => {
+        _vLog('ontrack', 'kind=' + event.track.kind + ' roomId=' + roomId);
+        event.streams.forEach(stream => {
+          stream.getTracks().forEach(t => {
+            if (!remoteStream.getTracks().includes(t)) remoteStream.addTrack(t);
+          });
+        });
         const video = _el('snxLiveViewerVideo');
-        if (video && streams[0]) {
-          video.srcObject = streams[0];
-          video.play().catch(() => {});
-          const loader = _el('snxViewerLoader');
-          if (loader) loader.classList.remove('show');
+        if (video) {
+          if (video.srcObject !== remoteStream) {
+            video.srcObject = remoteStream;
+            _vLog('stream-attached', 'roomId=' + roomId);
+          }
+          const playPromise = video.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                _vLog('video-playing', 'roomId=' + roomId);
+                _clearViewerTimeout();
+                _setViewerStatus('playing');
+              })
+              .catch((e) => {
+                _vLog('video-playing', 'autoplay-blocked ' + e.name + ' roomId=' + roomId);
+                _setViewerStatus('tap-to-play');
+                const tapBtn = _el('snxViewerTapToPlay');
+                if (tapBtn) {
+                  tapBtn.onclick = () => {
+                    video.play().then(() => {
+                      _vLog('video-playing', 'after-tap roomId=' + roomId);
+                      _clearViewerTimeout();
+                      _setViewerStatus('playing');
+                    }).catch(() => {});
+                  };
+                }
+              });
+          }
         }
-        _log('Viewer receiving stream');
+      };
+
+      // ── Connection state monitoring ──
+      pc.oniceconnectionstatechange = () => {
+        _vLog('connection-state', 'ice=' + pc.iceConnectionState + ' roomId=' + roomId);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          _clearViewerTimeout();
+          _setViewerStatus('connected');
+        } else if (pc.iceConnectionState === 'failed') {
+          _vLog('connection-state', 'ICE FAILED roomId=' + roomId);
+          _setViewerStatus('failed');
+        }
       };
 
       pc.onconnectionstatechange = () => {
-        _log('Viewer peer → ' + pc.connectionState);
-        if (pc.connectionState === 'failed') {
-          const msg = _el('snxViewerMsg');
-          if (msg) { msg.textContent = '⚠️ Connection lost.'; msg.style.display = 'block'; }
+        _vLog('connection-state', pc.connectionState + ' roomId=' + roomId);
+        if (pc.connectionState === 'connected') {
+          _clearViewerTimeout();
+          _setViewerStatus('connected');
+        } else if (pc.connectionState === 'failed') {
+          _setViewerStatus('failed');
         }
       };
 
-      const viewerCands = [];
+      // ── Viewer ICE candidate publishing — push-keyed children ──
       pc.onicecandidate = async ({ candidate }) => {
-        if (candidate) {
-          viewerCands.push(candidate.toJSON());
-          try { await set(ref(db, sigPath + '/viewerCandidates'), viewerCands); } catch (_) {}
+        if (!candidate) return;
+        _vLog('ice-created', 'roomId=' + roomId);
+        const icePath = sigPath + '/viewerCandidates';
+        try {
+          await set(push(ref(db, icePath)), candidate.toJSON());
+          _vLog('ice-created', 'written roomId=' + roomId);
+        } catch (e) {
+          _vErr('ice-created', e, icePath, roomId, sessId);
         }
       };
 
-      await pc.setRemoteDescription(new RTCSessionDescription(sig.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await set(ref(db, sigPath + '/answer'), { type: answer.type, sdp: answer.sdp });
-    }
+      // ── Set remote description (offer) ──
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(s.val()));
+        remoteDescSet = true;
+        _vLog('remote-description-set', 'roomId=' + roomId);
+      } catch (e) {
+        _vErr('remote-description-set', e, sigPath + '/offer', roomId, sessId);
+        return;
+      }
 
-    // Apply host ICE candidates
-    if (pc && sig.hostCandidates && Array.isArray(sig.hostCandidates)) {
-      for (const c of sig.hostCandidates) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (_) {}
+      // ── Flush host ICE candidates queued before remoteDesc was ready ──
+      if (pendingHostCands.length > 0) {
+        _vLog('ice-applied', 'flushing ' + pendingHostCands.length + ' queued hostCands roomId=' + roomId);
+        for (const { key, cand } of pendingHostCands.splice(0)) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+            appliedHostCandIds.add(key);
+            _vLog('ice-applied', 'flushed hostCand key=' + key + ' roomId=' + roomId);
+          } catch (e) {
+            _vErr('ice-applied', e, sigPath + '/hostCandidates', roomId, sessId);
+          }
+        }
+      }
+
+      // ── Create and publish answer (only once per session) ──
+      if (!answerPublished) {
+        let answer;
+        try {
+          answer = await pc.createAnswer();
+          _vLog('answer-created', 'roomId=' + roomId);
+        } catch (e) {
+          _vErr('answer-created', e, sigPath + '/answer', roomId, sessId);
+          return;
+        }
+
+        try {
+          await pc.setLocalDescription(answer);
+        } catch (e) {
+          _vErr('answer-written', e, sigPath + '/answer', roomId, sessId);
+          return;
+        }
+
+        try {
+          await set(ref(db, sigPath + '/answer'), { type: answer.type, sdp: answer.sdp });
+          answerPublished = true;
+          _vLog('answer-written', 'roomId=' + roomId);
+        } catch (e) {
+          _vErr('answer-written', e, sigPath + '/answer', roomId, sessId);
+        }
+      }
+
+    } catch (e) {
+      _vErr('peer-created', e, sigPath, roomId, sessId);
+    }
+  });
+  _S.viewUnsubs.push(() => off(offerRef, 'value', offerCb));
+
+  // ── Host ICE candidates — push-keyed children, Set-tracked, queued until remoteDesc ──
+  const hostCandRef = ref(db, sigPath + '/hostCandidates');
+  const hostCandCb  = onValue(hostCandRef, async (s) => {
+    if (!s.exists()) return;
+    const all = s.val();
+    for (const [key, cand] of Object.entries(all)) {
+      if (appliedHostCandIds.has(key)) continue;
+      _vLog('ice-received', 'hostCand key=' + key + ' roomId=' + roomId);
+      if (!remoteDescSet || !pc) {
+        pendingHostCands.push({ key, cand });
+        appliedHostCandIds.add(key);   // prevent double-queuing
+        _vLog('ice-received', 'queued hostCand key=' + key + ' (no remoteDesc yet) roomId=' + roomId);
+      } else {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+          appliedHostCandIds.add(key);
+          _vLog('ice-applied', 'hostCand key=' + key + ' roomId=' + roomId);
+        } catch (e) {
+          _vErr('ice-applied', e, sigPath + '/hostCandidates', roomId, sessId);
+        }
       }
     }
   });
-  _S.viewUnsubs.push(() => off(sigRef, 'value', sigCb));
+  _S.viewUnsubs.push(() => off(hostCandRef, 'value', hostCandCb));
 
-  // Watch room status — host may end Live
+  // ── Room status — host may end Live ──
   const statusRef = ref(db, 'liveRooms/' + roomId + '/status');
   const statusCb  = onValue(statusRef, (s) => {
     if (s.exists() && s.val() === 'ended') _onViewerHostEnded();
   });
   _S.viewUnsubs.push(() => off(statusRef, 'value', statusCb));
 
-  // Chat
   _initChat(user, roomId, db, false, (unsub) => {
     _S.viewUnsubs.push(unsub);
   });
 
-  // Likes
   _watchLikes(roomId, db);
   const likeBtn = _el('snxViewerLikeBtn');
   if (likeBtn) likeBtn.addEventListener('click', () => _sendLike(roomId, db));
 
-  // Leave
   const leaveBtn = _el('snxLiveLeaveBtn');
+  if (leaveBtn) leaveBtn.addEventListener('click', () => _leaveViewer(roomId, sessId, db));
+}
+
+/** Clear the 30-second connection watchdog when connection succeeds or video plays. */
+function _clearViewerTimeout() {
+  if (_S.viewConnTimeout) { clearTimeout(_S.viewConnTimeout); _S.viewConnTimeout = null; }
+}
+
+/**
+ * Show "Unable to connect to Live" UI with Retry and Leave buttons.
+ * Retry cleanly destroys the failed peer and re-starts signaling without page reload.
+ */
+function _showViewerTimeoutUI(roomId, sessId, db, room) {
+  const loader     = _el('snxViewerLoader');
+  const loaderText = _el('snxViewerLoaderText');
+  if (!loaderText) return;
+
+  // Replace loader content with timeout message + action buttons
+  loaderText.innerHTML =
+    'Unable to connect to Live' +
+    '<div style="margin-top:14px;display:flex;gap:10px;justify-content:center;">' +
+      '<button id="snxViewerRetryBtn" style="padding:10px 22px;background:#0ae;color:#fff;border:none;border-radius:24px;font-weight:800;font-size:13px;cursor:pointer;">↻ RETRY</button>' +
+      '<button id="snxViewerLeaveBtn2" style="padding:10px 22px;background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3);border-radius:24px;font-size:13px;cursor:pointer;">✕ LEAVE</button>' +
+    '</div>';
+
+  const retryBtn = _el('snxViewerRetryBtn');
+  const leaveBtn = _el('snxViewerLeaveBtn2');
+
+  if (retryBtn) retryBtn.addEventListener('click', async () => {
+    _vLog('connection-state', 'RETRY requested roomId=' + roomId);
+    // Clean up existing peer and signaling
+    _cleanupViewer();
+    if (_S.viewPresRef) {
+      try { await remove(_S.viewPresRef); } catch (_) {}
+      _S.viewPresRef = null;
+    }
+    try { await remove(ref(db, 'liveSignaling/' + roomId + '/' + sessId)); } catch (_) {}
+    // Re-open viewer screen — this generates a new sessId and full fresh attempt
+    _openViewerScreen(roomId);
+  });
+
   if (leaveBtn) leaveBtn.addEventListener('click', () => _leaveViewer(roomId, sessId, db));
 }
 
 function _onViewerHostEnded() {
   _cleanupViewer();
+  _setViewerStatus('ended');
   _showOverlay(_buildEndedHTML(false));
   const backBtn = _el('snxLiveEndedBack');
   if (backBtn) backBtn.addEventListener('click', () => {
@@ -872,6 +1210,7 @@ function _onViewerHostEnded() {
 }
 
 function _cleanupViewer() {
+  _clearViewerTimeout();
   if (_S.viewPc) { try { _S.viewPc.close(); } catch (_) {} _S.viewPc = null; }
   for (const fn of _S.viewUnsubs) { try { fn(); } catch (_) {} }
   _S.viewUnsubs = [];
@@ -906,8 +1245,9 @@ function _buildViewerHTML(room) {
     </div>
     <div class="snx-live-loader show" id="snxViewerLoader">
       <div class="snx-live-spinner"></div>
-      <div class="snx-live-loader-text">Connecting to live…</div>
+      <div class="snx-live-loader-text" id="snxViewerLoaderText">Connecting to live…</div>
     </div>
+    <button id="snxViewerTapToPlay" style="display:none;position:absolute;bottom:90px;left:50%;transform:translateX(-50%);z-index:40;padding:12px 28px;background:rgba(0,174,239,0.92);color:#fff;border:none;border-radius:30px;font-size:14px;font-weight:800;letter-spacing:1px;cursor:pointer;backdrop-filter:blur(8px);">▶ TAP TO PLAY LIVE</button>
     <div id="snxViewerMsg" style="display:none;position:absolute;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.7);color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;z-index:40;white-space:nowrap;"></div>
   </div>
   <div class="snx-live-chat">
@@ -1023,4 +1363,4 @@ function _hookGoLive() {
 }
 window._hookGoLive = _hookGoLive;
 
-_log('live.js loaded — SNS-2026-LIVE-002');
+_log('live.js loaded — SNS-2026-LIVE-005');

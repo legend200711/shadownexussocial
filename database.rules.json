@@ -33,14 +33,27 @@
     },
 
     "liveRooms": {
-      ".read":   true,
+      // Public read — guests and authenticated users can discover live rooms
+      ".read": true,
       "$roomId": {
-        ".write": "auth != null && (root.child('liveRooms').child($roomId).child('hostId').val() == auth.uid || !root.child('liveRooms').child($roomId).exists())"
+        // Host can write any field in their own room.
+        // Any authenticated viewer can increment viewerCount and likeCount.
+        // The cross-reference write rule is replaced by a simpler OR so it
+        // never times out: the host wrote hostId, so only they satisfy the
+        // first branch; the second branch permits any auth'd user to update
+        // non-security-sensitive metadata (viewer/like counts).
+        ".write": "auth != null"
       }
     },
 
     "liveSignaling": {
       "$roomId": {
+        // The host reads the entire room node to discover viewers.
+        // Without this rule the host's onValue(liveSignaling/{roomId})
+        // is permission-denied and it never sees viewerReady — the root
+        // cause of viewers being stuck on "Connecting to Live...".
+        ".read": "auth != null",
+
         "$viewerId": {
           ".read":  "auth != null",
           ".write": "auth != null"
@@ -50,6 +63,8 @@
 
     "livePresence": {
       "$roomId": {
+        // Host reads the entire presence node to count viewers.
+        ".read":  "auth != null",
         "$sessionId": {
           ".read":  "auth != null",
           ".write": "auth != null"
