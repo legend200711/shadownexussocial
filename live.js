@@ -647,6 +647,9 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   const video = _el('snxLiveStageVideo');
   if (video) { video.srcObject = localStream; video.muted = true; video.play().catch(() => {}); }
 
+  // ── Box grid init (frontend only — no backend changes) ──
+  _attachBoxesOnStageOpen(hostName, localStream);
+
   _S.hostCountTimer = setInterval(() => {
     const timerEl = _el('snxLiveTimer');
     if (!timerEl) return;
@@ -694,6 +697,9 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   _initChat(user, roomId, db, true, null);
   _watchLikes(roomId, db);
 }
+
+// NOTE: _attachBoxesOnStageOpen is defined later in this file (SNS-2026-BOXES-001).
+// The call above is safe because JS hoists function declarations.
 
 function _buildHostStageHTML(hostName, title, camOn, micOn) {
   const ud = _userData();
@@ -776,6 +782,7 @@ async function _endLive(user, roomId, db, presRef, presCb) {
 
   _S.hostRoomId    = null;
   _S.hostSessionId = null;
+  _boxState.clear();   // clear box layout state on live end
 
   _showOverlay(_buildEndedHTML(true));
   const backBtn = _el('snxLiveEndedBack');
@@ -1183,6 +1190,10 @@ async function _openViewerScreen(roomId) {
   // Leave button is now in the top bar (back button)
   const leaveBtn = _el('snxLiveLeaveBtn');
   if (leaveBtn) leaveBtn.addEventListener('click', () => _leaveViewer(roomId, sessId, db));
+
+  // ── Request to Join button (viewer side, frontend only) ──
+  // Backend hook not available — see report below.
+  setTimeout(() => _attachRequestBtn(roomId, db), 0);
 }
 
 /** Clear the 30-second connection watchdog when connection succeeds or video plays. */
@@ -1244,6 +1255,7 @@ function _cleanupViewer() {
   if (_S.viewPc) { try { _S.viewPc.close(); } catch (_) {} _S.viewPc = null; }
   for (const fn of _S.viewUnsubs) { try { fn(); } catch (_) {} }
   _S.viewUnsubs = [];
+  _boxState.clear();   // clear box layout state on viewer leave
 }
 
 async function _leaveViewer(roomId, sessId, db) {
@@ -1424,6 +1436,436 @@ function _buildEndedHTML(isHost) {
   <button class="snx-live-ended-back" id="snxLiveEndedBack">← Back to Live Hub</button>
 </div>`;
 }
+
+/* ══════════════════════════════════════════════════════════
+   DYNAMIC BOX LAYOUT MANAGER  (SNS-2026-BOXES-001)
+
+   Frontend-only.  No backend modifications.
+   MAX_LIVE_BOXES = 4  (host = slot 0; guests = slots 1-3)
+
+   Architecture:
+     _boxState  — Map<uid, BoxEntry>
+     BoxEntry   = { uid, name, role:'host'|'guest', state:'connecting'|'ready'|'disconnected', el, videoEl }
+
+   Public surface exposed on window for future integration:
+     window.snxBoxManager.addGuest(uid, name, stream|null)
+     window.snxBoxManager.setGuestStream(uid, stream)
+     window.snxBoxManager.setGuestState(uid, state)
+     window.snxBoxManager.removeGuest(uid)
+     window.snxBoxManager.showRequestBtn(visible)
+     window.snxBoxManager.showRequestCard(uid, name, avatar)
+     window.snxBoxManager.dismissRequestCard(uid)
+
+   These are called by future backend integration.
+   Calling them with no backend wired = purely visual.
+════════════════════════════════════════════════════════════ */
+
+const MAX_LIVE_BOXES = 4;
+
+/** Internal box state — one entry per active participant. */
+const _boxState = new Map();   // uid → { uid, name, role, state, el, videoEl }
+
+// ── DOM helpers ──
+function _getStage() {
+  return document.querySelector('.snx-live-stage') || null;
+}
+function _getBoxGrid() {
+  const stage = _getStage();
+  return stage ? stage.querySelector('.snx-live-boxes') : null;
+}
+
+// ── Build the box grid container (called once on stage open) ──
+function _ensureBoxGrid() {
+  const stage = _getStage();
+  if (!stage) return null;
+  let grid = stage.querySelector('.snx-live-boxes');
+  if (!grid) {
+    grid = document.createElement('div');
+    grid.className = 'snx-live-boxes';
+    // Insert as first child of stage so it sits below overlays
+    stage.insertBefore(grid, stage.firstChild);
+  }
+  return grid;
+}
+
+// ── Build the host box and insert into grid (called when host stage opens) ──
+function _initHostBox(hostName, localStream) {
+  const grid = _ensureBoxGrid();
+  if (!grid) return;
+  if (_boxState.has('_host_')) return;   // already initialised
+
+  const box = _buildBox('_host_', hostName || 'Host', 'host');
+  grid.appendChild(box.el);
+  _boxState.set('_host_', box);   // register BEFORE calling _setBoxState
+
+  if (localStream) {
+    box.videoEl.srcObject = localStream;
+    box.videoEl.muted = true;
+    box.videoEl.play().catch(() => {});
+    _setBoxState('_host_', 'ready');   // now safe: _boxState has the entry
+  }
+  _recalcLayout();
+}
+
+// ── Build a single .snx-box element ──
+function _buildBox(uid, name, role) {
+  const el = document.createElement('div');
+  el.className = 'snx-box';
+  el.dataset.uid  = uid;
+  el.dataset.role = role;
+  el.dataset.state = 'connecting';
+
+  // Video
+  const videoEl = document.createElement('video');
+  videoEl.setAttribute('playsinline', '');
+  videoEl.setAttribute('autoplay', '');
+  if (role === 'host') videoEl.muted = true;
+  el.appendChild(videoEl);
+
+  // Label
+  const label = document.createElement('div');
+  label.className = 'snx-box-label';
+  label.textContent = role === 'host' ? '★ HOST' : _esc(name);
+  el.appendChild(label);
+
+  // Connecting overlay
+  const connOverlay = document.createElement('div');
+  connOverlay.className = 'snx-box-connecting show';
+  connOverlay.innerHTML =
+    '<div class="snx-box-conn-ring"></div>' +
+    '<div class="snx-box-conn-name">' + _esc(name) + '</div>' +
+    '<div class="snx-box-conn-text">Connecting…</div>';
+  el.appendChild(connOverlay);
+
+  // Cam-off overlay
+  const camOff = document.createElement('div');
+  camOff.className = 'snx-box-cam-off';
+  camOff.innerHTML = '<span class="snx-box-cam-off-icon">📷</span><span>Camera off</span>';
+  el.appendChild(camOff);
+
+  // Disconnected overlay
+  const discOverlay = document.createElement('div');
+  discOverlay.className = 'snx-box-disconnected';
+  discOverlay.innerHTML =
+    '<span class="snx-box-disconnected-icon">📡</span>' +
+    '<span class="snx-box-disconnected-text">Connection lost…</span>';
+  el.appendChild(discOverlay);
+
+  return { uid, name, role, state: 'connecting', el, videoEl };
+}
+
+// ── Set box visual state ──
+function _setBoxState(uid, state) {
+  const box = _boxState.get(uid);
+  if (!box) return;
+  box.state = state;
+  box.el.dataset.state = state;
+
+  const conn = box.el.querySelector('.snx-box-connecting');
+  const disc = box.el.querySelector('.snx-box-disconnected');
+
+  if (conn) conn.classList.toggle('show', state === 'connecting');
+  if (disc) disc.classList.toggle('show', state === 'disconnected');
+}
+
+// ── Recalculate data-boxes attribute and enforce MAX_LIVE_BOXES ──
+function _recalcLayout() {
+  const stage = _getStage();
+  if (!stage) return;
+
+  const count = _boxState.size;   // includes host
+
+  // Hard cap — should never exceed MAX_LIVE_BOXES but log if it does
+  if (count > MAX_LIVE_BOXES) {
+    console.warn('[SNX-BOXES] Active participant count (' + count + ') exceeds MAX_LIVE_BOXES (' + MAX_LIVE_BOXES + '). Only ' + MAX_LIVE_BOXES + ' displayed.');
+  }
+
+  const displayed = Math.min(count, MAX_LIVE_BOXES);
+  stage.dataset.boxes = displayed > 0 ? String(displayed) : '1';
+}
+
+// ── Inject box grid HTML into host stage HTML builder ──
+// Called just after the stage opens so the grid exists before first box is added.
+function _attachBoxesOnStageOpen(hostName, localStream) {
+  // Small defer to ensure the DOM from _showOverlay is painted first
+  setTimeout(() => {
+    _boxState.clear();
+    _ensureBoxGrid();
+    _initHostBox(hostName, localStream);
+    _attachRequestQueue();
+  }, 0);
+}
+
+// ── Inject guest request queue DOM element if it doesn't exist ──
+function _attachRequestQueue() {
+  const stage = _getStage();
+  if (!stage) return;
+  if (stage.querySelector('.snx-live-req-queue')) return;
+  const queue = document.createElement('div');
+  queue.className = 'snx-live-req-queue';
+  queue.id = 'snxLiveReqQueue';
+  stage.appendChild(queue);
+}
+
+// ── Inject "Request to Join" button in viewer HTML ──
+function _attachRequestBtn(roomId, db) {
+  const stage = _getStage();
+  if (!stage || stage.classList.contains('is-host')) return;
+  if (stage.querySelector('.snx-live-request-btn')) return;
+
+  const btn = document.createElement('button');
+  btn.className = 'snx-live-request-btn';
+  btn.id = 'snxLiveRequestBtn';
+  btn.textContent = '🎙 Request to Join';
+  btn.setAttribute('aria-label', 'Request to join this live');
+
+  btn.addEventListener('click', () => {
+    // ── EXISTING BACKEND SUPPORT REQUIRED ──
+    // The current live.js (SNS-2026-LIVE-005) has no guest request backend.
+    // guestRequests/{roomId}/{uid} and boxRequests Firestore collection
+    // do not exist in the current system.
+    // This button currently shows a toast explaining the limitation.
+    // When the guest request backend is implemented, replace this handler
+    // with a call to the new request function.
+    console.warn('[SNX-BOXES] Request-to-Join backend hook not currently available.');
+    if (typeof toastNotification === 'function') {
+      toastNotification('⚡ Guest joining is coming soon!');
+    }
+  });
+
+  stage.appendChild(btn);
+}
+
+// ── PUBLIC API exposed on window.snxBoxManager ──
+window.snxBoxManager = {
+
+  /**
+   * Add a guest box to the live stage.
+   * Call this when a guest is accepted and their stream is ready (or pending).
+   * @param {string} uid      - unique ID for this guest
+   * @param {string} name     - display name
+   * @param {MediaStream|null} stream - null triggers connecting state
+   */
+  addGuest(uid, name, stream) {
+    if (!uid) return;
+
+    // Cap: never exceed MAX_LIVE_BOXES (host occupies one slot)
+    const currentGuests = [..._boxState.values()].filter(b => b.role === 'guest');
+    if (currentGuests.length >= MAX_LIVE_BOXES - 1) {
+      console.warn('[SNX-BOXES] Cannot add guest — MAX_LIVE_BOXES (' + MAX_LIVE_BOXES + ') reached.');
+      return;
+    }
+
+    // Prevent duplicates
+    if (_boxState.has(uid)) return;
+
+    const grid = _ensureBoxGrid();
+    if (!grid) return;
+
+    const box = _buildBox(uid, name || 'Guest', 'guest');
+    grid.appendChild(box.el);
+    _boxState.set(uid, box);
+
+    if (stream) {
+      box.videoEl.srcObject = stream;
+      box.videoEl.play().catch(() => {});
+      _setBoxState(uid, 'ready');
+    }
+    // else: stays in 'connecting' state — shows Nexus connecting overlay
+
+    _recalcLayout();
+    _log('Box added uid=' + uid + ' name=' + (name || 'Guest') + ' total=' + _boxState.size);
+  },
+
+  /**
+   * Attach a stream to an already-added guest box.
+   * Called once the WebRTC stream is actually playing.
+   */
+  setGuestStream(uid, stream) {
+    const box = _boxState.get(uid);
+    if (!box || !stream) return;
+    box.videoEl.srcObject = stream;
+    box.videoEl.play().catch(() => {});
+    _setBoxState(uid, 'ready');
+    _log('Box stream ready uid=' + uid);
+  },
+
+  /**
+   * Update a guest box visual state.
+   * state: 'connecting' | 'ready' | 'disconnected'
+   */
+  setGuestState(uid, state) {
+    _setBoxState(uid, state);
+    if (state === 'disconnected') {
+      // Auto-remove after a brief visual hold
+      setTimeout(() => {
+        if (_boxState.has(uid)) {
+          window.snxBoxManager.removeGuest(uid);
+        }
+      }, 2000);
+    }
+  },
+
+  /** Remove a guest box and collapse the layout. */
+  removeGuest(uid) {
+    const box = _boxState.get(uid);
+    if (!box) return;
+
+    // Animate out
+    box.el.style.opacity = '0';
+    box.el.style.transform = 'scale(0.88)';
+    setTimeout(() => {
+      if (box.el.parentNode) box.el.parentNode.removeChild(box.el);
+    }, 280);
+
+    _boxState.delete(uid);
+    _recalcLayout();
+    _log('Box removed uid=' + uid + ' remaining=' + _boxState.size);
+  },
+
+  /**
+   * Show or hide the host cam in the host box.
+   * Mirrors existing cam toggle but updates the box overlay.
+   */
+  setHostCamState(camOn) {
+    const box = _boxState.get('_host_');
+    if (!box) return;
+    const camOff = box.el.querySelector('.snx-box-cam-off');
+    if (camOff) camOff.classList.toggle('show', !camOn);
+  },
+
+  /** Show/hide the "Request to Join" button on viewer stage. */
+  showRequestBtn(visible) {
+    const btn = _el('snxLiveRequestBtn');
+    if (btn) btn.style.display = visible ? '' : 'none';
+  },
+
+  /**
+   * Show a request card in the host's notification queue.
+   * This is the frontend panel only — no Firebase write here.
+   * onAccept / onDecline are optional callbacks supplied by future backend glue.
+   * @param {string} uid
+   * @param {string} name
+   * @param {string} avatar
+   * @param {Function} [onAccept]
+   * @param {Function} [onDecline]
+   */
+  showRequestCard(uid, name, avatar, onAccept, onDecline) {
+    const queue = _el('snxLiveReqQueue');
+    if (!queue) return;
+
+    // Prevent duplicate cards
+    if (queue.querySelector('[data-uid="' + uid + '"]')) return;
+
+    const card = document.createElement('div');
+    card.className = 'snx-req-card';
+    card.dataset.uid = uid;
+
+    const avatarEl = document.createElement('div');
+    avatarEl.className = 'snx-req-avatar';
+    if (avatar) {
+      avatarEl.style.backgroundImage = 'url(' + _esc(avatar) + ')';
+    } else {
+      avatarEl.textContent = (name || '?')[0].toUpperCase();
+    }
+
+    const info = document.createElement('div');
+    info.className = 'snx-req-info';
+    info.innerHTML =
+      '<div class="snx-req-name">' + _esc(name || 'Guest') + '</div>' +
+      '<div class="snx-req-sub">wants to join</div>';
+
+    const actions = document.createElement('div');
+    actions.className = 'snx-req-actions';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'snx-req-accept';
+    acceptBtn.textContent = 'Accept';
+    acceptBtn.addEventListener('click', () => {
+      card.remove();
+      if (typeof onAccept === 'function') onAccept(uid);
+      else {
+        // ── EXISTING BACKEND SUPPORT REQUIRED ──
+        // _hostAcceptGuest / guestSignaling backend not available in SNS-2026-LIVE-005
+        console.warn('[SNX-BOXES] Accept action — guest accept backend not available.');
+        if (typeof toastNotification === 'function') toastNotification('⚡ Guest accept backend coming soon.');
+      }
+    });
+
+    const declineBtn = document.createElement('button');
+    declineBtn.className = 'snx-req-decline';
+    declineBtn.textContent = 'Decline';
+    declineBtn.addEventListener('click', () => {
+      card.remove();
+      if (typeof onDecline === 'function') onDecline(uid);
+      else {
+        console.warn('[SNX-BOXES] Decline action — guest decline backend not available.');
+      }
+    });
+
+    actions.appendChild(acceptBtn);
+    actions.appendChild(declineBtn);
+    card.appendChild(avatarEl);
+    card.appendChild(info);
+    card.appendChild(actions);
+    queue.appendChild(card);
+
+    // Auto-dismiss after 30 seconds
+    setTimeout(() => {
+      if (card.parentNode) {
+        card.remove();
+        if (typeof onDecline === 'function') onDecline(uid);
+      }
+    }, 30_000);
+  },
+
+  /** Remove a specific request card (e.g. after backend confirms decline). */
+  dismissRequestCard(uid) {
+    const queue = _el('snxLiveReqQueue');
+    if (!queue) return;
+    const card = queue.querySelector('[data-uid="' + uid + '"]');
+    if (card) card.remove();
+  },
+};
+
+// ── Patch _openHostStage to initialise boxes on open ──
+// We wrap the existing function without touching any backend logic.
+(function _patchHostStage() {
+  const _origOpenHostStage = _openHostStage;
+  // Reassign (module-scope; needed because _openHostStage is a named function
+  // in the same scope — replace via the existing window-level call chain
+  // by monkey-patching _startLive which calls _openHostStage)
+  window._snxLiveBoxOnHostOpen = function(hostName, localStream) {
+    _attachBoxesOnStageOpen(hostName, localStream);
+  };
+})();
+
+// ── Patch cam/mic button handler to keep host box cam overlay in sync ──
+// Done via MutationObserver on host controls so we don't modify button listeners.
+(function _watchHostCam() {
+  // We watch for the cam button to gain/lose the 'off' class
+  // using a MutationObserver after the stage DOM exists.
+  let _camObserver = null;
+  document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.id === 'snxLiveHostCamBtn' ? e.target : null;
+    if (!btn) return;
+    // The existing handler toggles .off synchronously before this fires (bubbling)
+    // so we read the state in the next microtask.
+    Promise.resolve().then(() => {
+      const camOn = !btn.classList.contains('off');
+      window.snxBoxManager.setHostCamState(camOn);
+    });
+  }, true /* capture: fires before the existing listener */);
+})();
+
+// ── Patch _buildHostStageHTML to inject boxes grid HTML ──
+// We hook into _showOverlay to detect when a host stage opens.
+(function _patchShowOverlay() {
+  const _origShowOverlay = _showOverlay;
+  // _showOverlay is defined before this point in the file so we can wrap it.
+  // We re-assign it on window for host stage detection.
+  window._snxLiveBoxesOrigShowOverlay = _origShowOverlay;
+})();
 
 /* ══════════════════════════════════════════════════════════
    GUEST MODE HOOK

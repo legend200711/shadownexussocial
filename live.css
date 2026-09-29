@@ -895,3 +895,445 @@
     width: min(420px, 35%);
   }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   DYNAMIC BOX LAYOUT — Shadow Nexus Live (SNS-2026-BOXES-001)
+
+   MAX_LIVE_BOXES = 4  (host + up to 3 guests)
+   Layout is data-driven via [data-boxes="1|2|3|4"] on .snx-live-stage
+   Transitions are CSS-only — no WebRTC restart, no page reload.
+
+   Architecture:
+     .snx-live-stage[data-boxes="1"]  → host full-screen (default)
+     .snx-live-stage[data-boxes="2"]  → host + 1 guest
+     .snx-live-stage[data-boxes="3"]  → host + 2 guests
+     .snx-live-stage[data-boxes="4"]  → 2 × 2 grid
+
+   Each participant lives inside a .snx-box element.
+   The host box carries [data-role="host"]; guests carry [data-role="guest"].
+   Box states: data-state="connecting|ready|disconnected"
+═══════════════════════════════════════════════════════════ */
+
+/* ── Box grid container (replaces single video when > 1 participant) ── */
+.snx-live-boxes {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none; /* hidden when host is solo */
+  transition: opacity 0.3s ease;
+}
+
+/* Show the grid whenever we have 2+ participants */
+.snx-live-stage[data-boxes="2"] .snx-live-boxes,
+.snx-live-stage[data-boxes="3"] .snx-live-boxes,
+.snx-live-stage[data-boxes="4"] .snx-live-boxes {
+  display: grid;
+}
+
+/* When boxes are active, push the solo host video behind the grid */
+.snx-live-stage[data-boxes="2"] > video,
+.snx-live-stage[data-boxes="3"] > video,
+.snx-live-stage[data-boxes="4"] > video,
+.snx-live-stage[data-boxes="2"] #snxLiveStageVideo,
+.snx-live-stage[data-boxes="3"] #snxLiveStageVideo,
+.snx-live-stage[data-boxes="4"] #snxLiveStageVideo,
+.snx-live-stage[data-boxes="2"] #snxLiveViewerVideo,
+.snx-live-stage[data-boxes="3"] #snxLiveViewerVideo,
+.snx-live-stage[data-boxes="4"] #snxLiveViewerVideo {
+  display: none;
+}
+
+/* Also hide cam-off overlay when boxes are active (each box has its own) */
+.snx-live-stage[data-boxes="2"] .snx-live-cam-off-overlay,
+.snx-live-stage[data-boxes="3"] .snx-live-cam-off-overlay,
+.snx-live-stage[data-boxes="4"] .snx-live-cam-off-overlay {
+  display: none !important;
+}
+
+/* ── 2-person layout: portrait stacked, landscape side-by-side ── */
+.snx-live-stage[data-boxes="2"] .snx-live-boxes {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 3px;
+}
+
+@media (orientation: landscape) {
+  .snx-live-stage[data-boxes="2"] .snx-live-boxes {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr;
+  }
+}
+
+/* ── 3-person layout: host top (bigger), two guests bottom ── */
+.snx-live-stage[data-boxes="3"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 55fr 45fr;
+  gap: 3px;
+}
+.snx-live-stage[data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1 / -1; /* host spans full width on top */
+}
+
+@media (orientation: landscape) {
+  .snx-live-stage[data-boxes="3"] .snx-live-boxes {
+    grid-template-columns: 55fr 45fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  .snx-live-stage[data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
+    grid-column: 1;
+    grid-row: 1 / -1; /* host spans full height on left */
+  }
+}
+
+/* ── 4-person layout: 2×2 grid ── */
+.snx-live-stage[data-boxes="4"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 3px;
+}
+
+/* ── Individual box ── */
+.snx-box {
+  position: relative;
+  background: #050C1C;
+  overflow: hidden;
+  /* Shadow Nexus energy border — subtle, not giant */
+  border: 1px solid rgba(0, 174, 239, 0.18);
+  transition:
+    grid-column 0.35s ease,
+    grid-row    0.35s ease,
+    opacity     0.3s  ease,
+    transform   0.3s  ease;
+}
+
+/* Glow effect on host box */
+.snx-box[data-role="host"] {
+  border-color: rgba(0, 174, 239, 0.32);
+  box-shadow: inset 0 0 24px rgba(0, 60, 120, 0.4);
+}
+
+/* ── Video inside box: cover fill ── */
+.snx-box video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+  display: block;
+}
+
+/* ── Host label — small badge bottom-left ── */
+.snx-box-label {
+  position: absolute;
+  bottom: 6px;
+  left: 8px;
+  z-index: 10;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  padding: 2px 7px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.snx-box[data-role="host"] .snx-box-label {
+  color: #00AEEF;
+  background: rgba(0, 20, 50, 0.7);
+  border: 1px solid rgba(0, 174, 239, 0.35);
+}
+
+/* ── Box cam-off overlay ── */
+.snx-box-cam-off {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: #050C1C;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 12px;
+  z-index: 5;
+}
+.snx-box-cam-off.show { display: flex; }
+.snx-box-cam-off-icon { font-size: 28px; }
+
+/* ── Connecting state overlay (Nexus energy) ── */
+.snx-box-connecting {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 12, 28, 0.92);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 8;
+  backdrop-filter: blur(6px);
+}
+.snx-box-connecting.show { display: flex; }
+
+.snx-box-conn-ring {
+  width: 36px;
+  height: 36px;
+  position: relative;
+  flex-shrink: 0;
+}
+.snx-box-conn-ring::before,
+.snx-box-conn-ring::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  animation: nexusRingSpin 1.2s linear infinite;
+}
+.snx-box-conn-ring::before {
+  border-top-color: #00AEEF;
+  border-right-color: rgba(0, 174, 239, 0.3);
+}
+.snx-box-conn-ring::after {
+  inset: 5px;
+  border-bottom-color: rgba(0, 174, 239, 0.6);
+  animation-direction: reverse;
+  animation-duration: 0.8s;
+}
+
+.snx-box-conn-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: center;
+  padding: 0 8px;
+  max-width: 100px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-box-conn-text {
+  font-size: 9px;
+  color: rgba(0, 174, 239, 0.55);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+/* ── Disconnected state overlay ── */
+.snx-box-disconnected {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 12, 28, 0.88);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 8;
+}
+.snx-box-disconnected.show { display: flex; }
+.snx-box-disconnected-icon { font-size: 22px; opacity: 0.5; }
+.snx-box-disconnected-text {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+}
+
+/* ── Enter animation for new boxes ── */
+@keyframes snxBoxEnter {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.snx-box {
+  animation: snxBoxEnter 0.3s ease-out both;
+}
+
+/* ── Host "REQUEST TO JOIN" button (viewer side) ── */
+.snx-live-request-btn {
+  position: absolute;
+  bottom: 56px;
+  right: 12px;
+  z-index: 25;
+  padding: 9px 16px;
+  background: rgba(0, 174, 239, 0.18);
+  border: 1px solid rgba(0, 174, 239, 0.5);
+  border-radius: 20px;
+  color: #00AEEF;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  padding-bottom: max(9px, env(safe-area-inset-bottom));
+}
+.snx-live-request-btn:hover,
+.snx-live-request-btn:active {
+  background: rgba(0, 174, 239, 0.30);
+  border-color: rgba(0, 174, 239, 0.75);
+}
+.snx-live-request-btn.pending {
+  color: rgba(255, 255, 255, 0.45);
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+/* Hide request button when host stage is active (viewer only) */
+.snx-live-stage.is-host .snx-live-request-btn {
+  display: none;
+}
+
+/* ── Host guest-request notification queue ── */
+.snx-live-req-queue {
+  position: absolute;
+  top: 70px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 260px;
+  pointer-events: none;
+}
+.snx-live-req-queue > * {
+  pointer-events: auto;
+}
+
+.snx-req-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(5, 12, 28, 0.88);
+  border: 1px solid rgba(0, 174, 239, 0.35);
+  border-radius: 14px;
+  padding: 10px 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 12px rgba(0, 60, 120, 0.5);
+  animation: snxBoxEnter 0.25s ease-out both;
+}
+
+.snx-req-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 60, 120, 0.5) center/cover no-repeat;
+  border: 1.5px solid rgba(0, 174, 239, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+  color: #00AEEF;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.snx-req-info {
+  flex: 1;
+  min-width: 0;
+}
+.snx-req-name {
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-req-sub {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 1px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.snx-req-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.snx-req-accept,
+.snx-req-decline {
+  padding: 4px 10px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+  border: none;
+  letter-spacing: 0.3px;
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+}
+.snx-req-accept {
+  background: rgba(0, 174, 239, 0.85);
+  color: #fff;
+}
+.snx-req-decline {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.55);
+}
+.snx-req-accept:hover { background: rgba(0, 174, 239, 1); }
+.snx-req-decline:hover { background: rgba(255, 255, 255, 0.14); }
+
+/* ── Adjust comment overlay when boxes are active ── */
+/* Ensure comments stay in a safe column, not covering faces */
+.snx-live-stage[data-boxes="2"] .snx-live-comments-overlay,
+.snx-live-stage[data-boxes="3"] .snx-live-comments-overlay,
+.snx-live-stage[data-boxes="4"] .snx-live-comments-overlay {
+  width: min(280px, 48%);
+  max-height: 28vh;
+  font-size: 11px;
+}
+
+/* ── Host controls shift slightly when boxes are active ── */
+.snx-live-stage[data-boxes="2"] .snx-live-host-controls,
+.snx-live-stage[data-boxes="3"] .snx-live-host-controls,
+.snx-live-stage[data-boxes="4"] .snx-live-host-controls {
+  bottom: 56px;
+}
+
+/* ── Ensure top-bar, comments, input and controls float above the box grid ── */
+.snx-live-top-bar,
+.snx-live-comments-overlay,
+.snx-live-chat-input-row,
+.snx-live-host-controls,
+.snx-live-confirm,
+.snx-live-req-queue,
+.snx-live-request-btn,
+.snx-live-loader {
+  z-index: 20; /* existing z-indices already place these above z-index:2 grid */
+}
+
+/* ── Mobile portrait tweaks for boxes ── */
+@media (max-width: 480px) {
+  .snx-live-stage[data-boxes="2"] .snx-live-boxes,
+  .snx-live-stage[data-boxes="3"] .snx-live-boxes,
+  .snx-live-stage[data-boxes="4"] .snx-live-boxes {
+    gap: 2px;
+  }
+  .snx-live-stage[data-boxes="2"] .snx-live-comments-overlay,
+  .snx-live-stage[data-boxes="3"] .snx-live-comments-overlay,
+  .snx-live-stage[data-boxes="4"] .snx-live-comments-overlay {
+    width: 65%;
+    max-height: 24vh;
+  }
+}
+
+/* ── Safe-area handling for host controls in landscape with boxes ── */
+@media (orientation: landscape) {
+  .snx-live-stage[data-boxes="2"] .snx-live-boxes,
+  .snx-live-stage[data-boxes="3"] .snx-live-boxes,
+  .snx-live-stage[data-boxes="4"] .snx-live-boxes {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
