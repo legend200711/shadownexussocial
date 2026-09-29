@@ -897,122 +897,409 @@
 }
 
 /* ═══════════════════════════════════════════════════════════
-   DYNAMIC BOX LAYOUT — Shadow Nexus Live (SNS-2026-BOXES-001)
+   DYNAMIC BOX LAYOUT — Shadow Nexus Live (SNS-2026-BOXES-002)
 
-   MAX_LIVE_BOXES = 4  (host + up to 3 guests)
-   Layout is data-driven via [data-boxes="1|2|3|4"] on .snx-live-stage
-   Transitions are CSS-only — no WebRTC restart, no page reload.
+   MAX_GUEST_BOXES = 4   Host is NOT counted against this limit.
+   Max total on screen   = 5 (1 host + 4 guests)
 
-   Architecture:
-     .snx-live-stage[data-boxes="1"]  → host full-screen (default)
-     .snx-live-stage[data-boxes="2"]  → host + 1 guest
-     .snx-live-stage[data-boxes="3"]  → host + 2 guests
-     .snx-live-stage[data-boxes="4"]  → 2 × 2 grid
+   Two independent data attributes drive all CSS:
+     data-boxes  = total active participants (1–5)
+     data-layout = auto | spotlight | grid | guestrow | focus
 
-   Each participant lives inside a .snx-box element.
-   The host box carries [data-role="host"]; guests carry [data-role="guest"].
-   Box states: data-state="connecting|ready|disconnected"
+   Box states  (data-state on .snx-box):
+     connecting | ready | disconnected
+
+   Focus mode  (data-focus on .snx-live-stage):
+     uid of the focused participant — that box gets .snx-box-focused
+
+   Layout is CSS/DOM only. No WebRTC restart, no page reload.
 ═══════════════════════════════════════════════════════════ */
 
-/* ── Box grid container (replaces single video when > 1 participant) ── */
+/* ══════════════════════════════════════════════════════════
+   BASE BOX CONTAINER
+══════════════════════════════════════════════════════════ */
+
 .snx-live-boxes {
   position: absolute;
   inset: 0;
   z-index: 2;
-  display: none; /* hidden when host is solo */
-  transition: opacity 0.3s ease;
+  display: none; /* invisible when host is solo */
+  gap: 3px;
+  box-sizing: border-box;
 }
 
-/* Show the grid whenever we have 2+ participants */
+/* Grid is active whenever there are 2+ participants */
 .snx-live-stage[data-boxes="2"] .snx-live-boxes,
 .snx-live-stage[data-boxes="3"] .snx-live-boxes,
-.snx-live-stage[data-boxes="4"] .snx-live-boxes {
+.snx-live-stage[data-boxes="4"] .snx-live-boxes,
+.snx-live-stage[data-boxes="5"] .snx-live-boxes {
   display: grid;
 }
 
-/* When boxes are active, push the solo host video behind the grid */
+/* When boxes are active, hide the solo-stream video element */
 .snx-live-stage[data-boxes="2"] > video,
 .snx-live-stage[data-boxes="3"] > video,
 .snx-live-stage[data-boxes="4"] > video,
+.snx-live-stage[data-boxes="5"] > video,
 .snx-live-stage[data-boxes="2"] #snxLiveStageVideo,
 .snx-live-stage[data-boxes="3"] #snxLiveStageVideo,
 .snx-live-stage[data-boxes="4"] #snxLiveStageVideo,
+.snx-live-stage[data-boxes="5"] #snxLiveStageVideo,
 .snx-live-stage[data-boxes="2"] #snxLiveViewerVideo,
 .snx-live-stage[data-boxes="3"] #snxLiveViewerVideo,
-.snx-live-stage[data-boxes="4"] #snxLiveViewerVideo {
+.snx-live-stage[data-boxes="4"] #snxLiveViewerVideo,
+.snx-live-stage[data-boxes="5"] #snxLiveViewerVideo {
   display: none;
 }
 
-/* Also hide cam-off overlay when boxes are active (each box has its own) */
+/* Hide solo cam-off overlay when boxes are active */
 .snx-live-stage[data-boxes="2"] .snx-live-cam-off-overlay,
 .snx-live-stage[data-boxes="3"] .snx-live-cam-off-overlay,
-.snx-live-stage[data-boxes="4"] .snx-live-cam-off-overlay {
+.snx-live-stage[data-boxes="4"] .snx-live-cam-off-overlay,
+.snx-live-stage[data-boxes="5"] .snx-live-cam-off-overlay {
   display: none !important;
 }
 
-/* ── 2-person layout: portrait stacked, landscape side-by-side ── */
-.snx-live-stage[data-boxes="2"] .snx-live-boxes {
+/* ══════════════════════════════════════════════════════════
+   LAYOUT 1 — AUTO
+   Intelligent arrangement by participant count.
+══════════════════════════════════════════════════════════ */
+
+/* 2 people — portrait: stacked 50/50 */
+.snx-live-stage[data-layout="auto"][data-boxes="2"] .snx-live-boxes {
   grid-template-columns: 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 3px;
 }
-
+/* 2 people — landscape: side by side */
 @media (orientation: landscape) {
-  .snx-live-stage[data-boxes="2"] .snx-live-boxes {
+  .snx-live-stage[data-layout="auto"][data-boxes="2"] .snx-live-boxes {
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr;
   }
 }
 
-/* ── 3-person layout: host top (bigger), two guests bottom ── */
-.snx-live-stage[data-boxes="3"] .snx-live-boxes {
+/* 3 people — host full-width top, two guests below */
+.snx-live-stage[data-layout="auto"][data-boxes="3"] .snx-live-boxes {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 55fr 45fr;
-  gap: 3px;
 }
-.snx-live-stage[data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
-  grid-column: 1 / -1; /* host spans full width on top */
+.snx-live-stage[data-layout="auto"][data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1 / -1;
 }
-
 @media (orientation: landscape) {
-  .snx-live-stage[data-boxes="3"] .snx-live-boxes {
+  .snx-live-stage[data-layout="auto"][data-boxes="3"] .snx-live-boxes {
     grid-template-columns: 55fr 45fr;
     grid-template-rows: 1fr 1fr;
   }
-  .snx-live-stage[data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
+  .snx-live-stage[data-layout="auto"][data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
     grid-column: 1;
-    grid-row: 1 / -1; /* host spans full height on left */
+    grid-row: 1 / -1;
   }
 }
 
-/* ── 4-person layout: 2×2 grid ── */
-.snx-live-stage[data-boxes="4"] .snx-live-boxes {
+/* 4 people — 2×2 */
+.snx-live-stage[data-layout="auto"][data-boxes="4"] .snx-live-boxes {
   grid-template-columns: 1fr 1fr;
   grid-template-rows: 1fr 1fr;
-  gap: 3px;
 }
 
-/* ── Individual box ── */
+/* 5 people — host top-left large, 2×2 guests top-right + bottom */
+.snx-live-stage[data-layout="auto"][data-boxes="5"] .snx-live-boxes {
+  grid-template-columns: 3fr 2fr;
+  grid-template-rows: 1fr 1fr;
+}
+.snx-live-stage[data-layout="auto"][data-boxes="5"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1;
+  grid-row: 1 / -1;
+}
+@media (max-width: 480px) {
+  /* Portrait mobile: host on top full-width, guests in 2×2 below */
+  .snx-live-stage[data-layout="auto"][data-boxes="5"] .snx-live-boxes {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 3fr 2fr 2fr;
+  }
+  .snx-live-stage[data-layout="auto"][data-boxes="5"] .snx-live-boxes .snx-box[data-role="host"] {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYOUT 2 — HOST SPOTLIGHT
+   Host large, guests stacked in a side column.
+══════════════════════════════════════════════════════════ */
+
+.snx-live-stage[data-layout="spotlight"] .snx-live-boxes {
+  grid-template-columns: 1fr 120px;
+  grid-template-rows: 1fr;
+  align-items: stretch;
+}
+.snx-live-stage[data-layout="spotlight"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1;
+  grid-row: 1;
+  /* Host fills entire height via align-self */
+  align-self: stretch;
+}
+/* Guest boxes auto-flow into column 2 */
+.snx-live-stage[data-layout="spotlight"] .snx-live-boxes .snx-box[data-role="guest"] {
+  grid-column: 2;
+}
+/* When there are 2–5 participants, the right column has the right number of rows */
+.snx-live-stage[data-layout="spotlight"][data-boxes="2"] .snx-live-boxes {
+  grid-template-rows: 1fr;
+}
+.snx-live-stage[data-layout="spotlight"][data-boxes="3"] .snx-live-boxes {
+  grid-template-rows: 1fr 1fr;
+}
+.snx-live-stage[data-layout="spotlight"][data-boxes="4"] .snx-live-boxes {
+  grid-template-rows: repeat(3, 1fr);
+}
+.snx-live-stage[data-layout="spotlight"][data-boxes="5"] .snx-live-boxes {
+  grid-template-rows: repeat(4, 1fr);
+}
+/* Host spans all rows in the left column */
+.snx-live-stage[data-layout="spotlight"][data-boxes="2"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-row: 1;
+}
+.snx-live-stage[data-layout="spotlight"][data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-row: 1 / 3;
+}
+.snx-live-stage[data-layout="spotlight"][data-boxes="4"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-row: 1 / 4;
+}
+.snx-live-stage[data-layout="spotlight"][data-boxes="5"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-row: 1 / 5;
+}
+
+/* Portrait mobile — host top 60%, guests as compact bottom strip */
+@media (max-width: 600px) and (orientation: portrait) {
+  .snx-live-stage[data-layout="spotlight"] .snx-live-boxes {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 60fr 40fr;
+  }
+  .snx-live-stage[data-layout="spotlight"] .snx-live-boxes .snx-box[data-role="host"] {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .snx-live-stage[data-layout="spotlight"] .snx-live-boxes .snx-box[data-role="guest"] {
+    grid-column: auto;
+    grid-row: 2;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYOUT 3 — EQUAL GRID
+   All participants roughly equal importance.
+══════════════════════════════════════════════════════════ */
+
+/* 2 people */
+.snx-live-stage[data-layout="grid"][data-boxes="2"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
+}
+@media (orientation: portrait) {
+  .snx-live-stage[data-layout="grid"][data-boxes="2"] .snx-live-boxes {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+}
+
+/* 3 people — 2 top, 1 centred bottom */
+.snx-live-stage[data-layout="grid"][data-boxes="3"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.snx-live-stage[data-layout="grid"][data-boxes="3"] .snx-live-boxes .snx-box:last-child {
+  grid-column: 1 / -1;
+}
+@media (orientation: landscape) {
+  .snx-live-stage[data-layout="grid"][data-boxes="3"] .snx-live-boxes {
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: 1fr;
+  }
+  .snx-live-stage[data-layout="grid"][data-boxes="3"] .snx-live-boxes .snx-box:last-child {
+    grid-column: auto;
+  }
+}
+
+/* 4 people — clean 2×2 */
+.snx-live-stage[data-layout="grid"][data-boxes="4"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+/* 5 people — 3-top / 2-bottom */
+.snx-live-stage[data-layout="grid"][data-boxes="5"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+.snx-live-stage[data-layout="grid"][data-boxes="5"] .snx-live-boxes .snx-box:nth-child(4),
+.snx-live-stage[data-layout="grid"][data-boxes="5"] .snx-live-boxes .snx-box:nth-child(5) {
+  /* Shift last two to centre row-2 — offset with margin trick */
+}
+@media (max-width: 480px) {
+  .snx-live-stage[data-layout="grid"][data-boxes="5"] .snx-live-boxes {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(3, 1fr);
+  }
+  .snx-live-stage[data-layout="grid"][data-boxes="5"] .snx-live-boxes .snx-box:first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYOUT 4 — GUEST ROW
+   Host large top, guests in compact horizontal strip below.
+══════════════════════════════════════════════════════════ */
+
+.snx-live-stage[data-layout="guestrow"] .snx-live-boxes {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 110px;
+}
+.snx-live-stage[data-layout="guestrow"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1;
+  grid-row: 1;
+}
+/* Guests flow into a flex row inside a pseudo-row */
+.snx-live-stage[data-layout="guestrow"] .snx-live-boxes .snx-box[data-role="guest"] {
+  grid-row: 2;
+}
+/* Distribute guest boxes evenly in a single row using subgrid-like columns */
+.snx-live-stage[data-layout="guestrow"][data-boxes="2"] .snx-live-boxes {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr 110px;
+}
+.snx-live-stage[data-layout="guestrow"][data-boxes="3"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 110px;
+}
+.snx-live-stage[data-layout="guestrow"][data-boxes="3"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.snx-live-stage[data-layout="guestrow"][data-boxes="4"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 110px;
+}
+.snx-live-stage[data-layout="guestrow"][data-boxes="4"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.snx-live-stage[data-layout="guestrow"][data-boxes="5"] .snx-live-boxes {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-rows: 1fr 110px;
+}
+.snx-live-stage[data-layout="guestrow"][data-boxes="5"] .snx-live-boxes .snx-box[data-role="host"] {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+/* Portrait mobile — shrink the guest strip */
+@media (max-width: 600px) and (orientation: portrait) {
+  .snx-live-stage[data-layout="guestrow"] .snx-live-boxes {
+    grid-template-rows: 1fr 80px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   LAYOUT 5 — FOCUS MODE
+   One participant (data-focus uid) is large; others are compact sidebar.
+   JS adds/removes .snx-box-focused on the target box element.
+══════════════════════════════════════════════════════════ */
+
+/* When focus mode is active, use a spotlight-style container */
+.snx-live-stage[data-layout="focus"] .snx-live-boxes {
+  grid-template-columns: 1fr 100px;
+  grid-template-rows: 1fr;
+}
+
+/* Non-focused boxes → right column, auto rows */
+.snx-live-stage[data-layout="focus"] .snx-live-boxes .snx-box:not(.snx-box-focused) {
+  grid-column: 2;
+}
+
+/* Focused box → left column, spans all rows */
+.snx-live-stage[data-layout="focus"] .snx-live-boxes .snx-box.snx-box-focused {
+  grid-column: 1;
+  grid-row: 1 / -1;
+}
+
+/* Row count for the sidebar */
+.snx-live-stage[data-layout="focus"][data-boxes="2"] .snx-live-boxes {
+  grid-template-rows: 1fr;
+}
+.snx-live-stage[data-layout="focus"][data-boxes="3"] .snx-live-boxes {
+  grid-template-rows: 1fr 1fr;
+}
+.snx-live-stage[data-layout="focus"][data-boxes="4"] .snx-live-boxes {
+  grid-template-rows: repeat(3, 1fr);
+}
+.snx-live-stage[data-layout="focus"][data-boxes="5"] .snx-live-boxes {
+  grid-template-rows: repeat(4, 1fr);
+}
+
+/* Portrait mobile — focused on top, others compact bottom strip */
+@media (max-width: 600px) and (orientation: portrait) {
+  .snx-live-stage[data-layout="focus"] .snx-live-boxes {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 90px;
+  }
+  .snx-live-stage[data-layout="focus"] .snx-live-boxes .snx-box.snx-box-focused {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  .snx-live-stage[data-layout="focus"] .snx-live-boxes .snx-box:not(.snx-box-focused) {
+    grid-column: auto;
+    grid-row: 2;
+  }
+}
+
+/* Focus glow — electric blue edge on focused box */
+.snx-box-focused {
+  outline: 2px solid rgba(0, 174, 239, 0.75);
+  outline-offset: -2px;
+  box-shadow: 0 0 16px rgba(0, 174, 239, 0.35), inset 0 0 20px rgba(0, 60, 120, 0.3);
+}
+
+/* Small FOCUS badge on focused box */
+.snx-box-focused .snx-box-label::after {
+  content: ' • FOCUS';
+  color: rgba(0, 174, 239, 0.8);
+}
+
+/* Focus tap hint overlay — appears briefly when clicked in focus mode */
+.snx-box-focus-tap {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ══════════════════════════════════════════════════════════
+   INDIVIDUAL BOX
+══════════════════════════════════════════════════════════ */
+
 .snx-box {
   position: relative;
   background: #050C1C;
   overflow: hidden;
-  /* Shadow Nexus energy border — subtle, not giant */
   border: 1px solid rgba(0, 174, 239, 0.18);
   transition:
-    grid-column 0.35s ease,
-    grid-row    0.35s ease,
-    opacity     0.3s  ease,
-    transform   0.3s  ease;
+    opacity     0.3s ease,
+    transform   0.3s ease,
+    outline     0.2s ease,
+    box-shadow  0.2s ease;
+  min-width: 0;
+  min-height: 0;
 }
 
-/* Glow effect on host box */
 .snx-box[data-role="host"] {
   border-color: rgba(0, 174, 239, 0.32);
   box-shadow: inset 0 0 24px rgba(0, 60, 120, 0.4);
 }
 
-/* ── Video inside box: cover fill ── */
+/* Video covers box */
 .snx-box video {
   position: absolute;
   inset: 0;
@@ -1023,15 +1310,24 @@
   display: block;
 }
 
-/* ── Host label — small badge bottom-left ── */
+/* Enter animation */
+@keyframes snxBoxEnter {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.snx-box {
+  animation: snxBoxEnter 0.3s ease-out both;
+}
+
+/* ── Participant label — compact, bottom-left ── */
 .snx-box-label {
   position: absolute;
-  bottom: 6px;
-  left: 8px;
+  bottom: 5px;
+  left: 7px;
   z-index: 10;
   font-size: 9px;
   font-weight: 900;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.7px;
   color: rgba(255, 255, 255, 0.75);
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
@@ -1039,15 +1335,18 @@
   border-radius: 6px;
   text-transform: uppercase;
   pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 14px);
 }
-
 .snx-box[data-role="host"] .snx-box-label {
   color: #00AEEF;
   background: rgba(0, 20, 50, 0.7);
   border: 1px solid rgba(0, 174, 239, 0.35);
 }
 
-/* ── Box cam-off overlay ── */
+/* ── Cam-off overlay ── */
 .snx-box-cam-off {
   display: none;
   position: absolute;
@@ -1058,13 +1357,13 @@
   flex-direction: column;
   gap: 8px;
   color: rgba(255, 255, 255, 0.3);
-  font-size: 12px;
+  font-size: 11px;
   z-index: 5;
 }
 .snx-box-cam-off.show { display: flex; }
-.snx-box-cam-off-icon { font-size: 28px; }
+.snx-box-cam-off-icon { font-size: 26px; }
 
-/* ── Connecting state overlay (Nexus energy) ── */
+/* ── Connecting state (Nexus ring) ── */
 .snx-box-connecting {
   display: none;
   position: absolute;
@@ -1073,15 +1372,15 @@
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   z-index: 8;
   backdrop-filter: blur(6px);
 }
 .snx-box-connecting.show { display: flex; }
 
 .snx-box-conn-ring {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   position: relative;
   flex-shrink: 0;
 }
@@ -1104,26 +1403,25 @@
   animation-direction: reverse;
   animation-duration: 0.8s;
 }
-
 .snx-box-conn-name {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: rgba(255, 255, 255, 0.6);
   text-align: center;
-  padding: 0 8px;
-  max-width: 100px;
+  padding: 0 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 90px;
 }
 .snx-box-conn-text {
   font-size: 9px;
   color: rgba(0, 174, 239, 0.55);
-  letter-spacing: 0.8px;
+  letter-spacing: 0.7px;
   text-transform: uppercase;
 }
 
-/* ── Disconnected state overlay ── */
+/* ── Disconnected overlay ── */
 .snx-box-disconnected {
   display: none;
   position: absolute;
@@ -1136,30 +1434,25 @@
   z-index: 8;
 }
 .snx-box-disconnected.show { display: flex; }
-.snx-box-disconnected-icon { font-size: 22px; opacity: 0.5; }
+.snx-box-disconnected-icon { font-size: 20px; opacity: 0.5; }
 .snx-box-disconnected-text {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.35);
   text-align: center;
 }
 
-/* ── Enter animation for new boxes ── */
-@keyframes snxBoxEnter {
-  from { opacity: 0; transform: scale(0.92); }
-  to   { opacity: 1; transform: scale(1); }
-}
-.snx-box {
-  animation: snxBoxEnter 0.3s ease-out both;
-}
+/* ══════════════════════════════════════════════════════════
+   REQUEST TO JOIN BUTTON (viewer side)
+══════════════════════════════════════════════════════════ */
 
-/* ── Host "REQUEST TO JOIN" button (viewer side) ── */
 .snx-live-request-btn {
   position: absolute;
   bottom: 56px;
   right: 12px;
   z-index: 25;
-  padding: 9px 16px;
-  background: rgba(0, 174, 239, 0.18);
+  padding: 8px 16px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+  background: rgba(0, 174, 239, 0.15);
   border: 1px solid rgba(0, 174, 239, 0.5);
   border-radius: 20px;
   color: #00AEEF;
@@ -1171,28 +1464,27 @@
   -webkit-tap-highlight-color: transparent;
   transition: background 0.15s, border-color 0.15s;
   white-space: nowrap;
-  padding-bottom: max(9px, env(safe-area-inset-bottom));
 }
 .snx-live-request-btn:hover,
 .snx-live-request-btn:active {
-  background: rgba(0, 174, 239, 0.30);
+  background: rgba(0, 174, 239, 0.28);
   border-color: rgba(0, 174, 239, 0.75);
 }
 .snx-live-request-btn.pending {
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.4);
   border-color: rgba(255, 255, 255, 0.2);
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
-/* Hide request button when host stage is active (viewer only) */
-.snx-live-stage.is-host .snx-live-request-btn {
-  display: none;
-}
+.snx-live-stage.is-host .snx-live-request-btn { display: none; }
 
-/* ── Host guest-request notification queue ── */
+/* ══════════════════════════════════════════════════════════
+   HOST REQUEST NOTIFICATION QUEUE
+══════════════════════════════════════════════════════════ */
+
 .snx-live-req-queue {
   position: absolute;
-  top: 70px;
+  top: 66px;
   right: 12px;
   z-index: 30;
   display: flex;
@@ -1201,9 +1493,7 @@
   max-width: 260px;
   pointer-events: none;
 }
-.snx-live-req-queue > * {
-  pointer-events: auto;
-}
+.snx-live-req-queue > * { pointer-events: auto; }
 
 .snx-req-card {
   display: flex;
@@ -1212,128 +1502,217 @@
   background: rgba(5, 12, 28, 0.88);
   border: 1px solid rgba(0, 174, 239, 0.35);
   border-radius: 14px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   backdrop-filter: blur(10px);
   box-shadow: 0 0 12px rgba(0, 60, 120, 0.5);
   animation: snxBoxEnter 0.25s ease-out both;
 }
-
 .snx-req-avatar {
-  width: 32px;
-  height: 32px;
+  width: 32px; height: 32px;
   border-radius: 50%;
   background: rgba(0, 60, 120, 0.5) center/cover no-repeat;
   border: 1.5px solid rgba(0, 174, 239, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 800;
-  color: #00AEEF;
-  flex-shrink: 0;
-  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; color: #00AEEF;
+  flex-shrink: 0; overflow: hidden;
 }
-
-.snx-req-info {
-  flex: 1;
-  min-width: 0;
-}
+.snx-req-info { flex: 1; min-width: 0; }
 .snx-req-name {
-  font-size: 12px;
-  font-weight: 800;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 12px; font-weight: 800; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .snx-req-sub {
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.4);
-  margin-top: 1px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  font-size: 9px; color: rgba(255,255,255,0.4); margin-top: 1px;
+  text-transform: uppercase; letter-spacing: 0.5px;
 }
+.snx-req-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.snx-req-accept, .snx-req-decline {
+  padding: 4px 10px; border-radius: 10px;
+  font-size: 10px; font-weight: 900; cursor: pointer; border: none;
+  -webkit-tap-highlight-color: transparent; white-space: nowrap;
+}
+.snx-req-accept  { background: rgba(0,174,239,0.85); color: #fff; }
+.snx-req-decline { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: rgba(255,255,255,0.5); }
+.snx-req-accept:hover  { background: #00AEEF; }
+.snx-req-decline:hover { background: rgba(255,255,255,0.14); }
 
-.snx-req-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.snx-req-accept,
-.snx-req-decline {
-  padding: 4px 10px;
-  border-radius: 10px;
+/* ══════════════════════════════════════════════════════════
+   HOST LAYOUT PICKER BUTTON & PANEL
+   Only useful/visible when data-boxes >= 2
+══════════════════════════════════════════════════════════ */
+
+/* Layout button — host only, hidden when solo */
+.snx-live-layout-btn {
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  z-index: 26;
+  padding: 6px 13px;
+  background: rgba(0, 174, 239, 0.12);
+  border: 1px solid rgba(0, 174, 239, 0.4);
+  border-radius: 16px;
+  color: rgba(0, 174, 239, 0.9);
   font-size: 10px;
   font-weight: 900;
+  letter-spacing: 0.5px;
   cursor: pointer;
-  border: none;
-  letter-spacing: 0.3px;
+  backdrop-filter: blur(6px);
   -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s, opacity 0.2s;
+  display: none; /* shown by JS only when ≥2 participants */
   white-space: nowrap;
+  text-transform: uppercase;
 }
-.snx-req-accept {
-  background: rgba(0, 174, 239, 0.85);
-  color: #fff;
+.snx-live-layout-btn.visible { display: block; }
+.snx-live-layout-btn:hover,
+.snx-live-layout-btn:active {
+  background: rgba(0, 174, 239, 0.25);
+  border-color: rgba(0, 174, 239, 0.7);
 }
-.snx-req-decline {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: rgba(255, 255, 255, 0.55);
-}
-.snx-req-accept:hover { background: rgba(0, 174, 239, 1); }
-.snx-req-decline:hover { background: rgba(255, 255, 255, 0.14); }
 
-/* ── Adjust comment overlay when boxes are active ── */
-/* Ensure comments stay in a safe column, not covering faces */
+/* Layout picker panel */
+.snx-live-layout-panel {
+  position: absolute;
+  top: 84px;
+  left: 12px;
+  z-index: 40;
+  background: rgba(5, 12, 28, 0.92);
+  border: 1px solid rgba(0, 174, 239, 0.3);
+  border-radius: 14px;
+  padding: 8px 6px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 0 20px rgba(0, 60, 120, 0.5);
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+  animation: snxBoxEnter 0.2s ease-out both;
+}
+.snx-live-layout-panel.open { display: flex; }
+
+.snx-layout-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.snx-layout-option:hover,
+.snx-layout-option.active {
+  background: rgba(0, 174, 239, 0.14);
+}
+.snx-layout-option.active .snx-layout-option-name {
+  color: #00AEEF;
+}
+.snx-layout-option-icon {
+  font-size: 14px;
+  width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.snx-layout-option-name {
+  font-size: 11px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.snx-layout-option-desc {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 1px;
+  letter-spacing: 0.2px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   COMMENT OVERLAY — adaptive positioning per layout
+══════════════════════════════════════════════════════════ */
+
+/* Tighten comments when any multi-box layout is active */
 .snx-live-stage[data-boxes="2"] .snx-live-comments-overlay,
 .snx-live-stage[data-boxes="3"] .snx-live-comments-overlay,
-.snx-live-stage[data-boxes="4"] .snx-live-comments-overlay {
-  width: min(280px, 48%);
-  max-height: 28vh;
+.snx-live-stage[data-boxes="4"] .snx-live-comments-overlay,
+.snx-live-stage[data-boxes="5"] .snx-live-comments-overlay {
+  width: min(260px, 44%);
+  max-height: 26vh;
   font-size: 11px;
 }
 
-/* ── Host controls shift slightly when boxes are active ── */
-.snx-live-stage[data-boxes="2"] .snx-live-host-controls,
-.snx-live-stage[data-boxes="3"] .snx-live-host-controls,
-.snx-live-stage[data-boxes="4"] .snx-live-host-controls {
-  bottom: 56px;
+/* Guest row layout — comments must clear the bottom strip */
+.snx-live-stage[data-layout="guestrow"][data-boxes="2"] .snx-live-comments-overlay,
+.snx-live-stage[data-layout="guestrow"][data-boxes="3"] .snx-live-comments-overlay,
+.snx-live-stage[data-layout="guestrow"][data-boxes="4"] .snx-live-comments-overlay,
+.snx-live-stage[data-layout="guestrow"][data-boxes="5"] .snx-live-comments-overlay {
+  bottom: 182px; /* clear the 110px guest row + input bar */
 }
-
-/* ── Ensure top-bar, comments, input and controls float above the box grid ── */
-.snx-live-top-bar,
-.snx-live-comments-overlay,
-.snx-live-chat-input-row,
-.snx-live-host-controls,
-.snx-live-confirm,
-.snx-live-req-queue,
-.snx-live-request-btn,
-.snx-live-loader {
-  z-index: 20; /* existing z-indices already place these above z-index:2 grid */
-}
-
-/* ── Mobile portrait tweaks for boxes ── */
-@media (max-width: 480px) {
-  .snx-live-stage[data-boxes="2"] .snx-live-boxes,
-  .snx-live-stage[data-boxes="3"] .snx-live-boxes,
-  .snx-live-stage[data-boxes="4"] .snx-live-boxes {
-    gap: 2px;
+@media (max-width: 600px) and (orientation: portrait) {
+  .snx-live-stage[data-layout="guestrow"] .snx-live-comments-overlay {
+    bottom: 152px; /* 80px strip on mobile */
   }
+}
+
+/* ══════════════════════════════════════════════════════════
+   Z-INDEX ORDER — overlays above box grid
+══════════════════════════════════════════════════════════ */
+
+.snx-live-top-bar       { z-index: 20; }
+.snx-live-comments-overlay { z-index: 22; }
+.snx-live-chat-input-row   { z-index: 23; }
+.snx-live-host-controls    { z-index: 24; }
+.snx-live-request-btn      { z-index: 25; }
+.snx-live-layout-btn       { z-index: 26; }
+.snx-live-req-queue        { z-index: 30; }
+.snx-live-layout-panel     { z-index: 40; }
+.snx-live-confirm          { z-index: 50; }
+.snx-live-loader           { z-index: 60; }
+
+/* ══════════════════════════════════════════════════════════
+   SAFE AREA / MOBILE PORTRAIT / LANDSCAPE
+══════════════════════════════════════════════════════════ */
+
+@media (max-width: 480px) {
+  .snx-live-boxes { gap: 2px; }
   .snx-live-stage[data-boxes="2"] .snx-live-comments-overlay,
   .snx-live-stage[data-boxes="3"] .snx-live-comments-overlay,
-  .snx-live-stage[data-boxes="4"] .snx-live-comments-overlay {
-    width: 65%;
-    max-height: 24vh;
+  .snx-live-stage[data-boxes="4"] .snx-live-comments-overlay,
+  .snx-live-stage[data-boxes="5"] .snx-live-comments-overlay {
+    width: 60%;
+    max-height: 22vh;
+  }
+  .snx-live-layout-btn { top: 52px; }
+}
+
+@media (orientation: landscape) {
+  .snx-live-boxes {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  /* Spotlight column wider in landscape */
+  .snx-live-stage[data-layout="spotlight"] .snx-live-boxes {
+    grid-template-columns: 1fr 140px;
+  }
+  .snx-live-stage[data-layout="focus"] .snx-live-boxes {
+    grid-template-columns: 1fr 120px;
+  }
+  /* Guest row taller strip in landscape */
+  .snx-live-stage[data-layout="guestrow"] .snx-live-boxes {
+    grid-template-rows: 1fr 120px;
   }
 }
 
-/* ── Safe-area handling for host controls in landscape with boxes ── */
-@media (orientation: landscape) {
-  .snx-live-stage[data-boxes="2"] .snx-live-boxes,
-  .snx-live-stage[data-boxes="3"] .snx-live-boxes,
-  .snx-live-stage[data-boxes="4"] .snx-live-boxes {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+@media (min-width: 768px) {
+  /* Wider sidebar on tablet/desktop for spotlight & focus */
+  .snx-live-stage[data-layout="spotlight"] .snx-live-boxes {
+    grid-template-columns: 1fr 160px;
+  }
+  .snx-live-stage[data-layout="focus"] .snx-live-boxes {
+    grid-template-columns: 1fr 140px;
+  }
+  .snx-live-stage[data-layout="guestrow"] .snx-live-boxes {
+    grid-template-rows: 1fr 130px;
   }
 }
