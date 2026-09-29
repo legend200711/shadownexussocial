@@ -58,13 +58,13 @@ function _injectTheaterHeader() {
   header.className = 'snx-theater-header';
   header.innerHTML = `
     <div class="snx-theater-brand">
-      <div class="snx-theater-network-name">Powered by Shadow Nexus Social</div>
-      <div class="snx-theater-title">NEXUS AFTERDARK TV</div>
-      <div class="snx-theater-sub">THE MAIN SIGNAL · 24/7 · LIVE · CREATOR CHANNELS</div>
+      <div class="snx-theater-network-name">SHADOW NEXUS SOCIAL</div>
+      <div class="snx-theater-title">SHADOW NEXUS 24-HOUR TV</div>
+      <div class="snx-theater-sub">24/7 · THE BROADCAST NEVER STOPS</div>
     </div>
     <div class="snx-theater-on-air" id="snx-theater-status" aria-live="polite" aria-atomic="true">
       <div class="snx-theater-on-air-dot" aria-hidden="true"></div>
-      <span id="snx-theater-status-text">ON AIR</span>
+      <span id="snx-theater-status-text">● ON AIR</span>
     </div>`;
 
   // Insert as first child of #ax-hero so it appears above the player
@@ -95,7 +95,7 @@ function _wrapPlayerInFrame() {
   const bug = document.createElement('div');
   bug.className = 'snx-network-bug';
   bug.setAttribute('aria-hidden', 'true');
-  bug.innerHTML = `<span class="snx-network-bug-top">NEXUS</span><span class="snx-network-bug-bottom">AFTERDARK</span>`;
+  bug.innerHTML = `<span class="snx-network-bug-top">SHADOW</span><span class="snx-network-bug-bottom">NEXUS TV</span>`;
   frame.appendChild(bug);
 
   // Move the entire .ax-player-wrap into the frame
@@ -320,8 +320,8 @@ function _updateStatusBadge() {
 
   badge.className = 'snx-theater-on-air' + (state !== 'on-air' ? ` ${state}` : '');
   badgeTxt.textContent = state === 'on-air' ? '● ON AIR'
-    : state === 'connecting' ? 'CONNECTING'
-    : 'OFF AIR';
+    : state === 'connecting' ? '● CONNECTING'
+    : '○ OFF AIR';
 }
 
 /* ════════════════════════════════════

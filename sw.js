@@ -10,11 +10,11 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNX-LIVE-REMOVED-2026-09-29
+ * Build: SHADOW-TV-2026-GLOBAL-UPDATE-01
  */
 
-const CACHE_VERSION = 'v80';
-const BUILD_ID      = 'SNX-LIVE-REMOVED-2026-09-29';
+const CACHE_VERSION = 'v85';
+const BUILD_ID      = 'SHADOW-TV-2026-GLOBAL-UPDATE-01';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -76,16 +76,19 @@ const NETWORK_FIRST_PATHS = [];
 const TV_NETWORK_FIRST_FILES = [
   'snx-ch-adapter.js',
   'snx-tv-network.js',
+  'snx-tv-network.css',
+  'snx-theater.js',
   'snx-main-tv-feature.js',
-  'snx-tv-live-view.js',
   'snx-ch-broadcast.js',
   'snx-ch-control.js',
   'snx-creator-channels.js',
-  'snx-creator-live.js',
-  'snx-creator-live-viewer.js',
   'snx-ch-auth-bridge.js',
   'snx-ch-firebase.js',
   'snx-ch-engine.js',
+  'channel.html',
+  // snx-tv-live-view.js removed — SNS Live viewer shell, not a TV file
+  // snx-creator-live.js removed — SNS Live broadcaster, not a TV file
+  // snx-creator-live-viewer.js removed — SNS Live viewer, not a TV file
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

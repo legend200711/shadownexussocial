@@ -2,29 +2,22 @@
  * SNX MAIN TV FEATURE BRIDGE — Stage 4
  * snx-main-tv-feature.js
  *
- * Controlled bridge that lets the FOUNDER temporarily carry an active
- * Creator Live on the Shadow Nexus Main 24-Hour TV station.
+ * Manages the mainTvState/current Firestore document that controls
+ * whether the 24-Hour TV channel is in 'scheduled' or 'featured_live' mode.
  *
- * Architecture:
- *   - A single Firestore document  mainTvState/current  holds the mode.
- *   - All viewers listen to that doc in real time.
- *   - When mode === 'featured_live', Main TV players switch to the creator's
- *     existing liveId WebRTC stream.  The 24-hour schedule keeps advancing
- *     in the background — it is never stopped.
- *   - When the feature ends (founder removes, creator ends live, or creator
- *     disconnects) mode reverts to 'scheduled' and the player resumes at the
- *     CURRENT schedule position (elapsed = now - started_at).
+ * NOTE: The WebRTC viewer path (joinCreatorLive) has been removed from the
+ * 24-Hour TV system. The featured_live state document remains intact (Firestore
+ * data is NOT deleted), but the TV player no longer attempts to join a WebRTC
+ * stream via this bridge. SNS Live is a separate system.
  *
- * Exports (used by snx-ch-adapter.js, snx-ch-broadcast.js, snx-creator-live-viewer.js,
- *          snx-tv-network.js):
- *
+ * Exports:
  *   featureCreatorOnMainTv(user, liveId, channel)   — founder only
  *   removeCreatorFromMainTv(user)                   — founder only
  *   subscribeMainTvState(cb)                        — any viewer
  *   loadMainTvState()                               — one-shot read
  *   getMainTvState()                                — sync cached value
  *   isFounderUser(user)                             — helper
- *   notifyCreatorFeatured(founderUser, liveId, channel) — internal
+ *   emergencyReturnToSchedule(user)                 — founder only
  *
  * Firestore path:
  *   mainTvState/current   (single document, world-readable, founder-write-only)
@@ -283,172 +276,32 @@ async function _notifyCreatorFeatured(creatorUid, liveId, channel) {
 }
 
 /* ════════════════════════════════════
-   MAIN TV FEATURE — VIEWER PLAYER HOOK
-   Used by snx-ch-adapter.js and snx-ch-broadcast.js to build the
-   featured live overlay inside the existing Main TV player area.
+   MAIN TV FEATURE — PLAYER HOOKS
+   WebRTC viewer path removed from 24-Hour TV.
+   mountFeaturedLiveInPlayer immediately returns to schedule.
+   dismountFeaturedLiveFromPlayer cleans up any leftover layer.
 ════════════════════════════════════ */
 
-let _featurePlayerState = {
-  active: false,
-  liveId: null,
-  videoEl: null,
-  unsub: null,
-};
-
 /**
- * Build and inject the Featured Live overlay inside the Main TV player.
- * Does NOT create a new overlay — reuses the existing #ax-media-area.
+ * mountFeaturedLiveInPlayer — WebRTC viewer removed from 24-Hour TV.
  *
- * @param {object} user          Firebase Auth user (for joinCreatorLive)
- * @param {object} userData      User profile data
- * @param {object} mainTvState   The mainTvState/current document data
- * @param {HTMLElement} mediaArea   The existing #ax-media-area element
- * @param {function} onReturnScheduled  Called when the feature ends (auto or manual)
+ * When the TV detects featured_live mode it calls this function.
+ * TV no longer joins a WebRTC stream — it returns to scheduled programming.
+ * SNS Live (live.html) is a separate system and is not affected.
  */
-export async function mountFeaturedLiveInPlayer(user, userData, mainTvState, mediaArea, onReturnScheduled) {
-  if (!mediaArea) return;
+export function mountFeaturedLiveInPlayer(_user, _userData, mainTvState, _mediaArea, onReturnScheduled) {
   if (!mainTvState || mainTvState.mode !== 'featured_live') return;
-
-  const liveId     = mainTvState.featuredLiveId;
-  const chanName   = mainTvState.featuredChannelName   || 'Creator Live';
-  const chanAvatar = mainTvState.featuredChannelAvatar || null;
-  const liveTitle  = mainTvState.featuredLiveTitle      || 'Live Broadcast';
-
-  // If the same live is already mounted, do nothing
-  if (_featurePlayerState.active && _featurePlayerState.liveId === liveId) return;
-
-  // Teardown any previous feature player
-  dismountFeaturedLiveFromPlayer();
-
-  // Build the featured live layer inside the existing media area
-  // Position: absolute, covers the media area, z-index above the scheduled content
-  const featuredDiv = document.createElement('div');
-  featuredDiv.id = 'snx-featured-live-layer';
-  featuredDiv.style.cssText = [
-    'position:absolute;inset:0;z-index:20;',
-    'background:#000;display:flex;flex-direction:column;',
-    'align-items:center;justify-content:center;',
-  ].join('');
-
-  const avatarHtml = chanAvatar
-    ? `<img src="${_esc(chanAvatar)}" alt="" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,45,85,0.7);">`
-    : `<div style="width:40px;height:40px;border-radius:50%;background:#1a2a45;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#fff;">${_esc(chanName.charAt(0).toUpperCase())}</div>`;
-
-  featuredDiv.innerHTML = `
-    <div id="snx-feat-header" style="position:absolute;top:0;left:0;right:0;z-index:2;padding:8px 12px;background:linear-gradient(to bottom,rgba(0,0,0,0.8),transparent);display:flex;align-items:center;gap:8px;">
-      <span style="display:inline-block;background:rgba(255,45,85,0.92);color:#fff;font-size:9px;font-weight:900;letter-spacing:2px;padding:2px 7px;border-radius:4px;flex-shrink:0;">🔴 LIVE ON SHADOW NEXUS TV</span>
-      ${avatarHtml}
-      <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;font-weight:800;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(chanName)}</div>
-        <div style="font-size:10px;color:rgba(255,255,255,0.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(liveTitle)}</div>
-      </div>
-    </div>
-    <video id="snx-feat-video" playsinline style="width:100%;height:100%;object-fit:contain;background:#000;" autoplay></video>
-    <div id="snx-feat-connecting" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.85);flex-direction:column;gap:10px;">
-      <div style="font-size:28px;">📺</div>
-      <div style="font-size:13px;font-weight:700;color:#00AEEF;letter-spacing:2px;">CONNECTING TO LIVE…</div>
-    </div>
-  `;
-
-  // Ensure media area has position:relative for absolute children
-  if (!mediaArea.style.position) mediaArea.style.position = 'relative';
-
-  mediaArea.appendChild(featuredDiv);
-
-  const videoEl = featuredDiv.querySelector('#snx-feat-video');
-  const connecting = featuredDiv.querySelector('#snx-feat-connecting');
-
-  _featurePlayerState = {
-    active: true,
-    liveId,
-    videoEl,
-    unsub: null,
-  };
-
-  // Start the feature watchdog
-  startFeatureWatchdog(liveId);
-
-  // Join the creator live WebRTC stream
-  try {
-    const { joinCreatorLive, leaveCreatorLive } = await import('./snx-creator-live.js');
-
-    // Track whether we have already left (to prevent double-leave)
-    let leftFlag = false;
-
-    await joinCreatorLive(user, liveId, videoEl, event => {
-      switch (event.type) {
-        case 'connecting':
-          if (connecting) connecting.style.display = 'flex';
-          break;
-
-        case 'stream':
-        case 'connected':
-          if (connecting) connecting.style.display = 'none';
-          break;
-
-        case 'reconnecting':
-          if (connecting) {
-            connecting.style.display = 'flex';
-            connecting.querySelector('div:last-child').textContent = 'RECONNECTING TO LIVE…';
-          }
-          break;
-
-        case 'ended':
-          // Creator ended live — auto-return to schedule
-          if (!leftFlag) {
-            leftFlag = true;
-            leaveCreatorLive().catch(() => {});
-            onReturnScheduled?.('live_ended');
-          }
-          break;
-
-        default:
-          break;
-      }
-    });
-
-    // Store leave function for cleanup
-    _featurePlayerState.unsub = () => {
-      if (!leftFlag) {
-        leftFlag = true;
-        leaveCreatorLive().catch(() => {});
-      }
-      stopFeatureWatchdog();
-    };
-
-  } catch (err) {
-    console.warn('[SNX TV FEATURE] Failed to join featured live:', err.message);
-    // Fallback: return to scheduled immediately
-    dismountFeaturedLiveFromPlayer();
-    onReturnScheduled?.('join_failed');
-  }
+  console.log('[SNX TV FEATURE] featured_live mode detected; WebRTC join removed from TV — returning to schedule.');
+  stopFeatureWatchdog();
+  onReturnScheduled?.('tv_live_removed');
 }
 
 /**
- * Dismount the featured live player from Main TV.
- * Called when returning to scheduled programming.
+ * Dismount any leftover featured-live layer from Main TV.
+ * Safe to call even when nothing is mounted.
  */
 export function dismountFeaturedLiveFromPlayer() {
-  if (_featurePlayerState.unsub) {
-    try { _featurePlayerState.unsub(); } catch (_) {}
-  }
   stopFeatureWatchdog();
-
   const layer = document.getElementById('snx-featured-live-layer');
   if (layer) layer.remove();
-
-  _featurePlayerState = { active: false, liveId: null, videoEl: null, unsub: null };
-}
-
-/* ════════════════════════════════════
-   UTILITIES
-════════════════════════════════════ */
-function _esc(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

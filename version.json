@@ -1,9 +1,9 @@
 {
-  "buildId": "SNX-LIVE-REMOVED-2026-09-29",
-  "swVersion": "v80",
-  "deployedAt": "2026-09-29T14:00:00Z",
+  "buildId": "SHADOW-TV-2026-GLOBAL-UPDATE-01",
+  "swVersion": "v85",
+  "deployedAt": "2026-10-02T00:00:00Z",
   "project": "horr-a08f4",
-  "studioVersion": "3.2.1",
+  "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
-  "note": "SNX-LIVE-REMOVED-2026-09-29: Removed Go Live / Live Hub / Live Room / WebRTC / cohost system. 24-Hour TV retained. SW v80 cache bust."
+  "note": "SHADOW-TV-2026-GLOBAL-UPDATE-01: Global update. 24-Hour TV tabs confirmed WATCH + TV STUDIO only. Removed GUIDE tab, MORE tab, Channels tab, My Channel tab, Go Live from 24-Hour TV UI. Removed stale viewer deep-links (snxOpenTvLive/snxOpenTvReplay no longer launch WebRTC viewer). snx:openCreatorChannel now navigates to WATCH tab only. VIEW CHANNEL button now uses snxOpen24HourTV() directly. Comments and sequence labels updated throughout index.html. SW v85 cache bust."
 }

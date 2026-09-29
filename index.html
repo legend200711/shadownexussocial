@@ -11895,9 +11895,9 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 <div class="page" id="tvPage">
   <!-- snx-ch-adapter.js renders the Main TV broadcast into #snxTvApp -->
-  <!-- snx-tv-network.js injects its tab bar + LIVE NOW / CHANNELS / MY CHANNEL panels -->
+  <!-- snx-tv-network.js injects the WATCH / TV STUDIO tab bar above the player -->
   <div id="snxTvApp" style="min-height:200px;"></div>
-  <!-- TV Network panels are injected dynamically by snx-tv-network.js -->
+  <!-- TV Network tab bar + studio panel injected dynamically by snx-tv-network.js -->
 </div><!-- end tvPage -->
 
 <!-- ████ LIVE PAGE — Shadow Nexus Live Hub ████ -->
@@ -11924,16 +11924,21 @@ body.arcade-fs-ios body::after { display:none !important; }
 <script type="module" src="snx-ch-adapter.js"></script>
 
 <!-- ── Load SNX TV Network (Creator Channels) for index.html tvPage ── -->
-<link rel="stylesheet" href="snx-tv-network.css?v=SNS-2026-TV-STABILITY-001">
+<link rel="stylesheet" href="snx-tv-network.css?v=SHADOW-TV-2026-GLOBAL-UPDATE-01">
 <!-- [PHASE-2-DISABLED] snx-creator-live.css removed — new creator-live UI not needed in Phase 1 -->
 <script type="module">
 /**
  * SNX TV Network — index.html integration
- * Initialises LIVE NOW / CHANNELS / MY CHANNEL tabs when the user opens tvPage.
+ * Initialises the WATCH / TV STUDIO tab bar when the user opens tvPage.
  * Auth is read from window._snxCurrentUser (set by the main SNS auth block).
  * No second login, no second Firebase init.
  *
- * Build: SNS-2026-TV-STABILITY-001
+ * Build: SHADOW-TV-2026-GLOBAL-UPDATE-01
+ *
+ * TABS: WATCH | TV STUDIO (founder only)
+ * Removed: GUIDE tab, MORE tab, Channels tab, My Channel tab, Go Live.
+ * Preserved: player, Now Playing, Up Next, TV Studio, programming,
+ *            schedule backend, playlists, queue, media, TV engine, Firebase data.
  *
  * CANONICAL ENTRY POINT: window.snxOpen24HourTV()
  * All navigation to tvPage must use this function (or realmNavTo('tvPage') which
@@ -12015,8 +12020,8 @@ window.addEventListener('snxAuthSignOut', () => {
      C. Use the existing logged-in SNS session (never a second login)
      D. Initialize snxTvInit() — the 24-Hour channel engine
      E. Wait for tvPage to be actually active in the DOM
-     F. Initialize snxTvNetworkInit() — LIVE NOW / CHANNELS / MY CHANNEL tabs
-     G. Sync auth state so MY CHANNEL resolves correctly
+     F. Initialize snxTvNetworkInit() — WATCH / TV STUDIO tab bar + theater
+     G. Sync auth state so TV STUDIO tab resolves correctly (founder only)
      H. Playback begins automatically inside snxTvInit/_startWithUser
 
    INIT LOCK (window._snxTvInitPromise):
@@ -12103,11 +12108,11 @@ window.snxOpen24HourTV = function() {
       // ── E. Small yield so snxTvInit's synchronous DOM work settles ────────────
       await new Promise(r => setTimeout(r, 50));
 
-      // ── F. Initialize snxTvNetworkInit — LIVE NOW / CHANNELS / MY CHANNEL ─────
+      // ── F. Initialize snxTvNetworkInit — WATCH / TV STUDIO tab bar + theater ──
       console.log('[SNX-TV] Network initializing');
       await window.snxTvNetworkInit();
 
-      // ── G. Sync auth state so MY CHANNEL resolves correctly ───────────────────
+      // ── G. Sync auth state so TV STUDIO tab resolves correctly (founder only) ─
       if (_tvNetworkModule && user) {
         _tvNetworkModule.onTvNetworkAuthChange(user);
       }
@@ -12128,88 +12133,36 @@ window.snxOpen24HourTV = function() {
 };
 
 /* ── Deep-link helpers called by notification buttons ────────────────────────
-   snxOpenTvLive(creatorUid, liveId)  — navigate to TV, open the live viewer
-   snxOpenTvReplay(creatorUid, replayId) — navigate to TV, open the replay
+   snxOpenTvLive(creatorUid, liveId)  — navigate to 24-Hour TV
+   snxOpenTvReplay — no-op; SNS Live is a separate system (live.html)
    These work whether the user is currently on any page inside index.html.
 ──────────────────────────────────────────────────────────────────────────── */
-window.snxOpenTvLive = async function(creatorUid, liveId) {
-  if (!creatorUid || !liveId) return;
-  // Navigate to TV page — snxOpen24HourTV handles auth wait + engine init
+window.snxOpenTvLive = async function(creatorUid, _liveId) {
+  if (!creatorUid) return;
+  // Navigate to TV page — SNS Live viewer removed from 24-Hour TV.
+  // SNS Live is accessed via live.html (separate system).
   if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-  // Wait for the canonical TV controller to finish (includes snxTvNetworkInit)
   if (typeof window.snxOpen24HourTV === 'function') await window.snxOpen24HourTV();
-  else if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
-  // Give UI a frame to settle, then open the live viewer
-  setTimeout(async () => {
-    try {
-      const [m, fs] = await Promise.all([
-        import('./snx-creator-channels.js'),
-        import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js'),
-      ]);
-      const ch = await m.loadCreatorChannel(creatorUid);
-      if (!ch) return;
-      let userData = null;
-      try {
-        const viewerUid = window._snxCurrentUser?.uid;
-        if (viewerUid) {
-          const snap = await fs.getDoc(fs.doc(m.snsDb, 'users', viewerUid));
-          if (snap.exists()) userData = snap.data();
-        }
-      } catch (_) {}
-      // Route through the adapter — opens old working viewer
-      const { watchLive } = await import('./snx-live-adapter.js');
-      await watchLive(window._snxCurrentUser, userData, ch, liveId);
-    } catch (err) {
-      console.warn('[SNX TV] snxOpenTvLive deep-link error:', err.message);
-    }
-  }, 500);
 };
 
-window.snxOpenTvReplay = async function(creatorUid, replayId) {
-  if (!creatorUid || !replayId) return;
+window.snxOpenTvReplay = async function(creatorUid, _replayId) {
+  if (!creatorUid) return;
+  // Navigate to TV page — SNS Live replay viewer removed from 24-Hour TV.
   if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-  // Wait for the canonical TV controller to finish (includes snxTvNetworkInit)
   if (typeof window.snxOpen24HourTV === 'function') await window.snxOpen24HourTV();
-  else if (typeof window.snxTvNetworkInit === 'function') await window.snxTvNetworkInit();
-  setTimeout(async () => {
-    try {
-      const [m, fs, live] = await Promise.all([
-        import('./snx-creator-channels.js'),
-        import('https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js'),
-        import('./snx-creator-live-viewer.js'),
-      ]);
-      let userData = null;
-      try {
-        const viewerUid = window._snxCurrentUser?.uid;
-        if (viewerUid) {
-          const snap = await fs.getDoc(fs.doc(m.snsDb, 'users', viewerUid));
-          if (snap.exists()) userData = snap.data();
-        }
-      } catch (_) {}
-      await live.openReplayPlayer(window._snxCurrentUser, userData, creatorUid, replayId, false);
-    } catch (err) {
-      console.warn('[SNX TV] snxOpenTvReplay deep-link error:', err.message);
-    }
-  }, 500);
 };
 
 /* ── snx:openCreatorChannel event — fired by VIEW CHANNEL button ─────────────
-   Listens for the event dispatched when a user clicks VIEW CHANNEL on a profile.
-   Switches to the Channels tab and opens the specified creator's channel view.
+   Creator channel viewer removed from 24-Hour TV.
+   Navigates to tvPage (WATCH tab) so the user sees the main broadcast.
 ──────────────────────────────────────────────────────────────────────────── */
 window.addEventListener('snx:openCreatorChannel', async e => {
   const uid = e?.detail?.uid;
   if (!uid) return;
+  // Creator channel viewer removed — just ensure TV is open on WATCH tab.
   try {
-    const m = await _getTvNetworkModule();
-    // Switch to channels tab and open the creator's channel view
-    if (typeof m.openChannelForUid === 'function') {
-      m.openChannelForUid(uid);
-    } else {
-      // Fire the event that switches to channels tab — the TV network's
-      // subscribeChannelDirectory will have the data; user can find them there.
-      window.dispatchEvent(new CustomEvent('snx:switchTvTab', { detail: { tab: 'channels' } }));
-    }
+    if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
+    await _getTvNetworkModule(); // ensure module is loaded (no-op if already)
   } catch (_) {}
 });
 </script>
@@ -13166,7 +13119,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
             window._snxAuthReadyQueue = [];
           }
           window._snxAuthResolved = true;
-          // Notify TV Network of signed-in user (for MY CHANNEL auto-resolve)
+          // Notify TV Network of signed-in user (for TV STUDIO founder-gate sync)
           window.dispatchEvent(new CustomEvent('snxAuthStateChanged', { detail: { user } }));
           // Start passive invite listener for sidebar badge (deferred so arcade IIFE has loaded)
           setTimeout(() => {
@@ -16758,27 +16711,20 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               if (btnReport2) btnReport2.insertAdjacentElement('afterend', btnViewChannel);
               else document.getElementById('btnFollowAction')?.insertAdjacentElement('afterend', btnViewChannel);
           }
-          // Always show VIEW CHANNEL (every user has a channel) — hide only on own profile
+          // Always show VIEW CHANNEL — hide only on own profile
           if (isSelf) {
               btnViewChannel.style.display = 'none';
           } else {
               btnViewChannel.textContent   = '📺 View Channel';
               btnViewChannel.style.display = '';
               btnViewChannel.onclick       = () => {
-                  // Navigate to TV tab and open this user's channel
-                  if (typeof window.realmNavTo === 'function') realmNavTo('tvPage');
-                  // Give the TV tab a moment to init, then open the channel view
-                  setTimeout(() => {
-                      if (window._tvNetworkModule && typeof window._tvNetworkModule.openChannelForUid === 'function') {
-                          window._tvNetworkModule.openChannelForUid(uid);
-                      } else {
-                          // Fallback: TV tab is the channel listing; user can find it there
-                          if (typeof window.toastNotification === 'function')
-                              toastNotification('📺 Opening ' + (p.displayName || p.username || 'their') + '\'s channel…');
-                          // Fire an event that snx-tv-network picks up
-                          window.dispatchEvent(new CustomEvent('snx:openCreatorChannel', { detail: { uid } }));
-                      }
-                  }, 350);
+                  // Navigate to 24-Hour TV — creator channel viewer removed,
+                  // user lands on the main WATCH tab.
+                  if (typeof window.snxOpen24HourTV === 'function') {
+                      window.snxOpen24HourTV();
+                  } else if (typeof window.realmNavTo === 'function') {
+                      realmNavTo('tvPage');
+                  }
               };
           }
 
@@ -34683,8 +34629,7 @@ window.snxFounderPanelCleanup = (function() {
     }
 
     /* Show a channel-specific JOIN prompt for guests — not a generic modal.
-       Called when a guest taps "My Channel" in index.html nav.
-       The TV Network's own _renderMyChannelSection handles the tvPage context. */
+       Called when a guest taps "My Channel" in the Nexus page nav. */
     function _showGuestChannelBlock() {
         // Customise the join modal title for the channel context
         const modal = document.getElementById('snxJoinModal');
@@ -34692,7 +34637,7 @@ window.snxFounderPanelCleanup = (function() {
             const title = modal.querySelector('h2');
             if (title) title.textContent = '📺 CREATE YOUR CHANNEL';
             const desc = modal.querySelector('p');
-            if (desc) desc.textContent = 'Join Shadow Nexus to create your own Creator Channel and start broadcasting on Nexus AfterDark TV.';
+            if (desc) desc.textContent = 'Join Shadow Nexus to create your own Creator Channel.';
         }
         snxJoinOpen();
         // Restore default title after closing

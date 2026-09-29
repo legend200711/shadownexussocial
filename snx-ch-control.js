@@ -545,7 +545,7 @@ function _buildFounderHTML() {
             <div class="ax-sched-queue-header">
               <span class="ax-sched-queue-title" id="ax-sched-ch-label">Select a channel above</span>
               <div style="display:flex;gap:6px;">
-                <button class="ax-btn-sm" id="ax-sched-push-btn">▶ GO LIVE</button>
+                <button class="ax-btn-sm" id="ax-sched-push-btn">▶ START CHANNEL</button>
                 <button class="ax-btn-sm ax-btn-danger" id="ax-sched-clear-btn">✕ CLEAR</button>
               </div>
             </div>

@@ -20,10 +20,7 @@
 <link rel="stylesheet" href="snx-channel.css">
 
 <!-- SNX TV Network — Creator Channels expansion -->
-<link rel="stylesheet" href="snx-tv-network.css?v=NATV-001">
-
-<!-- SNX Creator Live — live stage styles -->
-<link rel="stylesheet" href="snx-creator-live.css">
+<link rel="stylesheet" href="snx-tv-network.css?v=SHADOW-TV-2026-GLOBAL-UPDATE-01">
 
 <style>
 /* ── Override particle canvas opacity for Shadow Nexus look ── */
@@ -31,20 +28,11 @@
 .ax-ambient::before { background: radial-gradient(circle, rgba(0,100,255,0.07) 0%, transparent 70%); }
 .ax-ambient::after  { background: radial-gradient(circle, rgba(57,255,20,0.04) 0%, transparent 70%); }
 
-/* ── SNS TV Network header / back bar ── */
+/* ── SNS TV Network header / back bar — fixed top bar ── */
 .snx-back-bar {
   position: fixed;
   top: 0; left: 0; right: 0;
-  height: 50px;
   z-index: 1000;
-  display: flex;
-  align-items: center;
-  padding: 0 14px;
-  background: rgba(2,4,10,0.96);
-  border-bottom: 1px solid rgba(0,174,239,0.16);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  gap: 12px;
 }
 .snx-back-btn {
   display: flex; align-items: center; gap: 6px;
@@ -54,41 +42,15 @@
   flex-shrink: 0;
 }
 .snx-back-btn:hover { color: #33c8ff; }
-/* Brand block: title + tagline stacked */
+/* Brand block: title + tagline + build marker stacked */
 .snx-back-bar-brand {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  flex: 1; min-width: 0;
 }
-.snx-back-bar-title {
-  font-size: 13px; font-weight: 900; letter-spacing: 3px;
-  color: #c8d0e8; text-transform: uppercase;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.snx-back-bar-tagline {
-  font-size: 9px; font-weight: 700; letter-spacing: 2px;
-  color: rgba(0,174,239,0.60); text-transform: uppercase;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.snx-back-bar-badge {
-  flex-shrink: 0;
-  display: flex; align-items: center; gap: 5px;
-  font-size: 10px; font-weight: 800; letter-spacing: 2px;
-  color: #ff3344; padding: 3px 10px; border-radius: 14px;
-  border: 1px solid rgba(255,51,68,0.40); background: rgba(255,51,68,0.08);
-}
-.snx-back-bar-badge-dot {
-  width: 6px; height: 6px; border-radius: 50%; background: #ff3344;
-  animation: snxBackDot 2s ease-in-out infinite;
-  flex-shrink: 0;
-}
-@keyframes snxBackDot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
 
-/* ── Push content below back bar and above nav bar + TV Network tab bar ── */
+/* ── Push content below back bar (50px) + channel nav (~58px) + TV tab bar (48px) ── */
 #ax-nav { top: 50px !important; }
-#ax-app { padding-top: calc(50px + 58px + 44px) !important; }
+#ax-app { padding-top: calc(50px + 58px + 48px) !important; }
 
 /* ── Recolor the channel nav to SNS palette ── */
 .ax-nav-logo-text { color: #c8d0e8 !important; }
