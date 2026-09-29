@@ -1,6 +1,6 @@
 /**
  * Shadow Nexus Social — Live System
- * live.js  (SNS-2026-LIVE-008)
+ * live.js  (SNS-2026-LIVE-010)
  *
  * ONE canonical Live engine for Shadow Nexus Social.
  * ES module — loaded as <script type="module"> in index.html.
@@ -81,6 +81,25 @@
  *   - HOST: added [LIVE-HOST] room-created checkpoint.
  *   - VIEWER: added [LIVE-VIEWER] signaling-started checkpoint.
  *   - VIEWER: viewerCount write wrapped in try/catch with explicit error log.
+ *
+ * ARCHITECTURE (SNS-2026-LIVE-010) — SFU MEDIA LAYER:
+ *   snx-sfu.js introduces a provider-agnostic SFU façade (window.snxSfu).
+ *   When snxSfu is loaded, the host/guest/viewer media paths use LiveKit SFU
+ *   instead of direct peer-to-peer RTCPeerConnection.
+ *
+ *   Firebase/Firestore handles ONLY metadata:
+ *     - liveRooms/{roomId}          room metadata + status
+ *     - boxRequests                 join requests (Firestore)
+ *     - guestRequests/{roomId}      join requests (RTDB backup)
+ *     - liveChats/{roomId}          chat messages
+ *     - livePresence/{roomId}       viewer presence / count
+ *     - guestSignaling/{roomId}     accepted-guest hostEnded signals only
+ *
+ *   Firebase does NOT carry audio/video.
+ *   All WebRTC media goes through the SFU (LiveKit).
+ *
+ *   SFU provider: LiveKit (wss URL + JWT from Cloudflare Worker)
+ *   Fallback: existing direct RTCPeerConnection (P2P) when snxSfu absent.
  */
 
 import {
@@ -274,31 +293,207 @@ window._snxLiveFilterActiveRooms = _filterActiveRooms;
 ════════════════════════════════════════════════════════════ */
 const _S = {
   /* host */
-  hostRoomId:    null,
-  hostSessionId: null,
-  hostStream:    null,
-  hostCamOn:     true,
-  hostMicOn:     true,
-  hostPeers:     {},
-  hostSigRef:    null,
-  hostHbTimer:   null,
-  hostCountTimer:null,
-  hostStartedAt: null,
-  hostEnded:     false,
-  hostReqUnsub:  null,   // RTDB guestRequests listener unsub (host side)
-  hostShownReqs: null,   // Set of viewer UIDs whose card has been shown
+  hostRoomId:     null,
+  hostSessionId:  null,
+  hostStream:     null,
+  hostCamOn:      true,
+  hostMicOn:      true,
+  hostPeers:      {},
+  hostSigRef:     null,
+  hostHbTimer:    null,
+  hostCountTimer: null,
+  hostStartedAt:  null,
+  hostEnded:      false,
+  hostReqUnsub:    null,   // RTDB guestRequests listener unsub (host side)
+  hostShownReqs:   null,   // Set of viewer UIDs whose card has been shown
+  hostSpeakerTimer: null,  // active-speaker polling timer (host stage)
+  hostSfuToken:    null,   // LiveKit JWT for the host (null when SFU unavailable)
+  hostSfuUrl:      null,   // LiveKit WSS URL for the host session
   /* viewer */
   viewRoomId:    null,
   viewSessId:    null,
   viewPc:        null,
   viewPresRef:   null,
   viewUnsubs:    [],
-  viewConnTimeout: null,   // 30-second connection watchdog
-  viewReqUnsub:  null,   // Firestore boxRequest status listener unsub (viewer side)
+  viewConnTimeout: null,  // 30-second connection watchdog
+  viewReqUnsub:  null,    // Firestore boxRequest status listener unsub (viewer side)
+  viewSfuToken:  null,    // LiveKit JWT when viewer is connected via SFU
   /* hub */
   hubRef:        null,
   hubCb:         null,
 };
+
+/* ══════════════════════════════════════════════════════════
+   SFU HELPERS
+   Wrapper utilities for the snxSfu media layer.
+   All calls are no-ops if snxSfu is not loaded (P2P fallback).
+════════════════════════════════════════════════════════════ */
+
+/** True when snx-sfu.js has been loaded and LiveKit is configured. */
+function _sfuAvailable() {
+  return typeof window.snxSfu === 'object' && window.snxSfu !== null;
+}
+
+/**
+ * Build the SFU callback object for host-stage participant tracking.
+ * Wires SFU track events → snxBoxManager box state (LIVE only on real media).
+ */
+function _buildHostSfuCallbacks(hostUid) {
+  return {
+    onConnected(uid) {
+      _log('[SFU] host connected to room as: ' + uid);
+    },
+    onDisconnected() {
+      _log('[SFU] host disconnected from room');
+    },
+    onConnectionStateChange(state) {
+      _log('[SFU] connection state: ' + state);
+    },
+    onParticipantJoined(uid, name) {
+      // A guest joined the SFU room — add their box in CONNECTING state.
+      // Box becomes LIVE only after onTrackSubscribed fires.
+      if (uid === hostUid) return; // skip self
+      _log('[SFU] participant joined: ' + uid + ' (' + name + ')');
+      window.snxBoxManager.addGuest(uid, name || uid, '');
+    },
+    onParticipantLeft(uid) {
+      if (uid === hostUid) return;
+      _log('[SFU] participant left: ' + uid);
+      window.snxBoxManager.removeGuest(uid);
+    },
+    onTrackSubscribed(uid, stream) {
+      // Real media arrived — transition box from CONNECTING → LIVE.
+      _log('[SFU] track subscribed: ' + uid + ' tracks=' + stream.getTracks().length);
+      window.snxBoxManager.setGuestStream(uid, stream);
+    },
+    onTrackUnsubscribed(uid) {
+      _log('[SFU] track unsubscribed: ' + uid);
+      window.snxBoxManager.setGuestState(uid, 'disconnected');
+    },
+    onTrackMuteChanged(uid, kind, muted) {
+      if (kind === 'video') {
+        const box = _boxState.get(uid);
+        if (box) {
+          const co = box.el.querySelector('.snx-box-cam-off');
+          if (co) co.classList.toggle('show', muted);
+        }
+      }
+    },
+    onActiveSpeakersChanged(uids) {
+      _boxState.forEach((box, bUid) => {
+        box.el.classList.toggle('snx-box-speaking', uids.includes(bUid));
+      });
+      // Also apply to host box (host uid is host speaking when they're in the list)
+      const hostBox = _boxState.get('_host_');
+      if (hostBox) {
+        hostBox.el.classList.toggle('snx-box-speaking', uids.includes(hostUid));
+      }
+    },
+    onError(err) {
+      console.error('[SFU] error:', err);
+    },
+  };
+}
+
+/**
+ * Build the SFU callback object for the viewer screen.
+ * Drives the solo video element (no box grid on pure-viewer screens).
+ */
+function _buildViewerSfuCallbacks(roomId) {
+  return {
+    onConnected(uid) {
+      _log('[SFU] viewer connected: ' + uid);
+      _setViewerStatus('connected');
+      _clearViewerTimeout();
+    },
+    onDisconnected() {
+      _log('[SFU] viewer disconnected');
+    },
+    onConnectionStateChange(state) {
+      _log('[SFU] viewer connection state: ' + state);
+      if (state === 'reconnecting') _setViewerStatus('connecting');
+      if (state === 'connected')    _setViewerStatus('connected');
+    },
+    onParticipantJoined(uid, name) {
+      _log('[SFU] viewer sees participant: ' + uid);
+    },
+    onParticipantLeft(uid) {
+      _log('[SFU] viewer: participant left: ' + uid);
+    },
+    onTrackSubscribed(uid, stream) {
+      // First track from the host — attach to the viewer video element.
+      _log('[SFU] viewer track subscribed from: ' + uid);
+      const video = _el('snxLiveViewerVideo');
+      if (video && !video.srcObject) {
+        video.srcObject = stream;
+        const p = video.play();
+        if (p) {
+          p.then(() => {
+            _clearViewerTimeout();
+            _setViewerStatus('playing');
+          }).catch(() => _setViewerStatus('tap-to-play'));
+        }
+      }
+    },
+    onTrackUnsubscribed() {},
+    onTrackMuteChanged() {},
+    onActiveSpeakersChanged() {},
+    onError(err) {
+      console.error('[SFU] viewer error:', err);
+      _setViewerStatus('failed');
+    },
+  };
+}
+
+/**
+ * Build the SFU callback object for a guest who has been accepted.
+ * Drives the guest-side two-box stage (HOST + YOU).
+ */
+function _buildGuestSfuCallbacks(roomId, localStream) {
+  return {
+    onConnected(uid) {
+      _log('[SFU] guest connected as: ' + uid);
+    },
+    onDisconnected() {
+      _log('[SFU] guest SFU disconnected');
+      _guestLeaveStage(false);
+    },
+    onConnectionStateChange(state) {
+      _log('[SFU] guest connection state: ' + state);
+      if (state === 'reconnecting') {
+        // Update host box to show reconnecting state
+        const hostBox = _boxState.get('_host_');
+        if (hostBox) _setBxState('_host_', 'connecting');
+      }
+    },
+    onParticipantJoined(uid, name) {
+      _log('[SFU] guest sees participant: ' + uid);
+    },
+    onParticipantLeft(uid) {
+      _log('[SFU] guest: participant left: ' + uid);
+    },
+    onTrackSubscribed(uid, stream) {
+      // Host's stream arrived — update the host box.
+      _log('[SFU] guest received host track — uid:', uid);
+      const hostBox = _boxState.get('_host_');
+      if (hostBox) {
+        hostBox.videoEl.srcObject = stream;
+        hostBox.videoEl.muted = false;
+        hostBox.videoEl.play().catch(() => {});
+        _setBxState('_host_', 'ready');
+      }
+    },
+    onTrackUnsubscribed() {},
+    onTrackMuteChanged() {},
+    onActiveSpeakersChanged(uids) {
+      const hostBox = _boxState.get('_host_');
+      if (hostBox) hostBox.el.classList.toggle('snx-box-speaking', uids.length > 0);
+    },
+    onError(err) {
+      console.error('[SFU] guest error:', err);
+    },
+  };
+}
 
 /* ══════════════════════════════════════════════════════════
    PUBLIC API
@@ -556,15 +751,51 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   onDisconnect(ref(db, 'liveRooms/' + roomId + '/endedAt')).set(Date.now());
   onDisconnect(ref(db, 'liveRooms/' + roomId + '/lastHeartbeat')).set(0);
 
-  _S.hostRoomId    = roomId;
-  _S.hostSessionId = sessionId;
-  _S.hostStream    = localStream;
-  _S.hostCamOn     = camOn;
-  _S.hostMicOn     = micOn;
-  _S.hostPeers     = {};
-  _S.hostEnded     = false;
-  _S.hostStartedAt = startedAt;
+  _S.hostRoomId     = roomId;
+  _S.hostSessionId  = sessionId;
+  _S.hostStream     = localStream;
+  _S.hostCamOn      = camOn;
+  _S.hostMicOn      = micOn;
+  _S.hostPeers      = {};
+  _S.hostEnded      = false;
+  _S.hostStartedAt  = startedAt;
+  _S.hostSfuToken   = null;
+  _S.hostSfuUrl     = null;
 
+  // ── SFU media path (LiveKit) ──────────────────────────────────────────────
+  // When snxSfu is loaded, connect to the LiveKit room and publish.
+  // On failure, fall through silently to the P2P path.
+  if (_sfuAvailable()) {
+    _log('[SFU] Host: connecting — roomId: ' + roomId);
+    try {
+      await window.snxSfu.ensureRoom(roomId);
+      const ud2 = _userData();
+      const { token, url: sfuUrl } = await window.snxSfu.fetchToken(
+        roomId, user.uid, /* canPublish */ true
+      );
+      _S.hostSfuToken = token;
+      _S.hostSfuUrl   = sfuUrl;
+      await window.snxSfu.connect({
+        sfuUrl,
+        token,
+        roomName:  roomId,
+        uid:       user.uid,
+        role:      'host',
+        callbacks: _buildHostSfuCallbacks(user.uid),
+      });
+      await window.snxSfu.publishLocalStream(localStream);
+      _log('[SFU] Host connected and publishing');
+    } catch (sfuErr) {
+      console.error('[SFU] Host connect failed — falling back to P2P:', sfuErr.message);
+      window.snxSfu.disconnect();
+      _S.hostSfuToken = null;
+      _S.hostSfuUrl   = null;
+    }
+  }
+
+  // ── P2P path — direct RTCPeerConnection to each viewer ───────────────────
+  // Always active: handles viewers who join without SFU,
+  // and acts as the sole transport when SFU is unavailable.
   _log('Signaling ready');
   _startHostWebRTC(user, roomId, localStream, db);
   _log('WebRTC ready');
@@ -795,7 +1026,10 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   const camBtn = _el('snxLiveHostCamBtn');
   if (camBtn) camBtn.addEventListener('click', () => {
     _S.hostCamOn = !_S.hostCamOn;
+    // Update local track enabled state (affects P2P viewers immediately)
     if (_S.hostStream) _S.hostStream.getVideoTracks().forEach(t => { t.enabled = _S.hostCamOn; });
+    // Also notify SFU (mutes the published track at the SFU level)
+    if (_sfuAvailable()) window.snxSfu.setCamMuted(!_S.hostCamOn);
     camBtn.classList.toggle('off', !_S.hostCamOn);
     camBtn.textContent = _S.hostCamOn ? '📷' : '🚫';
     const co = _el('snxLiveStageCamOff');
@@ -805,7 +1039,10 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
   const micBtn = _el('snxLiveHostMicBtn');
   if (micBtn) micBtn.addEventListener('click', () => {
     _S.hostMicOn = !_S.hostMicOn;
+    // Update local track enabled state
     if (_S.hostStream) _S.hostStream.getAudioTracks().forEach(t => { t.enabled = _S.hostMicOn; });
+    // Also notify SFU
+    if (_sfuAvailable()) window.snxSfu.setMicMuted(!_S.hostMicOn);
     micBtn.classList.toggle('off', !_S.hostMicOn);
     micBtn.textContent = _S.hostMicOn ? '🎤' : '🔇';
   });
@@ -823,6 +1060,35 @@ function _openHostStage(user, roomId, title, hostName, localStream, db, camOn, m
 
   // ── Start host-side request listener ──
   _startHostRequestListener(roomId, user.uid, db);
+
+  // ── Active speaker detection — host stage ──
+  // Polls inbound-rtp audio levels from each guest peer every 1.5 s.
+  // Adds .snx-box-speaking to the corresponding guest box.
+  // Host box is tracked by local mic enabled state.
+  const SPEAKER_INTERVAL = 1500;
+  const SPEAKER_THRESHOLD = 0.01;
+  _S.hostSpeakerTimer = setInterval(async () => {
+    for (const [guestUid, peer] of _guestPeers) {
+      const box = _boxState.get(guestUid);
+      if (!box || !peer.pc || !peer.pc.getStats) continue;
+      try {
+        const stats = await peer.pc.getStats();
+        let level = 0;
+        stats.forEach(r => {
+          if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+            level = Math.max(level, r.audioLevel || 0);
+          }
+        });
+        box.el.classList.toggle('snx-box-speaking', level > SPEAKER_THRESHOLD);
+      } catch (_) {}
+    }
+    // Host self — reflect mic enabled state
+    const hostBox = _boxState.get('_host_');
+    if (hostBox && _S.hostStream) {
+      const at = _S.hostStream.getAudioTracks();
+      hostBox.el.classList.toggle('snx-box-speaking', at.length > 0 && at[0].enabled && _S.hostMicOn);
+    }
+  }, SPEAKER_INTERVAL);
 
   // ── Shadow Chat Bot AI moderation panel (host only) ──
   _initLiveModerationPanel(roomId);
@@ -884,10 +1150,11 @@ async function _endLive(user, roomId, db, presRef, presCb) {
   _S.hostEnded = true;
   _log('Ending live: ' + roomId);
 
-  if (_S.hostHbTimer)    { clearInterval(_S.hostHbTimer);    _S.hostHbTimer    = null; }
-  if (_S.hostCountTimer) { clearInterval(_S.hostCountTimer); _S.hostCountTimer = null; }
-  if (_S._hostSigOff)    { _S._hostSigOff(); _S._hostSigOff = null; }
-  if (_S.hostReqUnsub)   { try { _S.hostReqUnsub(); } catch (_) {} _S.hostReqUnsub = null; }
+  if (_S.hostHbTimer)       { clearInterval(_S.hostHbTimer);       _S.hostHbTimer       = null; }
+  if (_S.hostCountTimer)    { clearInterval(_S.hostCountTimer);    _S.hostCountTimer    = null; }
+  if (_S.hostSpeakerTimer)  { clearInterval(_S.hostSpeakerTimer);  _S.hostSpeakerTimer  = null; }
+  if (_S._hostSigOff)       { _S._hostSigOff(); _S._hostSigOff = null; }
+  if (_S.hostReqUnsub)      { try { _S.hostReqUnsub(); } catch (_) {} _S.hostReqUnsub = null; }
 
   if (presRef && presCb) try { off(presRef, 'value', presCb); } catch (_) {}
 
@@ -899,6 +1166,13 @@ async function _endLive(user, roomId, db, presRef, presCb) {
 
   // ── Tear down all guest peer connections ──
   _hostCleanupAllGuests(roomId, db);
+
+  // ── Disconnect SFU ──
+  if (_sfuAvailable()) {
+    try { window.snxSfu.disconnect(); } catch (_) {}
+  }
+  _S.hostSfuToken = null;
+  _S.hostSfuUrl   = null;
 
   if (_S.hostStream) { _S.hostStream.getTracks().forEach(t => t.stop()); _S.hostStream = null; }
 
@@ -1081,22 +1355,55 @@ async function _openViewerScreen(roomId) {
   });
   _S.viewUnsubs.push(() => off(presAllRef, 'value', presAllCb));
 
-  // ── Signal host: viewer is ready ──
-  _vLog('signaling-started', 'roomId=' + roomId + ' sessId=' + sessId);
-  const sigPath = 'liveSignaling/' + roomId + '/' + sessId;
-  try {
-    await set(ref(db, sigPath + '/viewerReady'), true);
-    _vLog('viewer-ready-written', 'path=' + sigPath + '/viewerReady');
-  } catch (e) {
-    _vErr('viewer-ready-written', e, sigPath + '/viewerReady', roomId, sessId);
-    // If this is a permission-denied error the RTDB liveSignaling rule is wrong.
-    console.error('[LIVE-VIEWER] CRITICAL — cannot write viewerReady to liveSignaling/' +
-      roomId + '/' + sessId + ' | code=' + (e.code || e.message));
+  // ── SFU viewer path ───────────────────────────────────────────────────────
+  // When snxSfu is available, the viewer connects to LiveKit as a subscriber.
+  // The SFU streams the host's track directly — no P2P signaling required.
+  if (_sfuAvailable()) {
+    _log('[SFU] Viewer: connecting to room ' + roomId);
+    try {
+      const { token, url: sfuUrl } = await window.snxSfu.fetchToken(
+        roomId, user.uid, /* canPublish */ false
+      );
+      _S.viewSfuToken = token;
+      await window.snxSfu.connect({
+        sfuUrl,
+        token,
+        roomName:  roomId,
+        uid:       user.uid,
+        role:      'viewer',
+        callbacks: _buildViewerSfuCallbacks(roomId),
+      });
+      _log('[SFU] Viewer connected — room: ' + roomId);
+      // SFU handles track delivery; no P2P signaling needed for this viewer.
+      // We still run presence + chat below (Firebase metadata only).
+    } catch (sfuErr) {
+      console.error('[SFU] Viewer connect failed — falling back to P2P:', sfuErr.message);
+      if (_sfuAvailable()) window.snxSfu.disconnect();
+      _S.viewSfuToken = null;
+      // Fall through to P2P path
+    }
   }
 
-  // ── 30-second connection watchdog ──
+  // ── P2P fallback path — signal host that viewer is ready ─────────────────
+  // Runs when SFU is unavailable. The host creates a P2P offer for this viewer.
+  _vLog('signaling-started', 'roomId=' + roomId + ' sessId=' + sessId);
+  const sigPath = 'liveSignaling/' + roomId + '/' + sessId;
+  if (!_S.viewSfuToken) {
+    // Only write viewerReady when NOT using SFU (avoids unnecessary host P2P overhead)
+    try {
+      await set(ref(db, sigPath + '/viewerReady'), true);
+      _vLog('viewer-ready-written', 'path=' + sigPath + '/viewerReady');
+    } catch (e) {
+      _vErr('viewer-ready-written', e, sigPath + '/viewerReady', roomId, sessId);
+      console.error('[LIVE-VIEWER] CRITICAL — cannot write viewerReady to liveSignaling/' +
+        roomId + '/' + sessId + ' | code=' + (e.code || e.message));
+    }
+  }
+
+  // ── 30-second connection watchdog (P2P path only) ──
   _S.viewConnTimeout = setTimeout(() => {
-    // Only fire if we haven't started playing yet
+    // Fire only if no SFU connection and no P2P connection established
+    if (_S.viewSfuToken) return;
     if (!_S.viewPc || _S.viewPc.connectionState === 'connected') return;
     _vLog('connection-state', 'TIMEOUT — no connection after 30s roomId=' + roomId);
     _setViewerStatus('timeout');
@@ -1390,8 +1697,24 @@ function _cleanupViewer() {
   if (_S.viewPc) { try { _S.viewPc.close(); } catch (_) {} _S.viewPc = null; }
   for (const fn of _S.viewUnsubs) { try { fn(); } catch (_) {} }
   _S.viewUnsubs = [];
+  // Disconnect viewer from SFU
+  if (_S.viewSfuToken && _sfuAvailable()) {
+    try { window.snxSfu.disconnect(); } catch (_) {}
+  }
+  _S.viewSfuToken = null;
   // Clean up any pending Request-to-Join status listener
   if (_S.viewReqUnsub) { try { _S.viewReqUnsub(); } catch (_) {} _S.viewReqUnsub = null; }
+  // Stop guest stage (does NOT recurse — _guestViewerCleanup is called below)
+  if (_guestStageActive) {
+    _guestStageActive = false;
+    _stopGuestSpeakerDetection();
+    const stage = _getStage();
+    if (stage) {
+      stage.classList.remove('is-guest-stage');
+      const dock = stage.querySelector('.snx-guest-controls');
+      if (dock) dock.remove();
+    }
+  }
   // Clean up guest connection if viewer was in a guest box
   _guestViewerCleanup();
   _boxState.clear();   // clear box layout state on viewer leave
@@ -2469,6 +2792,11 @@ let _guestViewerReconnTimer  = null;   // viewer side: reconnect/cleanup timer
 let _guestViewerRoomId       = null;   // viewer side: roomId for cleanup
 let _guestViewerUid          = null;   // viewer side: own uid for cleanup
 
+// Guest stage state (viewer who was accepted as a guest)
+let _guestStageActive        = false;  // true when guest multi-box stage is open
+let _guestStageSpeakerTimer  = null;   // active-speaker polling timer
+let _guestStageHostStream    = null;   // remote stream from host (received on guest's viewPc)
+
 const _MAX_GUEST_PEERS = 4;            // host: max simultaneous guest connections
 
 /* ──────────────────────────────────────────────────────────
@@ -2496,11 +2824,32 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
     return;
   }
 
-  // ────────────────────────────────────────────────────────
-  // DIAG STEP 1 — HOST ACCEPTS
   console.log('[DIAG-1] HOST ACCEPTS — roomId:', roomId, 'guestUid:', guestUid);
-  // ────────────────────────────────────────────────────────
 
+  // ── SFU path: guest connects directly to LiveKit room ───────────────────
+  // The SFU handles all media distribution.  The host's onParticipantJoined
+  // callback fires when the guest actually joins the room, and onTrackSubscribed
+  // fires when their media is ready.  We add the box in CONNECTING state here
+  // so the host sees it immediately; the SFU callbacks will update it to LIVE.
+  // No RTCPeerConnection or Firebase signaling offer/answer is needed.
+  if (_sfuAvailable() && _S.hostSfuToken) {
+    console.log('[SFU] hostAcceptGuest — SFU active; adding box, skipping P2P offer for:', guestUid);
+    // Add box in connecting state (idempotent — onParticipantJoined may also call this)
+    window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', req.avatar || '');
+    // Track the guest so _hostCleanupGuest and the cap check work correctly
+    _guestPeers.set(guestUid, { pc: null, sigUnsub: null, connectTimer: null, name: req.name, avatar: req.avatar });
+    // Clean up Firestore boxRequest doc after short delay
+    const fs = window._snxFirestore;
+    const reqId = roomId + '_' + guestUid;
+    if (fs && fs.deleteDoc && fs.doc && fs.db) {
+      setTimeout(async () => {
+        try { await fs.deleteDoc(fs.doc(fs.db, 'boxRequests', reqId)); } catch (_) {}
+      }, 3000);
+    }
+    return;
+  }
+
+  // ── P2P path (fallback when SFU is not active) ───────────────────────────
   const sigRef  = ref(db, 'guestSignaling/' + roomId + '/' + guestUid);
   const pc      = new RTCPeerConnection(_buildIceConfig());
 
@@ -2808,7 +3157,14 @@ async function _hostAcceptGuest(guestUid, req, roomId, db) {
  * Clean up one guest's host-side resources.
  * Does NOT affect other guests or the normal Live broadcast.
  */
-function _hostCleanupGuest(guestUid, roomId, db) {
+/**
+ * @param {string}  guestUid
+ * @param {string}  roomId
+ * @param {object}  db
+ * @param {string}  [signal]  – value to write to hostEnded ('removed' | 'ended').
+ *                              Pass null to skip writing (when caller already wrote it).
+ */
+function _hostCleanupGuest(guestUid, roomId, db, signal) {
   const peer = _guestPeers.get(guestUid);
   if (!peer) return;
   _guestPeers.delete(guestUid);
@@ -2821,6 +3177,15 @@ function _hostCleanupGuest(guestUid, roomId, db) {
     try { peer.pc.onconnectionstatechange = null; } catch (_) {}
     try { peer.pc.oniceconnectionstatechange = null; } catch (_) {}
     try { peer.pc.close(); } catch (_) {}
+  }
+
+  // Signal guest client to leave stage BEFORE removing data so the guest's
+  // hostEnded listener has time to fire.
+  // Default: 'removed' (live continues, only this guest was removed).
+  // Pass null to skip (e.g. when _hostCleanupAllGuests already wrote 'ended').
+  const sig = (signal === undefined) ? 'removed' : signal;
+  if (sig !== null) {
+    try { set(ref(db, 'guestSignaling/' + roomId + '/' + guestUid + '/hostEnded'), sig); } catch (_) {}
   }
 
   // Remove signaling data after brief delay so guest client can read it
@@ -2839,9 +3204,8 @@ function _hostCleanupAllGuests(roomId, db) {
   if (!_guestPeers.size) return;
   console.log('[SNX-HOST-GUEST] cleaning all', _guestPeers.size, 'guest peer(s) on Live end');
   for (const guestUid of [..._guestPeers.keys()]) {
-    // Signal the guest client to disconnect
-    try { set(ref(db, 'guestSignaling/' + roomId + '/' + guestUid + '/hostEnded'), true); } catch (_) {}
-    _hostCleanupGuest(guestUid, roomId, db);
+    // Pass 'ended' explicitly — entire Live has ended
+    _hostCleanupGuest(guestUid, roomId, db, 'ended');
     window.snxBoxManager.removeGuest(guestUid);
   }
 }
@@ -2923,10 +3287,64 @@ async function _guestJoinAsViewer(roomId, db, btn) {
   _guestViewerRoomId  = roomId;
   _guestViewerUid     = user.uid;
 
+  // ── SFU guest media path ──────────────────────────────────────────────────
+  // When snxSfu is available, the guest connects to the LiveKit room directly
+  // and publishes their camera/mic. The SFU distributes their stream to the
+  // host and all other participants automatically.
+  // Firebase is used only to signal acceptance (already done above in
+  // _viewerSendRequest → boxRequest update).
+  if (_sfuAvailable()) {
+    console.log('[SFU] Guest: connecting to room — roomId:', roomId, 'guestUid:', user.uid);
+    try {
+      const { token, url: sfuUrl } = await window.snxSfu.fetchToken(
+        roomId, user.uid, /* canPublish */ true
+      );
+      // Disconnect any existing viewer-mode SFU connection before joining as guest
+      if (_S.viewSfuToken) {
+        try { window.snxSfu.disconnect(); } catch (_) {}
+        _S.viewSfuToken = null;
+      }
+      await window.snxSfu.connect({
+        sfuUrl,
+        token,
+        roomName:  roomId,
+        uid:       user.uid,
+        role:      'guest',
+        callbacks: _buildGuestSfuCallbacks(roomId, guestStream),
+      });
+      await window.snxSfu.publishLocalStream(guestStream);
+      console.log('[SFU] Guest connected and publishing — roomId:', roomId);
+
+      // ── Open the guest stage UI (HOST + YOU boxes) ──
+      if (typeof toastNotification === 'function') toastNotification('🎙 You are now LIVE!');
+      _openGuestStageView(roomId, db, guestStream);
+
+      // ── Listen for hostEnded signal on guestSignaling ──
+      // (host uses this to signal removal or live end)
+      const hostEndedRef = ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/hostEnded');
+      const hostEndedUnsub = onValue(hostEndedRef, snap => {
+        if (!snap.exists() || !snap.val()) return;
+        const signal = snap.val();
+        console.log('[SNX-GUEST/SFU] hostEnded signal:', signal);
+        try { hostEndedUnsub(); } catch (_) {}
+        const liveEnded = (signal === true || signal === 'ended');
+        _guestLeaveStage(liveEnded);
+      });
+      return;   // SFU path complete — skip P2P handshake below
+
+    } catch (sfuErr) {
+      console.error('[SFU] Guest connect failed — falling back to P2P:', sfuErr.message);
+      try { window.snxSfu.disconnect(); } catch (_) {}
+      // Fall through to P2P path
+    }
+  }
+
+  // ── P2P guest media path (fallback) ──────────────────────────────────────
+  // Wait for host's SDP offer on guestSignaling, exchange ICE, connect.
   const sigRef   = ref(db, 'guestSignaling/' + roomId + '/' + user.uid);
   const offerRef = ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/offer');
 
-  console.log('[SNX-GUEST] waiting for offer — path: guestSignaling/' + roomId + '/' + user.uid);
+  console.log('[SNX-GUEST/P2P] waiting for offer — path: guestSignaling/' + roomId + '/' + user.uid);
 
   // ── Wait for host offer (max 15 s) ──
   // onValue fires immediately if the offer is already present, so there is no
@@ -3005,7 +3423,7 @@ async function _guestJoinAsViewer(roomId, db, btn) {
           _guestViewerReconnTimer = null;
           if (_guestViewerPc === pc && pc.connectionState !== 'connected') {
             console.log('[DIAG-25] GUEST disconnected grace expired — roomId:', roomId, 'guestUid:', user.uid);
-            _guestViewerCleanup();
+            _guestLeaveStage(false);
           }
         }, 4000);
       }
@@ -3013,7 +3431,7 @@ async function _guestJoinAsViewer(roomId, db, btn) {
       if (_guestViewerReconnTimer) { clearTimeout(_guestViewerReconnTimer); _guestViewerReconnTimer = null; }
       if (_guestViewerPc === pc) {
         console.log('[DIAG-25] GUEST connection', state, '— roomId:', roomId, 'guestUid:', user.uid);
-        _guestViewerCleanup();
+        _guestLeaveStage(false);
       }
     }
   };
@@ -3126,16 +3544,342 @@ async function _guestJoinAsViewer(roomId, db, btn) {
   }
 
   // ── Listen for hostEnded signal ──
+  // Value: 'ended' = host ended entire live; 'removed' = host removed this guest; true = legacy
   const hostEndedRef = ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/hostEnded');
   const hostEndedUnsub = onValue(hostEndedRef, snap => {
     if (!snap.exists() || !snap.val()) return;
-    console.log('[SNX-GUEST] host ended signal received — roomId:', roomId, 'guestUid:', user.uid);
+    const signal = snap.val();
+    console.log('[SNX-GUEST] host ended signal received:', signal, '— roomId:', roomId, 'guestUid:', user.uid);
     try { hostEndedUnsub(); } catch (_) {}
-    _guestViewerCleanup();
+    // 'removed' = host removed just this guest (live continues); they return to viewer
+    // 'ended' or true = host ended the entire live
+    const liveEnded = (signal === true || signal === 'ended');
+    _guestLeaveStage(liveEnded);
   });
 
-  console.log('[SNX-GUEST] signaling complete — WebRTC in progress — roomId:', roomId, 'guestUid:', user.uid);
-  if (typeof toastNotification === 'function') toastNotification('🎙 Connecting to guest box…');
+  // ── Open the guest participant stage ──
+  // The guest's viewPc (liveSignaling connection) already carries the host's
+  // broadcast stream.  We wire up the GUEST-SIDE stage so the guest sees:
+  //   [ HOST box — remote stream from _S.viewPc ]
+  //   [ YOU  box — local camera, muted           ]
+  console.log('[SNX-GUEST] signaling complete — opening guest stage — roomId:', roomId, 'guestUid:', user.uid);
+  if (typeof toastNotification === 'function') toastNotification('🎙 You are now LIVE!');
+  _openGuestStageView(roomId, db, guestStream);
+}
+
+/**
+ * Open the two-person (or N-person) stage view for an accepted guest.
+ *
+ * The guest's normal viewer WebRTC connection (_S.viewPc) delivers the host
+ * broadcast stream.  We capture that stream, build a mini box-stage, and add
+ * the guest's own local camera as a muted "YOU" preview tile.
+ */
+function _openGuestStageView(roomId, db, localStream) {
+  if (_guestStageActive) return;   // guard re-entry
+  _guestStageActive = true;
+
+  const stage = _getStage();
+  if (!stage) {
+    console.warn('[SNX-GUEST-STAGE] No stage element found');
+    return;
+  }
+
+  // Mark stage as guest participant stage (enables guest-specific CSS)
+  stage.classList.add('is-guest-stage');
+
+  // ── Build or reuse the box grid ──
+  _boxState.clear();
+  _ensureBoxGrid();
+
+  // ── HOST box — driven by the existing viewer PC remote stream ──
+  // _S.viewPc is the RTCPeerConnection already live with host media.
+  // We collect tracks from it; if they're already present grab them now,
+  // otherwise wait for the ontrack event.
+  const hostBox = _buildGuestBox('_host_', 'HOST', 'host');
+  const grid = stage.querySelector('.snx-live-boxes');
+  if (grid) grid.appendChild(hostBox.el);
+  _boxState.set('_host_', hostBox);
+
+  // Collect existing tracks from the viewer PC remoteStream
+  function _attachHostStream() {
+    const vpc = _S.viewPc;
+    if (!vpc) return;
+    // Build a fresh MediaStream from all current receiver tracks
+    const hostStream = new MediaStream(
+      vpc.getReceivers()
+         .map(r => r.track)
+         .filter(t => t && t.readyState !== 'ended')
+    );
+    if (hostStream.getTracks().length > 0) {
+      _guestStageHostStream = hostStream;
+      hostBox.videoEl.srcObject = hostStream;
+      hostBox.videoEl.muted = false;
+      hostBox.videoEl.play().catch(() => {});
+      _setBxState('_host_', 'ready');
+    }
+  }
+  _attachHostStream();
+
+  // Also hook ontrack so late-arriving tracks are captured
+  const origViewPcOntrack = _S.viewPc ? _S.viewPc.ontrack : null;
+  if (_S.viewPc) {
+    _S.viewPc.ontrack = (e) => {
+      if (typeof origViewPcOntrack === 'function') origViewPcOntrack(e);
+      // Re-attach whenever a new track arrives
+      _attachHostStream();
+    };
+  }
+
+  // ── YOU box — local camera preview, ALWAYS muted ──
+  const youBox = _buildGuestBox('_you_', 'YOU', 'you');
+  if (grid) grid.appendChild(youBox.el);
+  _boxState.set('_you_', youBox);
+
+  if (localStream) {
+    youBox.videoEl.srcObject = localStream;
+    youBox.videoEl.muted = true;      // must be muted — no echo
+    youBox.videoEl.play().catch(() => {});
+    _setBxState('_you_', 'ready');
+  }
+
+  // ── Layout ──
+  _recalcGuestLayout();
+
+  // ── Hide the connecting loader (if still visible) ──
+  const loader = _el('snxViewerLoader');
+  if (loader) loader.classList.remove('show');
+
+  // ── Hide the solo viewer video (we use box grid now) ──
+  const viewerVid = _el('snxLiveViewerVideo');
+  if (viewerVid) viewerVid.style.display = 'none';
+
+  // ── Inject guest controls dock ──
+  _attachGuestControls(roomId, db, localStream);
+
+  // ── Active speaker detection ──
+  _startGuestSpeakerDetection();
+
+  console.log('[SNX-GUEST-STAGE] Stage opened — roomId:', roomId);
+}
+
+/**
+ * Build a minimal box element for the guest stage.
+ * role: 'host' | 'you' | 'guest'
+ */
+function _buildGuestBox(uid, name, role) {
+  const el = document.createElement('div');
+  el.className = 'snx-box';
+  el.dataset.uid   = uid;
+  el.dataset.role  = role;
+  el.dataset.state = 'connecting';
+
+  const videoEl = document.createElement('video');
+  videoEl.setAttribute('playsinline', '');
+  videoEl.setAttribute('autoplay', '');
+  videoEl.muted = (role === 'you');   // YOU box is always muted
+  el.appendChild(videoEl);
+
+  const label = document.createElement('div');
+  label.className = 'snx-box-label';
+  if (role === 'host')    label.textContent = '★ HOST';
+  else if (role === 'you') label.textContent = 'YOU';
+  else label.textContent = _esc(name || 'Guest');
+  el.appendChild(label);
+
+  // Connecting overlay
+  const connEl = document.createElement('div');
+  connEl.className = 'snx-box-connecting show';
+  connEl.innerHTML =
+    '<div class="snx-box-conn-ring"></div>' +
+    '<div class="snx-box-conn-name">' + (role === 'host' ? 'HOST' : 'YOU') + '</div>' +
+    '<div class="snx-box-conn-text">Connecting…</div>';
+  el.appendChild(connEl);
+
+  // Cam-off overlay
+  const camOffEl = document.createElement('div');
+  camOffEl.className = 'snx-box-cam-off';
+  camOffEl.innerHTML =
+    '<span class="snx-box-cam-off-icon">📷</span>' +
+    '<span class="snx-box-cam-off-name">' + (role === 'you' ? 'YOU' : 'Camera off') + '</span>';
+  el.appendChild(camOffEl);
+
+  return { uid, name, role, state: 'connecting', el, videoEl };
+}
+
+/**
+ * Recalculate data-boxes on the stage for the guest-side two-box layout.
+ */
+function _recalcGuestLayout() {
+  const stage = _getStage();
+  if (!stage) return;
+  const count = _boxState.size;
+  stage.dataset.boxes  = String(Math.max(1, count));
+  stage.dataset.layout = 'auto';
+}
+
+/**
+ * Inject the guest controls (mic / cam / leave) into the stage.
+ */
+function _attachGuestControls(roomId, db, localStream) {
+  const stage = _getStage();
+  if (!stage || stage.querySelector('.snx-guest-controls')) return;
+
+  const dock = document.createElement('div');
+  dock.className = 'snx-guest-controls';
+
+  // Mic button
+  let micOn = true;
+  const micBtn = document.createElement('button');
+  micBtn.className = 'snx-guest-ctrl-btn';
+  micBtn.id = 'snxGuestMicBtn';
+  micBtn.setAttribute('aria-label', 'Toggle microphone');
+  micBtn.textContent = '🎤';
+  micBtn.addEventListener('click', () => {
+    micOn = !micOn;
+    if (localStream) localStream.getAudioTracks().forEach(t => { t.enabled = micOn; });
+    micBtn.textContent = micOn ? '🎤' : '🔇';
+    micBtn.classList.toggle('off', !micOn);
+  });
+
+  // Cam button
+  let camOn = true;
+  const camBtn = document.createElement('button');
+  camBtn.className = 'snx-guest-ctrl-btn';
+  camBtn.id = 'snxGuestCamBtn';
+  camBtn.setAttribute('aria-label', 'Toggle camera');
+  camBtn.textContent = '📷';
+  camBtn.addEventListener('click', () => {
+    camOn = !camOn;
+    if (localStream) localStream.getVideoTracks().forEach(t => { t.enabled = camOn; });
+    camBtn.textContent = camOn ? '📷' : '🚫';
+    camBtn.classList.toggle('off', !camOn);
+    // Update YOU box cam-off overlay
+    const youBox = _boxState.get('_you_');
+    if (youBox) {
+      const co = youBox.el.querySelector('.snx-box-cam-off');
+      if (co) co.classList.toggle('show', !camOn);
+    }
+  });
+
+  // Leave button
+  const leaveBtn = document.createElement('button');
+  leaveBtn.className = 'snx-guest-leave-btn';
+  leaveBtn.id = 'snxGuestLeaveBtn';
+  leaveBtn.setAttribute('aria-label', 'Leave stage');
+  leaveBtn.textContent = '← LEAVE';
+  leaveBtn.addEventListener('click', () => _guestLeaveStage(false));
+
+  dock.appendChild(micBtn);
+  dock.appendChild(camBtn);
+  dock.appendChild(leaveBtn);
+  stage.appendChild(dock);
+}
+
+/**
+ * Poll active speaker state using getStats() on the guest peer connection.
+ * Adds/removes .snx-box-speaking on the host and you boxes.
+ * Runs every 1.5 s. Only starts if audiocontext-free stats are available.
+ */
+function _startGuestSpeakerDetection() {
+  if (_guestStageSpeakerTimer) return;
+  const INTERVAL = 1500;
+  const THRESHOLD = 0.01;   // audio level threshold (0–1 scale)
+
+  async function _poll() {
+    const vpc = _S.viewPc;
+    if (!vpc || !vpc.getStats) return;
+    try {
+      const stats = await vpc.getStats();
+      let hostLevel = 0;
+      stats.forEach(r => {
+        if (r.type === 'inbound-rtp' && r.kind === 'audio') {
+          hostLevel = Math.max(hostLevel, r.audioLevel || 0);
+        }
+      });
+      const hostBox = _boxState.get('_host_');
+      if (hostBox) hostBox.el.classList.toggle('snx-box-speaking', hostLevel > THRESHOLD);
+    } catch (_) {}
+
+    // YOU box — check local mic track via captureStream or just reflect enabled state
+    // We can't easily measure local mic level without AudioContext, so just
+    // highlight when mic is unmuted (track.enabled).
+    const guestStream = _guestViewerStream;
+    const youBox = _boxState.get('_you_');
+    if (youBox && guestStream) {
+      const atracks = guestStream.getAudioTracks();
+      const micActive = atracks.length > 0 && atracks[0].enabled;
+      youBox.el.classList.toggle('snx-box-speaking', micActive);
+    }
+  }
+
+  _guestStageSpeakerTimer = setInterval(_poll, INTERVAL);
+}
+
+function _stopGuestSpeakerDetection() {
+  if (_guestStageSpeakerTimer) {
+    clearInterval(_guestStageSpeakerTimer);
+    _guestStageSpeakerTimer = null;
+  }
+}
+
+/**
+ * Guest leaves the stage (tap LEAVE or host ended the Live).
+ * @param {boolean} hostEnded  – true when the host ended Live (vs guest tapping Leave)
+ */
+function _guestLeaveStage(hostEnded) {
+  if (!_guestStageActive) {
+    _guestViewerCleanup();
+    return;
+  }
+  _guestStageActive = false;
+  _stopGuestSpeakerDetection();
+
+  // Remove guest-stage chrome
+  const stage = _getStage();
+  if (stage) {
+    stage.classList.remove('is-guest-stage');
+    const dock = stage.querySelector('.snx-guest-controls');
+    if (dock) dock.remove();
+    // Remove box grid guest boxes
+    _boxState.forEach(b => {
+      if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el);
+    });
+    _boxState.clear();
+  }
+  _guestStageHostStream = null;
+  _stopGuestSpeakerDetection();
+
+  // Disconnect SFU guest connection
+  if (_sfuAvailable()) {
+    try { window.snxSfu.disconnect(); } catch (_) {}
+  }
+
+  // Clean up P2P WebRTC + media (no-op when SFU was used)
+  _guestViewerCleanup();
+
+  if (hostEnded) {
+    // Host ended the live — show ended screen
+    _onViewerHostEnded();
+  } else {
+    // Guest chose to leave — return to normal viewer mode
+    const roomId = _S.viewRoomId;
+    if (roomId) {
+      if (typeof toastNotification === 'function') toastNotification('👋 You left the stage.');
+      // Close the existing viewer broadcast connection and state cleanly,
+      // then re-open viewer screen with a fresh session.
+      // Small delay so cleanup can complete before re-opening.
+      setTimeout(() => {
+        // Close old viewer PC and unsubs (does NOT show ended screen)
+        if (_S.viewPc) { try { _S.viewPc.close(); } catch (_) {} _S.viewPc = null; }
+        for (const fn of _S.viewUnsubs) { try { fn(); } catch (_) {} }
+        _S.viewUnsubs = [];
+        if (_S.viewPresRef) { try { remove(_S.viewPresRef); } catch (_) {} _S.viewPresRef = null; }
+        _openViewerScreen(roomId);
+      }, 400);
+    } else {
+      _closeOverlay();
+    }
+  }
 }
 
 /**

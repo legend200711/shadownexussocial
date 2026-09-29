@@ -145,6 +145,14 @@ async function handleLiveKitRoom(request, env, cors, sec) {
     return new Response('Method not allowed', { status: 405, headers: mergeHeaders(cors, sec) });
   }
 
+  // Require a valid Firebase ID token — unauthenticated callers get 401.
+  try { await _requireAuth(request, env); } catch (e) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+
   const apiKey    = env.LIVEKIT_API_KEY;
   const apiSecret = env.LIVEKIT_API_SECRET;
   const livekitUrl = (env.LIVEKIT_URL || '')
@@ -220,6 +228,14 @@ async function handleLiveKitRoom(request, env, cors, sec) {
 async function handleLiveKitToken(request, env, cors, sec) {
   if (request.method !== 'POST') {
     return new Response('Method not allowed', { status: 405, headers: mergeHeaders(cors, sec) });
+  }
+
+  // Require a valid Firebase ID token — unauthenticated callers get 401.
+  try { await _requireAuth(request, env); } catch (e) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
   }
 
   const apiKey    = env.LIVEKIT_API_KEY;

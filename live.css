@@ -1512,7 +1512,8 @@
   background: rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
-.snx-live-stage.is-host .snx-live-request-btn { display: none; }
+.snx-live-stage.is-host .snx-live-request-btn        { display: none; }
+.snx-live-stage.is-guest-stage .snx-live-request-btn { display: none; }
 
 /* ══════════════════════════════════════════════════════════
    HOST REQUEST NOTIFICATION QUEUE
@@ -1750,6 +1751,150 @@
   }
   .snx-live-stage[data-layout="guestrow"] .snx-live-boxes {
     grid-template-rows: 1fr 130px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   GUEST PARTICIPANT STAGE — .is-guest-stage
+   Applied when a viewer has been accepted as a guest and is
+   in the multi-box stage view.
+══════════════════════════════════════════════════════════ */
+
+/* Guest controls dock — bottom-right, compact */
+.snx-guest-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 56px;
+  z-index: 24;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+}
+
+/* Individual guest control buttons (mic / cam) */
+.snx-guest-ctrl-btn {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 174, 239, 0.35);
+  background: rgba(0, 10, 30, 0.72);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.snx-guest-ctrl-btn.off {
+  background: rgba(255, 50, 80, 0.22);
+  border-color: rgba(255, 60, 80, 0.5);
+}
+.snx-guest-ctrl-btn:active {
+  background: rgba(0, 174, 239, 0.3);
+  border-color: rgba(0, 174, 239, 0.7);
+}
+
+/* Guest leave button */
+.snx-guest-leave-btn {
+  padding: 9px 16px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-tap-highlight-color: transparent;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+.snx-guest-leave-btn:active {
+  background: rgba(220, 50, 50, 0.65);
+  border-color: rgba(255, 80, 80, 0.5);
+  color: #fff;
+}
+
+/* On guest stage: shift chat input to leave room for guest controls */
+.snx-live-stage.is-guest-stage .snx-live-chat-input-row {
+  padding-right: 72px;
+}
+
+/* YOU box: role="you" — same as guest but distinct label colour */
+.snx-box[data-role="you"] .snx-box-label {
+  color: rgba(0, 230, 180, 0.9);
+  background: rgba(0, 20, 15, 0.7);
+  border: 1px solid rgba(0, 200, 160, 0.3);
+}
+
+/* YOU box: always-muted tag so viewers know it's local */
+.snx-box[data-role="you"] .snx-box-label::after {
+  content: ' • YOU';
+  color: rgba(0, 200, 160, 0.7);
+  font-size: 8px;
+}
+
+/* Camera-off overlay: name text inside the placeholder */
+.snx-box-cam-off-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.45);
+  text-align: center;
+  padding: 0 8px;
+  margin-top: 4px;
+}
+
+/* ── Active speaker glow — electric-blue edge ──
+   Triggered by JS adding .snx-box-speaking via getStats() polling.
+   Intentionally subtle — not flashing.                              */
+.snx-box-speaking {
+  outline: 2px solid rgba(0, 200, 255, 0.8);
+  outline-offset: -2px;
+  box-shadow: 0 0 14px rgba(0, 200, 255, 0.3), inset 0 0 16px rgba(0, 60, 120, 0.25);
+  transition: outline 0.2s ease, box-shadow 0.2s ease;
+}
+.snx-box:not(.snx-box-speaking) {
+  transition: outline 0.4s ease, box-shadow 0.4s ease;
+}
+
+/* ── YOU box: data-role="you" recognized by layout grid ──
+   Treat it the same as data-role="guest" for layout purposes.       */
+.snx-live-boxes .snx-box[data-role="you"] {
+  /* inherits .snx-box guest layout slot — no special grid override needed */
+}
+
+/* ── Guest stage: ensure the tap zone does not block guest controls ── */
+.snx-live-stage.is-guest-stage .snx-live-tap-zone {
+  /* Leave the bottom-right quadrant open for guest controls */
+  right: 72px;
+  bottom: 56px;
+}
+
+/* ── Guest stage: hide host controls dock (not applicable to guest) ── */
+.snx-live-stage.is-guest-stage .snx-live-host-controls { display: none; }
+
+/* ── Guest stage mobile portrait: stacked 50/50 ── */
+@media (max-width: 480px) and (orientation: portrait) {
+  .snx-live-stage.is-guest-stage .snx-guest-controls {
+    bottom: max(60px, env(safe-area-inset-bottom) + 60px);
+    right: 10px;
+  }
+}
+
+/* ── Guest stage landscape ── */
+@media (orientation: landscape) {
+  .snx-live-stage.is-guest-stage .snx-guest-controls {
+    right: max(12px, env(safe-area-inset-right));
+  }
+  .snx-live-stage.is-guest-stage .snx-live-tap-zone {
+    right: max(72px, env(safe-area-inset-right) + 72px);
   }
 }
 
