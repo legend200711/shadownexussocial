@@ -109,8 +109,13 @@
 
     "guestSignaling": {
       "$roomId": {
-        ".read":  "auth != null",
-        ".write": "auth != null"
+        "$guestUid": {
+          // The guest may read/write their own signaling branch.
+          // The host of this room (liveRooms/$roomId/hostId == auth.uid) may
+          // read/write any guest signaling branch within their room.
+          ".read":  "auth != null && (auth.uid == $guestUid || root.child('liveRooms').child($roomId).child('hostId').val() == auth.uid)",
+          ".write": "auth != null && (auth.uid == $guestUid || root.child('liveRooms').child($roomId).child('hostId').val() == auth.uid)"
+        }
       }
     },
 

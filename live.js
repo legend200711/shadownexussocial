@@ -1,17 +1,22 @@
 /**
  * Shadow Nexus Social — Live System
- * live.js  (SNS-2026-LIVE-005)
+ * live.js  (SNS-2026-LIVE-006)
  *
  * ONE canonical Live engine for Shadow Nexus Social.
  * ES module — loaded as <script type="module"> in index.html.
  *
  * Firebase paths (RTDB):
  *   liveRooms/{roomId}                        — room metadata
- *   liveSignaling/{roomId}/{viewerId}         — WebRTC signaling
+ *   liveSignaling/{roomId}/{viewerId}         — WebRTC signaling (normal viewers)
  *   liveSignaling/{roomId}/{viewerId}/hostCandidates/{key}   — host ICE (keyed)
  *   liveSignaling/{roomId}/{viewerId}/viewerCandidates/{key} — viewer ICE (keyed)
  *   livePresence/{roomId}/{viewerId}          — viewer presence
  *   liveChats/{roomId}/{msgId}                — chat messages
+ *   guestSignaling/{roomId}/{guestUid}        — GUEST BOX WebRTC signaling (separate)
+ *   guestSignaling/{roomId}/{guestUid}/offer             — host → guest SDP offer
+ *   guestSignaling/{roomId}/{guestUid}/answer            — guest → host SDP answer
+ *   guestSignaling/{roomId}/{guestUid}/hostCandidates/{key}  — host ICE for guest
+ *   guestSignaling/{roomId}/{guestUid}/guestCandidates/{key} — guest ICE to host
  *
  * FIXES (SNS-2026-LIVE-004):
  *   - HOST+VIEWER: ICE candidates now use Firebase push() keys — no array overwrites
@@ -23,6 +28,17 @@
  *   - VIEWER: _setViewerStatus extended with NEGOTIATING state
  *   - VIEWER: connTimeout cleared in _cleanupViewer
  *   - ALL: checkpoint labels match spec exactly
+ *
+ * FIXES (SNS-2026-LIVE-006):
+ *   - GUEST BOX WEBRTC HANDOFF (SNX-GUEST-001):
+ *     Full accepted-guest → media → WebRTC → signaling → host ontrack → box manager
+ *     chain implemented. Supports up to 4 simultaneous guests.
+ *     Separate guestSignaling path — does NOT touch liveSignaling.
+ *     Each guest has isolated RTCPeerConnection, signaling listeners, ICE tracking.
+ *     Host creates offer; guest acquires camera/mic, sets remote desc, answers.
+ *     ICE candidates queued until remoteDescription ready (no silent drops).
+ *     Host ontrack fires → window.snxBoxManager.addGuest / setGuestStream.
+ *     Guest cleanup is isolated — other guests/viewers stay connected.
  *
  * FIXES (SNS-2026-LIVE-005):
  *   - CRITICAL: RTDB rules now grant read at liveSignaling/{roomId} so host can
@@ -773,6 +789,9 @@ async function _endLive(user, roomId, db, presRef, presCb) {
   }
   _S.hostPeers = {};
 
+  // ── Tear down all guest peer connections ──
+  _hostCleanupAllGuests(roomId, db);
+
   if (_S.hostStream) { _S.hostStream.getTracks().forEach(t => t.stop()); _S.hostStream = null; }
 
   try {
@@ -1264,6 +1283,8 @@ function _cleanupViewer() {
   _S.viewUnsubs = [];
   // Clean up any pending Request-to-Join status listener
   if (_S.viewReqUnsub) { try { _S.viewReqUnsub(); } catch (_) {} _S.viewReqUnsub = null; }
+  // Clean up guest connection if viewer was in a guest box
+  _guestViewerCleanup();
   _boxState.clear();   // clear box layout state on viewer leave
 }
 
@@ -1858,10 +1879,9 @@ async function _viewerSendRequest(roomId, db, btn) {
       btn.disabled = true;
       if (typeof toastNotification === 'function') toastNotification('✅ Your request was accepted!');
       if (_S.viewReqUnsub) { try { _S.viewReqUnsub(); } catch (_) {} _S.viewReqUnsub = null; }
-      // ── GUEST CONNECTION HANDOFF REQUIRED ──
-      // Current live.js does not yet have guest WebRTC handoff.
-      // Request accepted — waiting for host to initiate guest connection.
-      console.log('[BoxRequest] ACCEPTED — GUEST CONNECTION HANDOFF REQUIRED. Waiting for host signaling.');
+      // ── GUEST BOX HANDOFF ──
+      console.log('[SNX-GUEST] accepted — starting guest media + signaling');
+      _guestJoinAsViewer(roomId, db, btn);
 
     } else if (status === 'declined') {
       btn.dataset.reqPending = '';
@@ -1927,10 +1947,9 @@ function _startHostRequestListener(roomId, hostUid, db) {
             // Update RTDB status → accepted
             try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'accepted' }); } catch (_) {}
             if (_S.hostShownReqs) _S.hostShownReqs.delete(uid);
-            // ── GUEST CONNECTION HANDOFF REQUIRED ──
-            // Current live.js (SNS-2026-LIVE-005) does not yet have guest WebRTC handoff.
-            // Stop here — the request state transition is complete.
-            console.log('[BoxRequest] ACCEPT complete — GUEST CONNECTION HANDOFF REQUIRED for uid:', uid);
+            // ── GUEST BOX HANDOFF ──
+            console.log('[SNX-HOST-GUEST] accept complete — starting host guest peer for uid:', uid);
+            _hostAcceptGuest(uid, { name: d.viewerName || 'Guest', avatar: d.viewerProfileImage || '' }, roomId, db);
           },
           /* onDecline */ async (uid) => {
             console.log('[BoxRequest] Host declining:', uid);
@@ -1991,7 +2010,8 @@ function _startHostRequestListener(roomId, hostUid, db) {
               try { await fs2.updateDoc(fs2.doc(fs2.db, 'boxRequests', reqId), { status: 'accepted' }); } catch (_) {}
             }
             if (_S.hostShownReqs) _S.hostShownReqs.delete(uid);
-            console.log('[BoxRequest] ACCEPT (RTDB) complete — GUEST CONNECTION HANDOFF REQUIRED for uid:', uid);
+            console.log('[SNX-HOST-GUEST] accept (RTDB fallback) — starting host guest peer for uid:', uid);
+            _hostAcceptGuest(uid, { name: req.name || 'Guest', avatar: req.avatar || '' }, roomId, db);
           },
           async (uid) => {
             try { await update(ref(db, 'guestRequests/' + roomId + '/' + uid), { status: 'declined' }); } catch (_) {}
@@ -2230,4 +2250,550 @@ function _hookGoLive() {
 }
 window._hookGoLive = _hookGoLive;
 
-_log('live.js loaded — SNS-2026-LIVE-005');
+/* ══════════════════════════════════════════════════════════
+   GUEST BOX WEBRTC ENGINE  (SNX-GUEST-001)
+
+   Architecture:
+     HOST side  — _hostAcceptGuest(), _hostCleanupGuest(), _hostCleanupAllGuests()
+     VIEWER side — _guestJoinAsViewer(), _guestViewerCleanup()
+
+   Signaling path (SEPARATE from liveSignaling):
+     guestSignaling/{roomId}/{guestUid}/offer
+     guestSignaling/{roomId}/{guestUid}/answer
+     guestSignaling/{roomId}/{guestUid}/hostCandidates/{key}
+     guestSignaling/{roomId}/{guestUid}/guestCandidates/{key}
+
+   State:
+     _guestPeers              Map<uid, { pc, sigUnsub, name, avatar }>
+     _guestViewerPc           RTCPeerConnection|null   (viewer-side guest PC)
+     _guestViewerStream       MediaStream|null          (viewer local cam/mic)
+     _guestViewerSigUnsub     Function|null             (viewer host-ICE listener)
+     _guestViewerReconnTimer  number|null               (reconnect timer)
+════════════════════════════════════════════════════════════ */
+
+/* ── Guest state (module-level) ── */
+const _guestPeers = new Map();    // host side: uid → { pc, sigUnsub, name, avatar }
+
+let _guestViewerPc           = null;   // viewer side: their RTCPeerConnection
+let _guestViewerStream       = null;   // viewer side: camera/mic MediaStream
+let _guestViewerSigUnsub     = null;   // viewer side: host ICE listener
+let _guestViewerReconnTimer  = null;   // viewer side: reconnect/cleanup timer
+let _guestViewerRoomId       = null;   // viewer side: roomId for cleanup
+let _guestViewerUid          = null;   // viewer side: own uid for cleanup
+
+const _MAX_GUEST_PEERS = 4;            // host: max simultaneous guest connections
+
+/* ──────────────────────────────────────────────────────────
+   HOST SIDE
+────────────────────────────────────────────────────────── */
+
+/**
+ * Called when host presses Accept on a guest request.
+ * Creates an isolated RTCPeerConnection for this guest,
+ * writes the offer to guestSignaling, and listens for answer + ICE.
+ */
+async function _hostAcceptGuest(guestUid, req, roomId, db) {
+  if (!roomId || !guestUid || !db) return;
+
+  // ── 4-guest cap ──
+  if (_guestPeers.size >= _MAX_GUEST_PEERS) {
+    console.warn('[SNX-HOST-GUEST] ALL GUEST BOXES ARE IN USE — max', _MAX_GUEST_PEERS, 'guests');
+    if (typeof toastNotification === 'function') toastNotification('⚠️ All guest boxes are in use.');
+    return;
+  }
+
+  // ── Guard against duplicate ──
+  if (_guestPeers.has(guestUid)) {
+    console.warn('[SNX-HOST-GUEST] Already have peer for guestUid:', guestUid);
+    return;
+  }
+
+  console.log('[SNX-HOST-GUEST] creating peer for guestUid:', guestUid);
+
+  const sigRef  = ref(db, 'guestSignaling/' + roomId + '/' + guestUid);
+  const pc      = new RTCPeerConnection(_ICE_CONFIG);
+
+  // Add to box manager immediately (connecting state — no stream yet)
+  window.snxBoxManager.addGuest(guestUid, req.name || 'Guest', null);
+  console.log('[SNX-HOST-GUEST] guest added to box (connecting) — guestUid:', guestUid);
+
+  // ── ICE candidate publishing — push-keyed, queued until offer written ──
+  const pendingHostCands = [];
+  let offerWritten = false;
+
+  pc.onicecandidate = async ({ candidate }) => {
+    if (!candidate) return;
+    console.log('[SNX-HOST-GUEST] ICE candidate — guestUid:', guestUid);
+    if (!offerWritten) {
+      pendingHostCands.push(candidate.toJSON());
+      return;
+    }
+    try {
+      await set(push(ref(db, 'guestSignaling/' + roomId + '/' + guestUid + '/hostCandidates')), candidate.toJSON());
+    } catch (e) {
+      console.error('[SNX-HOST-GUEST] ICE write error — guestUid:', guestUid, e.message);
+    }
+  };
+
+  // ── ontrack: guest stream arrived ──
+  const remoteStream = new MediaStream();
+  let   trackTimer   = null;
+
+  pc.ontrack = (e) => {
+    const track = e.track;
+    if (!remoteStream.getTracks().includes(track)) remoteStream.addTrack(track);
+    // Defer 150 ms so both audio+video are collected before attaching
+    if (trackTimer) return;
+    trackTimer = setTimeout(() => {
+      trackTimer = null;
+      console.log('[SNX-HOST-GUEST] remote track received — guestUid:', guestUid, 'tracks:', remoteStream.getTracks().length);
+      window.snxBoxManager.setGuestStream(guestUid, remoteStream);
+      console.log('[SNX-HOST-GUEST] guest added to box (stream ready) — guestUid:', guestUid);
+    }, 150);
+  };
+
+  // ── Connection state ──
+  let dcTimer = null;
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    console.log('[SNX-HOST-GUEST] connection-state:', state, 'guestUid:', guestUid);
+    if (state === 'connected') {
+      if (dcTimer) { clearTimeout(dcTimer); dcTimer = null; }
+    } else if (state === 'disconnected') {
+      if (!dcTimer) {
+        dcTimer = setTimeout(() => {
+          dcTimer = null;
+          if (pc.connectionState !== 'connected' && _guestPeers.has(guestUid)) {
+            console.log('[SNX-HOST-GUEST] disconnected grace period expired — cleaning guestUid:', guestUid);
+            window.snxBoxManager.setGuestState(guestUid, 'disconnected');
+            _hostCleanupGuest(guestUid, roomId, db);
+          }
+        }, 2000);
+      }
+    } else if (state === 'failed' || state === 'closed') {
+      if (dcTimer) { clearTimeout(dcTimer); dcTimer = null; }
+      if (_guestPeers.has(guestUid)) {
+        window.snxBoxManager.setGuestState(guestUid, 'disconnected');
+        _hostCleanupGuest(guestUid, roomId, db);
+      }
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log('[SNX-HOST-GUEST] ICE state:', pc.iceConnectionState, 'guestUid:', guestUid);
+    if (pc.iceConnectionState === 'failed') {
+      if (_guestPeers.has(guestUid)) {
+        window.snxBoxManager.setGuestState(guestUid, 'disconnected');
+        _hostCleanupGuest(guestUid, roomId, db);
+      }
+    }
+  };
+
+  // ── Create offer ──
+  let offer;
+  try {
+    offer = await pc.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+    await pc.setLocalDescription(offer);
+    console.log('[SNX-HOST-GUEST] offer created — guestUid:', guestUid);
+  } catch (e) {
+    console.error('[SNX-HOST-GUEST] offer creation failed — guestUid:', guestUid, e.message);
+    try { pc.close(); } catch (_) {}
+    window.snxBoxManager.removeGuest(guestUid);
+    return;
+  }
+
+  // ── Write offer to guestSignaling ──
+  try {
+    await set(sigRef, {
+      offer: { type: offer.type, sdp: offer.sdp },
+      hostCandidates:  {},
+      guestCandidates: {},
+    });
+    offerWritten = true;
+    console.log('[SNX-HOST-GUEST] offer written — guestUid:', guestUid);
+  } catch (e) {
+    console.error('[SNX-HOST-GUEST] offer write failed — guestUid:', guestUid, e.message);
+    try { pc.close(); } catch (_) {}
+    window.snxBoxManager.removeGuest(guestUid);
+    return;
+  }
+
+  // ── Flush any ICE candidates that were generated before offerWritten ──
+  for (const cand of pendingHostCands.splice(0)) {
+    try {
+      await set(push(ref(db, 'guestSignaling/' + roomId + '/' + guestUid + '/hostCandidates')), cand);
+    } catch (_) {}
+  }
+
+  // ── Watch for guest answer + ICE ──
+  const appliedGuestCandIds = new Set();
+  const pendingGuestCands   = [];  // queued before remoteDescription ready
+
+  const sigUnsub = onValue(sigRef, async snap => {
+    if (!snap.exists()) return;
+    const d = snap.val();
+
+    // Apply answer (once only)
+    if (d.answer && pc.remoteDescription === null) {
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(d.answer));
+        console.log('[SNX-HOST-GUEST] answer received + remote desc set — guestUid:', guestUid);
+        // Flush queued guest ICE
+        for (const { key, cand } of pendingGuestCands.splice(0)) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(cand)); appliedGuestCandIds.add(key); } catch (_) {}
+        }
+      } catch (e) {
+        console.error('[SNX-HOST-GUEST] setRemoteDescription(answer) failed — guestUid:', guestUid, e.message);
+      }
+    }
+
+    // Apply guest ICE candidates
+    if (d.guestCandidates) {
+      for (const [key, cand] of Object.entries(d.guestCandidates)) {
+        if (appliedGuestCandIds.has(key)) continue;
+        if (!pc.remoteDescription) {
+          pendingGuestCands.push({ key, cand });
+          appliedGuestCandIds.add(key);  // prevent double-queuing
+        } else {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+            appliedGuestCandIds.add(key);
+            console.log('[SNX-HOST-GUEST] ICE applied — key:', key, 'guestUid:', guestUid);
+          } catch (e) {
+            console.error('[SNX-HOST-GUEST] ICE addCandidate failed — guestUid:', guestUid, e.message);
+          }
+        }
+      }
+    }
+  });
+
+  // ── Store peer ──
+  _guestPeers.set(guestUid, { pc, sigUnsub, name: req.name, avatar: req.avatar });
+
+  const fs = window._snxFirestore;
+
+  // ── Clean up Firestore boxRequest doc once accepted ──
+  const reqId = roomId + '_' + guestUid;
+  if (fs && fs.deleteDoc && fs.doc && fs.db) {
+    setTimeout(async () => {
+      try { await fs.deleteDoc(fs.doc(fs.db, 'boxRequests', reqId)); } catch (_) {}
+    }, 3000);
+  }
+}
+
+/**
+ * Clean up one guest's host-side resources.
+ * Does NOT affect other guests or the normal Live broadcast.
+ */
+function _hostCleanupGuest(guestUid, roomId, db) {
+  const peer = _guestPeers.get(guestUid);
+  if (!peer) return;
+  _guestPeers.delete(guestUid);
+
+  if (peer.sigUnsub) { try { peer.sigUnsub(); } catch (_) {} }
+  if (peer.pc) {
+    try { peer.pc.ontrack = null; } catch (_) {}
+    try { peer.pc.onicecandidate = null; } catch (_) {}
+    try { peer.pc.onconnectionstatechange = null; } catch (_) {}
+    try { peer.pc.oniceconnectionstatechange = null; } catch (_) {}
+    try { peer.pc.close(); } catch (_) {}
+  }
+
+  // Remove signaling data after brief delay so guest client can read it
+  setTimeout(() => {
+    try { remove(ref(db, 'guestSignaling/' + roomId + '/' + guestUid)); } catch (_) {}
+    try { remove(ref(db, 'guestRequests/' + roomId + '/' + guestUid)); } catch (_) {}
+  }, 3000);
+
+  console.log('[SNX-HOST-GUEST] guest cleaned up — guestUid:', guestUid, 'remaining peers:', _guestPeers.size);
+}
+
+/**
+ * Clean up ALL guest peers — called when host ends Live.
+ */
+function _hostCleanupAllGuests(roomId, db) {
+  if (!_guestPeers.size) return;
+  console.log('[SNX-HOST-GUEST] cleaning all', _guestPeers.size, 'guest peer(s) on Live end');
+  for (const guestUid of [..._guestPeers.keys()]) {
+    // Signal the guest client to disconnect
+    try { set(ref(db, 'guestSignaling/' + roomId + '/' + guestUid + '/hostEnded'), true); } catch (_) {}
+    _hostCleanupGuest(guestUid, roomId, db);
+    window.snxBoxManager.removeGuest(guestUid);
+  }
+}
+
+/* ──────────────────────────────────────────────────────────
+   VIEWER / GUEST SIDE
+────────────────────────────────────────────────────────── */
+
+/**
+ * Called after the host accepts the viewer as a guest.
+ * Acquires camera + microphone, waits for the host's offer,
+ * creates answer, exchanges ICE.
+ */
+async function _guestJoinAsViewer(roomId, db, btn) {
+  const user = _user();
+  if (!user || !roomId || !db) return;
+
+  console.log('[SNX-GUEST] accepted — acquiring camera + microphone');
+
+  // ── Request camera + microphone ──
+  let guestStream;
+  try {
+    guestStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    console.log('[SNX-GUEST] media acquired — tracks:', guestStream.getTracks().length);
+  } catch (e) {
+    console.error('[SNX-GUEST] getUserMedia failed:', e.name, e.message);
+    const msg =
+      (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError')
+        ? '⛔ CAMERA/MICROPHONE PERMISSION REQUIRED — allow access in browser settings.'
+        : e.name === 'NotFoundError'
+          ? '⛔ No camera/microphone found on this device.'
+          : '⛔ Could not access camera: ' + e.message;
+    if (typeof toastNotification === 'function') toastNotification(msg);
+    // Restore button
+    if (btn) { btn.textContent = '🎙 Request to Join'; btn.disabled = false; btn.dataset.reqPending = ''; }
+    return;
+  }
+
+  _guestViewerStream  = guestStream;
+  _guestViewerRoomId  = roomId;
+  _guestViewerUid     = user.uid;
+
+  const sigRef  = ref(db, 'guestSignaling/' + roomId + '/' + user.uid);
+  const offerRef = ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/offer');
+
+  console.log('[SNX-GUEST] waiting for offer — path: guestSignaling/' + roomId + '/' + user.uid);
+
+  // ── Wait for host offer (max 15 s) ──
+  let offerData = null;
+  const offerWait = new Promise((resolve, reject) => {
+    const t = setTimeout(() => { try { unsub(); } catch (_) {} reject(new Error('offer-timeout')); }, 15000);
+    const unsub = onValue(offerRef, snap => {
+      if (!snap.exists()) return;
+      clearTimeout(t);
+      try { unsub(); } catch (_) {}
+      resolve(snap.val());
+    });
+  });
+
+  try {
+    offerData = await offerWait;
+    console.log('[SNX-GUEST] offer received');
+  } catch (e) {
+    console.error('[SNX-GUEST] offer wait timed out or failed:', e.message);
+    if (typeof toastNotification === 'function') toastNotification('⚠️ Host did not respond in time. Please try again.');
+    guestStream.getTracks().forEach(t => t.stop());
+    _guestViewerStream = null;
+    if (btn) { btn.textContent = '🎙 Request to Join'; btn.disabled = false; btn.dataset.reqPending = ''; }
+    return;
+  }
+
+  // ── Create peer connection ──
+  const pc = new RTCPeerConnection(_ICE_CONFIG);
+  _guestViewerPc = pc;
+
+  // Add local tracks to send to host
+  guestStream.getTracks().forEach(t => pc.addTrack(t, guestStream));
+
+  // ── ICE candidate publishing — push-keyed, queued until answer written ──
+  const pendingGuestCands = [];
+  let answerWritten = false;
+
+  pc.onicecandidate = async ({ candidate }) => {
+    if (!candidate) return;
+    console.log('[SNX-GUEST] ICE candidate generated');
+    if (!answerWritten) {
+      pendingGuestCands.push(candidate.toJSON());
+      return;
+    }
+    try {
+      await set(push(ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/guestCandidates')), candidate.toJSON());
+    } catch (e) {
+      console.error('[SNX-GUEST] ICE write error:', e.message);
+    }
+  };
+
+  // ── Connection state monitoring ──
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    console.log('[SNX-GUEST] connection-state:', state);
+    if (state === 'connected') {
+      if (_guestViewerReconnTimer) { clearTimeout(_guestViewerReconnTimer); _guestViewerReconnTimer = null; }
+      console.log('[SNX-GUEST] connected');
+    } else if (state === 'disconnected') {
+      if (!_guestViewerReconnTimer) {
+        _guestViewerReconnTimer = setTimeout(() => {
+          _guestViewerReconnTimer = null;
+          if (_guestViewerPc === pc && pc.connectionState !== 'connected') {
+            console.log('[SNX-GUEST] disconnected grace expired — cleaning up');
+            _guestViewerCleanup();
+          }
+        }, 4000);
+      }
+    } else if (state === 'failed' || state === 'closed') {
+      if (_guestViewerReconnTimer) { clearTimeout(_guestViewerReconnTimer); _guestViewerReconnTimer = null; }
+      if (_guestViewerPc === pc) {
+        console.log('[SNX-GUEST] connection', state, '— cleaning up');
+        _guestViewerCleanup();
+      }
+    }
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log('[SNX-GUEST] ICE state:', pc.iceConnectionState);
+  };
+
+  // ── Set remote description (offer) ──
+  try {
+    await pc.setRemoteDescription(new RTCSessionDescription(offerData));
+    console.log('[SNX-GUEST] remote description (offer) set');
+  } catch (e) {
+    console.error('[SNX-GUEST] setRemoteDescription(offer) failed:', e.message);
+    try { pc.close(); } catch (_) {}
+    guestStream.getTracks().forEach(t => t.stop());
+    _guestViewerPc = null;
+    _guestViewerStream = null;
+    if (btn) { btn.textContent = '🎙 Request to Join'; btn.disabled = false; btn.dataset.reqPending = ''; }
+    return;
+  }
+
+  // ── Read and apply any host ICE candidates already in signaling ──
+  const appliedHostCandIds = new Set();
+  const pendingHostCands   = [];
+
+  try {
+    const hcSnap = await get(ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/hostCandidates'));
+    if (hcSnap.exists()) {
+      for (const [key, cand] of Object.entries(hcSnap.val())) {
+        appliedHostCandIds.add(key);
+        try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (_) {}
+      }
+    }
+  } catch (_) {}
+
+  // ── Create answer ──
+  let answer;
+  try {
+    answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    console.log('[SNX-GUEST] answer created');
+  } catch (e) {
+    console.error('[SNX-GUEST] createAnswer failed:', e.message);
+    try { pc.close(); } catch (_) {}
+    guestStream.getTracks().forEach(t => t.stop());
+    _guestViewerPc = null;
+    _guestViewerStream = null;
+    return;
+  }
+
+  // ── Write answer to guestSignaling ──
+  try {
+    await update(sigRef, { answer: { type: answer.type, sdp: answer.sdp } });
+    answerWritten = true;
+    console.log('[SNX-GUEST] answer written');
+  } catch (e) {
+    console.error('[SNX-GUEST] answer write failed:', e.message);
+    try { pc.close(); } catch (_) {}
+    guestStream.getTracks().forEach(t => t.stop());
+    _guestViewerPc = null;
+    _guestViewerStream = null;
+    return;
+  }
+
+  // ── Flush pending local ICE candidates that accumulated before answer was written ──
+  for (const cand of pendingGuestCands.splice(0)) {
+    try {
+      await set(push(ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/guestCandidates')), cand);
+    } catch (_) {}
+  }
+
+  // ── Listen for more host ICE candidates arriving after we read the snapshot ──
+  const hostCandRef = ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/hostCandidates');
+  const hostCandUnsub = onValue(hostCandRef, async snap => {
+    if (!snap.exists()) return;
+    for (const [key, cand] of Object.entries(snap.val())) {
+      if (appliedHostCandIds.has(key)) continue;
+      appliedHostCandIds.add(key);
+      console.log('[SNX-GUEST] ICE candidate from host applied — key:', key);
+      try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) {
+        console.error('[SNX-GUEST] addIceCandidate failed:', e.message);
+      }
+    }
+  });
+  _guestViewerSigUnsub = hostCandUnsub;
+
+  // ── Listen for hostEnded signal ──
+  const hostEndedRef = ref(db, 'guestSignaling/' + roomId + '/' + user.uid + '/hostEnded');
+  const hostEndedUnsub = onValue(hostEndedRef, snap => {
+    if (!snap.exists() || !snap.val()) return;
+    console.log('[SNX-GUEST] host ended signal received');
+    try { hostEndedUnsub(); } catch (_) {}
+    _guestViewerCleanup();
+  });
+
+  console.log('[SNX-GUEST] signaling complete — WebRTC in progress');
+  if (typeof toastNotification === 'function') toastNotification('🎙 Connecting to guest box…');
+}
+
+/**
+ * Clean up the viewer-side guest connection.
+ * Called on leave, disconnect, or host cleanup.
+ * Does NOT affect normal viewer playback or other features.
+ */
+function _guestViewerCleanup() {
+  if (_guestViewerReconnTimer) {
+    clearTimeout(_guestViewerReconnTimer);
+    _guestViewerReconnTimer = null;
+  }
+
+  if (_guestViewerSigUnsub) {
+    try { _guestViewerSigUnsub(); } catch (_) {}
+    _guestViewerSigUnsub = null;
+  }
+
+  const pc = _guestViewerPc;
+  _guestViewerPc = null;
+  if (pc) {
+    try { pc.ontrack = null; } catch (_) {}
+    try { pc.onicecandidate = null; } catch (_) {}
+    try { pc.onconnectionstatechange = null; } catch (_) {}
+    try { pc.close(); } catch (_) {}
+  }
+
+  const stream = _guestViewerStream;
+  _guestViewerStream = null;
+  if (stream) {
+    try { stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+  }
+
+  // Clean up signaling data
+  const roomId = _guestViewerRoomId;
+  const uid    = _guestViewerUid;
+  if (roomId && uid) {
+    const db = _db();
+    if (db) {
+      setTimeout(() => {
+        try { remove(ref(db, 'guestSignaling/' + roomId + '/' + uid)); } catch (_) {}
+        try { remove(ref(db, 'guestRequests/' + roomId + '/' + uid)); } catch (_) {}
+      }, 1000);
+    }
+    const fs = window._snxFirestore;
+    if (fs && fs.deleteDoc && fs.doc && fs.db) {
+      const reqId = roomId + '_' + uid;
+      setTimeout(async () => {
+        try { await fs.deleteDoc(fs.doc(fs.db, 'boxRequests', reqId)); } catch (_) {}
+      }, 1000);
+    }
+  }
+
+  _guestViewerRoomId = null;
+  _guestViewerUid    = null;
+
+  console.log('[SNX-GUEST] viewer guest cleanup complete');
+}
+
+_log('live.js loaded — SNS-2026-LIVE-006');
