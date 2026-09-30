@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="snx-commit" content="6f02b71">
+<meta name="snx-commit" content="SNS-2026-WORLD-BG-GLOBAL-001">
 <title>Shadow Nexus Social — Stay Legendary 🌑🔥</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 
@@ -68,11 +68,11 @@
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
-<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-WORLD-BG-002">
+<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-WORLD-BG-005">
 <!-- ── Shadow Nexus Radio — player + standalone page styles ── -->
 <link rel="stylesheet" href="snx-radio.css?v=SNS-2026-RADIO-PAGE-001">
 <!-- ── Preload the world background image so it appears without flash ── -->
-<link rel="preload" as="image" href="assets/images/shadow-nexus-world.webp" fetchpriority="low">
+<link rel="preload" as="image" href="assets/images/shadow-nexus-global-bg.png" fetchpriority="low">
 
 <!-- ── Preconnect to Firebase + R2 CDN so first load is faster ── -->
 <link rel="preconnect" href="https://www.gstatic.com">
@@ -6343,6 +6343,12 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 <body>
 
+<!-- Global world background — position:fixed, z-index:-9999, below all content.
+     Source: ChatGPT Image Sep 25, 2026, 07_54_47 AM.png
+     Web copy: assets/images/shadow-nexus-global-bg.png
+     Complements html::before in snx-world-bg.css for full cross-platform coverage. -->
+<div id="snx-global-world-bg" aria-hidden="true"></div>
+
 <!-- Auth gate — invisible sentinel; cinematic intro is the real startup experience -->
 <div id="snx-auth-gate" aria-hidden="true"></div>
 
@@ -12208,6 +12214,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   window.__snxT.APP_BOOT = _T0;
   console.log('[SNS-STARTUP] page-start +' + Math.round(_T0) + 'ms');
   window.__snxT.FIREBASE_INIT = null;
+  window.__snxT.PERSISTENCE_CONFIGURED = null;
   window.__snxT.AUTH_LISTENER_ATTACHED = null;
   window.__snxT.AUTH_FIRST_CALLBACK = null;
   window.__snxT.AUTH_USER_FOUND = null;
@@ -12219,6 +12226,12 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   window.__snxT.LOGIN_FIREBASE_SUCCESS = null;
   window.__snxT.LOGOUT_START = null;
   window.__snxT.LOGOUT_COMPLETE = null;
+  // Auth result and state tracking
+  window.__snxT.AUTH_RESULT = null;          // 'SIGNED_IN' | 'SIGNED_OUT'
+  window.__snxT.AUTH_TIMEOUT_FIRED = null;   // set if 10s timeout fired before auth resolved
+  window.__snxT.AUTH_STATE_MISMATCH = false; // true if auth.currentUser ≠ window._snxCurrentUser
+  // Global error capture
+  window.__snxErrors = [];
 
   // Stamp INTRO_START when it first renders
   var _introCheck = setInterval(function() {
@@ -12233,15 +12246,34 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // Stop checking after 5s
   setTimeout(function() { clearInterval(_introCheck); }, 5000);
 
+  // ── Global error capture — catches JS errors and unhandled promise rejections ──
+  // Errors are collected in window.__snxErrors (capped at 10) for the debug panel.
+  window.onerror = function(msg, src, line, col, err) {
+    var entry = { t: Math.round(performance.now()), type: 'error', msg: String(msg).slice(0, 200), src: String(src || '').replace(/.*\//, '').slice(0, 60), line: line };
+    window.__snxErrors.push(entry);
+    if (window.__snxErrors.length > 10) window.__snxErrors.shift();
+    console.error('[SNX GLOBAL ERROR]', msg, 'at', src, line + ':' + col);
+    return false; // let browser default error handling continue
+  };
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = e.reason;
+    var msg = reason ? (reason.message || String(reason)).slice(0, 200) : 'unhandled rejection';
+    var code = reason && reason.code ? reason.code : '';
+    var entry = { t: Math.round(performance.now()), type: 'unhandledrejection', msg: (code ? '[' + code + '] ' : '') + msg };
+    window.__snxErrors.push(entry);
+    if (window.__snxErrors.length > 10) window.__snxErrors.shift();
+    console.error('[SNX UNHANDLED REJECTION]', code, msg);
+  });
+
   // Public report utility
   window.snxTimingReport = function() {
     var t = window.__snxT;
     var keys = [
-      'APP_BOOT','INTRO_START','FIREBASE_INIT',
+      'APP_BOOT','INTRO_START','FIREBASE_INIT','PERSISTENCE_CONFIGURED',
       'AUTH_LISTENER_ATTACHED','AUTH_FIRST_CALLBACK','AUTH_USER_FOUND',
       'GLOBAL_USER_SET','ROLE_READY','FIRST_PAGE_RENDER','APP_INTERACTIVE',
       'LOGIN_SUBMITTED','LOGIN_FIREBASE_SUCCESS',
-      'LOGOUT_START','LOGOUT_COMPLETE'
+      'LOGOUT_START','LOGOUT_COMPLETE','AUTH_TIMEOUT_FIRED'
     ];
     console.group('[SNX] Startup / Auth Timing Report');
     var prev = 0;
@@ -12269,7 +12301,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
 <script type="module">
   import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+  import { getAuth, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
   import { getFirestore, doc, setDoc, getDoc, getDocFromCache, getDocFromServer, updateDoc, deleteDoc, collection, collectionGroup, addDoc, query, orderBy, limit, startAfter, onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment, serverTimestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
   import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging.js";
   import { getDatabase as _getRtdb, ref as _rtdbRef, set as _rtdbSet, remove as _rtdbRemove, get as _rtdbGet, onDisconnect as _rtdbOnDisconnect, serverTimestamp as _rtdbServerTimestamp, onValue as _rtdbOnValue, off as _rtdbOff } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
@@ -12294,11 +12326,27 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // ── Timing: Firebase app + auth instance created ──
   if (window.__snxT) window.__snxT.FIREBASE_INIT = performance.now();
   console.log('[SNS-STARTUP] firebase-app-ready (init) +' + Math.round(window.__snxT ? window.__snxT.FIREBASE_INIT : 0) + 'ms');
+  console.log('[SNX STARTUP] Firebase initialized — project=' + firebaseConfig.projectId);
 
-  // NOTE: browserLocalPersistence is the default for Firebase Auth on web.
-  // Calling setPersistence() explicitly triggers a redundant IndexedDB write
-  // that can stall auth resolution for 30-60 s on slow devices/browsers.
-  // Removed — Firebase manages persistence automatically.
+  // ── Explicitly set browserLocalPersistence so Android/iOS PWA keeps the
+  //    session across cold starts, app switcher restores, and browser restarts.
+  //    Firebase 12.x defaults to LOCAL on web, but calling this explicitly:
+  //      1. Confirms IndexedDB is writable (we log the result either way)
+  //      2. Forces the auth SDK to persist to IndexedDB immediately on init
+  //    The await is intentional: we need persistence confirmed before
+  //    onAuthStateChanged attaches, or the session read may miss storage.
+  window.__snxPersistenceConfigured = false;
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+    window.__snxPersistenceConfigured = true;
+    console.log('[SNX AUTH] local persistence configured (browserLocalPersistence OK)');
+    if (window.__snxT) window.__snxT.PERSISTENCE_CONFIGURED = performance.now();
+  } catch (persistErr) {
+    window.__snxPersistenceConfigured = false;
+    window.__snxPersistenceError = persistErr.code + ': ' + persistErr.message;
+    console.error('[SNX AUTH] browserLocalPersistence FAILED:', persistErr.code, persistErr.message);
+    // Do NOT abort — Firebase will fall back gracefully; we still attach onAuthStateChanged
+  }
 
   // ── Firebase Cloud Messaging ──
   let messaging = null;
@@ -13121,22 +13169,42 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 
   // ── Safety net: dismiss the auth gate after 10 s even if onAuthStateChanged
   //    never fires (e.g. Firebase CDN blocked, network error).
-  //    This prevents a permanent loading screen on bad networks.
+  //    IMPORTANT: This timeout must NOT conclude "user is signed out."
+  //    It only unblocks the UI so the user sees something (not a black screen).
+  //    The actual auth state is UNKNOWN at this point — we show a "still connecting"
+  //    notice rather than exposing the login form.  If Firebase later resolves,
+  //    onAuthStateChanged will navigate correctly.
   // ── Timing: canonical auth listener is now attached ──
   if (window.__snxT) { window.__snxT.AUTH_LISTENER_ATTACHED = performance.now(); console.log('[SNS-STARTUP] auth-ready (listener attached) +' + Math.round(window.__snxT.AUTH_LISTENER_ATTACHED) + 'ms'); }
 
   const _authGateTimeout = setTimeout(() => {
       if (!_authFirstResolved) {
-          _authFirstResolved = true;
+          // Auth state is UNKNOWN — Firebase hasn't responded yet.
+          // We do NOT call show('login') here because the user may be signed in
+          // but Firebase is slow on this device/network.
+          // Instead: dissolve the gate overlay (removes black screen) and display
+          // a non-destructive "still connecting" message. onAuthStateChanged WILL
+          // still fire later and navigate correctly when it does.
+          console.warn('[SNX AUTH] 10s timeout — Firebase auth has NOT resolved. State UNKNOWN. Not redirecting to login.');
+          if (window.__snxT) { window.__snxT.AUTH_TIMEOUT_FIRED = performance.now(); }
+          window.__snxAuthTimedOut = true;
           const _gate = document.getElementById('snx-auth-gate');
           if (_gate) _gate.classList.add('resolved');
-          // Signal app readiness so intro can exit even on bad network
+          // Show a minimal "still connecting" notice so the screen isn't blank.
+          // This is NOT a login redirect — it's informational only.
+          const _notice = document.createElement('div');
+          _notice.id = 'snx-auth-timeout-notice';
+          _notice.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9989;text-align:center;pointer-events:none;';
+          _notice.innerHTML = '<div style="color:#4a8aaa;font-family:monospace;font-size:13px;letter-spacing:1px;">CONNECTING TO SHADOW NEXUS…<br><span style="font-size:11px;color:#2a5a7a;">Please wait or check your connection</span></div>';
+          document.body.appendChild(_notice);
+          // Signal app readiness so intro can exit — but auth state is still unknown
           window.__shadowNexusAppReady = true;
           if (typeof window.__shadowNexusAppReadyCb === 'function') {
               try { window.__shadowNexusAppReadyCb(); } catch(_) {}
               window.__shadowNexusAppReadyCb = null;
           }
-          show('login');
+          // NOTE: show('login') is intentionally NOT called here.
+          // When onAuthStateChanged finally fires it will navigate correctly.
       }
   }, 10000);
 
@@ -13144,6 +13212,20 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       clearTimeout(_authGateTimeout);
       const _firstCall = !_authFirstResolved;
       _authFirstResolved = true;
+      // Dismiss the "still connecting" notice if the timeout had fired
+      const _timeoutNotice = document.getElementById('snx-auth-timeout-notice');
+      if (_timeoutNotice) _timeoutNotice.remove();
+      window.__snxAuthTimedOut = false;
+      // ── Auth state cross-check: compare auth.currentUser vs window._snxCurrentUser ──
+      const _authCurrentUser = auth.currentUser;
+      if (user && window._snxCurrentUser && user.uid !== (window._snxCurrentUser.uid)) {
+          console.warn('[SNX AUTH] AUTH STATE MISMATCH — auth.currentUser.uid=' + user.uid.slice(0,8) + '… vs window._snxCurrentUser.uid=' + window._snxCurrentUser.uid.slice(0,8) + '…');
+          if (window.__snxT) window.__snxT.AUTH_STATE_MISMATCH = true;
+      }
+      // Record auth result for diagnostics
+      if (window.__snxT) {
+          window.__snxT.AUTH_RESULT = user ? 'SIGNED_IN' : 'SIGNED_OUT';
+      }
       // ── Timing: first callback fired ──
       if (window.__snxT) {
           if (!window.__snxT.AUTH_FIRST_CALLBACK) {
@@ -13153,6 +13235,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               console.log('[SNS-STARTUP] firebase-app-ready +' + _authMs + 'ms (user=' + _authUser + ')');
           }
       }
+      // [SNX AUTH] diagnostic log
+      console.log('[SNX AUTH] resolved: ' + (user ? 'signed-in uid=' + user.uid.slice(0,8) + '… firstCall=' + _firstCall : 'no-user firstCall=' + _firstCall));
       if (user) {
           currentUser = user;
           // ── Timing: user found ──
@@ -13184,6 +13268,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           if (userData) window._snxUserData = userData;
           // ── Timing: global user set ──
           if (window.__snxT && !window.__snxT.GLOBAL_USER_SET) { window.__snxT.GLOBAL_USER_SET = performance.now(); console.log('[SNS-STARTUP] profile-ready +' + Math.round(window.__snxT.GLOBAL_USER_SET) + 'ms'); }
+          console.log('[SNX PROFILE] user-exposed uid=' + user.uid.slice(0,8) + '…');
 
           // Best-effort presence + status writes — fire-and-forget (no await).
           // A slow or offline network should NEVER delay the feed from appearing.
@@ -13378,6 +13463,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           }
           // ── Timing: first page render (feed) ──
           if (window.__snxT) { window.__snxT.FIRST_PAGE_RENDER = performance.now(); console.log('[SNS-STARTUP] main-ui-visible +' + Math.round(window.__snxT.FIRST_PAGE_RENDER) + 'ms'); }
+          console.log('[SNX APP] ready — navigating to feed');
           navTo('feed');
 
           // ── Post-nav: role + maintenance checks (deferred so navTo('feed') runs first) ──
@@ -13392,6 +13478,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                       window._snxRole = r2;
                   }
                   if (window.__snxT && !window.__snxT.ROLE_READY) { window.__snxT.ROLE_READY = performance.now(); console.log('[SNS-STARTUP] role-ready +' + Math.round(window.__snxT.ROLE_READY) + 'ms (role=' + (window._snxRole||'member') + ')'); }
+                  console.log('[SNX ROLE] loaded role=' + (window._snxRole||'member'));
                   if (typeof window._showRolePanels === 'function') window._showRolePanels();
                   // Re-apply nav visibility now that window._snxRole is confirmed.
                   if (typeof window._snxReapplyNavVisibility === 'function') window._snxReapplyNavVisibility();
@@ -13587,6 +13674,55 @@ window.addEventListener('snx:openCreatorChannel', async e => {
     window.addEventListener('online',  _onNetworkRestored);
     window.addEventListener('offline', _onNetworkLost);
   })();
+
+  /* ── BFCache (back-forward cache) restore handler ──────────────────────────────
+     iOS Safari and Android Chrome can restore pages from BFCache (a full memory
+     snapshot).  When this happens the module does NOT re-run, so onAuthStateChanged
+     is not re-attached.  However Firebase Auth state is still valid in IndexedDB —
+     the user did NOT log out.
+
+     We handle pageshow with persisted=true to:
+       1. Ensure the auth gate is resolved (never stuck on a dark screen).
+       2. Ensure window._snxCurrentUser reflects the live Firebase Auth state.
+       3. Re-verify the auth token silently so fresh content loads.
+
+     We do NOT re-initialise the whole app — that would cause duplicate listeners.
+     We only sync UI state with the already-known auth session.
+  ─────────────────────────────────────────────────────────────────────────────── */
+  window.addEventListener('pageshow', (event) => {
+      if (!event.persisted) return; // not a BFCache restore — normal navigation, no action needed
+
+      console.log('[SNX STARTUP] pageshow (BFCache restore) — syncing auth gate');
+
+      // 1. Always resolve the auth gate so the dark overlay never stays stuck
+      const _gate = document.getElementById('snx-auth-gate');
+      if (_gate) _gate.classList.add('resolved');
+
+      // 2. Sync current auth state with whatever Firebase has in IndexedDB
+      //    auth.currentUser is synchronously available after restoration because
+      //    Firebase Auth does not clear IndexedDB when the page is backgrounded.
+      const _liveUser = auth.currentUser;
+      if (_liveUser && !window._snxCurrentUser) {
+          // BFCache restored but our in-memory state was wiped by the snapshot.
+          // Re-expose the user so all downstream code sees the correct state.
+          window._snxCurrentUser = _liveUser;
+          window._snxAuthResolved = true;
+          console.log('[SNX STARTUP] pageshow — auth recovered from BFCache:', _liveUser.uid.slice(0,8) + '…');
+      } else if (!_liveUser && window._snxCurrentUser) {
+          // Session was invalidated while the page was frozen (e.g. revoked token).
+          // The onAuthStateChanged listener will fire momentarily and handle logout.
+          console.log('[SNX STARTUP] pageshow — no live user; onAuthStateChanged will handle teardown');
+      }
+
+      // 3. Re-start the RTDB presence heartbeat if it somehow stopped
+      if (_liveUser && !_presenceHeartbeatTimer) {
+          _presenceHeartbeatTimer = setInterval(() => {
+              if (auth.currentUser) {
+                  try { _rtdbSet(_rtdbRef(_presenceRtdb, 'users/' + auth.currentUser.uid), { online: true, live: false, lastSeen: _rtdbServerTimestamp() }); } catch(_) {}
+              }
+          }, 30000);
+      }
+  });
 
   /* ── Re-apply all nav visibility settings after role is confirmed ──────────────
      Both the siteSettings/config onSnapshot and the siteSettings/pageVisibility
@@ -21549,6 +21685,7 @@ function show(p) {
     const target = document.getElementById(p);
     if (target) target.classList.add("active");
 }
+console.log('[SNX ROUTER] router-functions-ready');
 
 /* ── Navigate + highlight active nav item + close menu on mobile ── */
 // Helper: show the "page unavailable" screen with a custom message
@@ -23333,6 +23470,7 @@ document.addEventListener("visibilitychange", () => {
 })();
 
 render();
+console.log('[SNX BACKGROUND] canvas-render-started');
 
 /* ═══════════════════════════════════════════════════════════
    NOTIFICATION SETTINGS & PUSH PERMISSION HELPERS
@@ -32865,8 +33003,8 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-TV-STABILITY-001';
-  var SW_VER   = 'v74';
+  var BUILD_ID = 'SNS-2026-WORLD-BG-GLOBAL-001';
+  var SW_VER   = 'v93';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
@@ -32902,7 +33040,7 @@ document.addEventListener('click', function(e) {
         if (window.caches) {
           caches.keys().then(function(keys) {
             var del = keys.filter(function(k) {
-              return k.startsWith('shadow-nexus-') && k !== 'shadow-nexus-v74' && k !== 'shadow-nexus-media-v74';
+              return k.startsWith('shadow-nexus-') && k !== ('shadow-nexus-' + SW_VER) && k !== ('shadow-nexus-media-' + SW_VER);
             });
             Promise.all(del.map(function(k) { return caches.delete(k); }))
               .then(function() { window.location.reload(); });
@@ -32927,96 +33065,365 @@ document.addEventListener('click', function(e) {
   }
 
   /* ══════════════════════════════════════════════════════
-     DEBUG PANEL — only when ?snxdebug=1
+     SHADOW NEXUS STARTUP DEBUG — ?snxdebug=1
+     Full diagnostic overlay for runtime startup tracing.
+     Covers: build, auth, background, service worker,
+     storage, display mode, errors, and timing stages.
+     PRIVATE: shows NO email, UID, tokens, or credentials.
      ══════════════════════════════════════════════════════ */
   if (!/[?&]snxdebug=1/.test(location.search)) return;
 
-  /* ── Inject panel CSS ── */
-  var style = document.createElement('style');
-  style.textContent = [
-    '#snxDebugPanel{position:fixed;bottom:0;left:0;right:0;z-index:99999;',
-    'background:rgba(5,10,20,0.97);border-top:2px solid #00AEEF;',
-    'color:#a0cfef;font-family:monospace;font-size:11px;line-height:1.6;',
-    'padding:8px 14px 12px;max-height:320px;overflow-y:auto;}',
-    '#snxDebugPanel .snxd-title{color:#00AEEF;font-weight:700;font-size:12px;',
-    'text-transform:uppercase;letter-spacing:1px;margin:8px 0 5px;}',
-    '#snxDebugPanel .snxd-title:first-child{margin-top:0;}',
-    '#snxDebugPanel .snxd-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:3px;}',
-    '#snxDebugPanel .snxd-label{color:#4a8aaa;min-width:170px;flex-shrink:0;}',
-    '#snxDebugPanel .snxd-val{color:#d8eeff;}',
-    '#snxDebugPanel .snxd-ok{color:#00ff88;}',
-    '#snxDebugPanel .snxd-warn{color:#ffbb00;}',
-    '#snxDebugPanel .snxd-err{color:#ff3355;}',
-    '#snxDebugClose{float:right;cursor:pointer;color:#00AEEF;font-size:13px;',
-    'padding:0 4px;border:1px solid rgba(0,174,239,0.3);border-radius:3px;}'
-  ].join('');
-  document.head.appendChild(style);
+  /* ── Inject overlay CSS ── */
+  var _dbgStyle = document.createElement('style');
+  _dbgStyle.textContent =
+    '#snxDbg{position:fixed;top:0;left:0;right:0;bottom:0;z-index:999999;' +
+    'background:rgba(2,4,14,0.97);color:#a0cfef;font-family:monospace;font-size:11px;' +
+    'line-height:1.7;padding:10px 14px 60px;overflow-y:auto;box-sizing:border-box;}' +
+    '#snxDbgBar{position:fixed;bottom:0;left:0;right:0;z-index:999999;' +
+    'background:rgba(0,10,30,0.98);border-top:1px solid rgba(0,174,239,0.4);' +
+    'padding:7px 14px;display:flex;gap:10px;align-items:center;}' +
+    '#snxDbgBar button{background:rgba(0,40,100,0.7);border:1px solid rgba(0,174,239,0.5);' +
+    'color:#00d4ff;font-size:11px;padding:4px 12px;border-radius:5px;cursor:pointer;font-family:monospace;}' +
+    '.snxd-h{color:#00AEEF;font-weight:700;font-size:11px;text-transform:uppercase;' +
+    'letter-spacing:1.2px;margin:10px 0 4px;border-bottom:1px solid rgba(0,174,239,0.18);padding-bottom:3px;}' +
+    '.snxd-h:first-child{margin-top:0;}' +
+    '.snxd-r{display:flex;gap:6px;margin-bottom:2px;min-height:16px;}' +
+    '.snxd-k{color:#4a8aaa;min-width:220px;flex-shrink:0;font-size:10px;}' +
+    '.snxd-v{color:#d8eeff;word-break:break-all;}' +
+    '.ok{color:#00ff88 !important;}.warn{color:#ffbb00 !important;}.err{color:#ff3355 !important;}' +
+    '.snxd-sep{height:1px;background:rgba(0,100,200,0.15);margin:6px 0;}';
+  document.head.appendChild(_dbgStyle);
 
-  var panel = document.createElement('div');
-  panel.id = 'snxDebugPanel';
-  document.body.appendChild(panel);
+  var _dbgPanel = document.createElement('div');
+  _dbgPanel.id = 'snxDbg';
+  document.body.appendChild(_dbgPanel);
 
-  var _swVer = null;
+  var _dbgBar = document.createElement('div');
+  _dbgBar.id = 'snxDbgBar';
+  _dbgBar.innerHTML =
+    '<button onclick="document.getElementById(\'snxDbg\').style.display=\'none\';document.getElementById(\'snxDbgBar\').style.display=\'none\'">✕ CLOSE</button>' +
+    '<button onclick="window.snxTimingReport&&window.snxTimingReport()">TIMING LOG</button>' +
+    '<button onclick="_snxDbgRefreshBg()">RETRY BG</button>' +
+    '<span style="color:#2a5a7a;font-size:10px;margin-left:auto;">SHADOW NEXUS STARTUP DEBUG • auto-refresh 2s</span>';
+  document.body.appendChild(_dbgBar);
 
-  /* Ask the active SW what version it is */
-  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' });
+  /* ── SW version state ── */
+  var _dbgSwVer = null;
+  var _dbgSwBuild = null;
+  var _dbgSwActive = null;
+  var _dbgSwWaiting = null;
+  var _dbgSwInstalling = null;
+  var _dbgCacheList = [];
+
+  /* ── Background test state ── */
+  var _dbgBgStatus = 'pending';
+  var _dbgBgHttpStatus = '—';
+  var _dbgBgContentType = '—';
+  var _dbgBgWidth = '—';
+  var _dbgBgHeight = '—';
+  var _dbgBgDecoded = '—';
+  var _dbgBgCurrentSrc = '—';
+
+  /* ── Storage availability ── */
+  var _dbgStorage = { localStorage: '—', sessionStorage: '—', indexedDB: '—' };
+
+  /* ── Display mode ── */
+  var _dbgDisplayMode = window.matchMedia('(display-mode: standalone)').matches
+    ? 'standalone (installed PWA)'
+    : (window.navigator.standalone === true ? 'standalone (iOS fullscreen)' : 'browser');
+
+  /* ────────────────────────────────────────────────────────
+     STORAGE AVAILABILITY CHECK — read-only probe, no writes
+     ──────────────────────────────────────────────────────── */
+  (function _checkStorage() {
+    try { localStorage.getItem('_snxProbe'); _dbgStorage.localStorage = 'AVAILABLE'; }
+    catch(e) { _dbgStorage.localStorage = 'BLOCKED: ' + e.name; }
+    try { sessionStorage.getItem('_snxProbe'); _dbgStorage.sessionStorage = 'AVAILABLE'; }
+    catch(e) { _dbgStorage.sessionStorage = 'BLOCKED: ' + e.name; }
+    try {
+      if (!window.indexedDB) { _dbgStorage.indexedDB = 'NOT SUPPORTED'; return; }
+      var req = window.indexedDB.open('_snxProbe', 1);
+      req.onsuccess = function() { _dbgStorage.indexedDB = 'AVAILABLE'; req.result.close(); };
+      req.onerror   = function(e) { _dbgStorage.indexedDB = 'BLOCKED: ' + (e.target.error ? e.target.error.name : 'unknown'); };
+    } catch(e) { _dbgStorage.indexedDB = 'BLOCKED: ' + e.name; }
+  })();
+
+  /* ────────────────────────────────────────────────────────
+     BACKGROUND IMAGE RUNTIME TEST
+     ──────────────────────────────────────────────────────── */
+  var _BG_URL = 'assets/images/shadow-nexus-global-bg.png';
+
+  function _snxDbgRefreshBg() {
+    _dbgBgStatus = 'loading…';
+    _dbgBgHttpStatus = '—';
+    _dbgBgContentType = '—';
+    _dbgBgWidth = '—';
+    _dbgBgHeight = '—';
+    _dbgBgDecoded = '—';
+    _dbgBgCurrentSrc = '—';
+
+    /* 1. HTTP probe via fetch */
+    fetch(_BG_URL + '?_dbg=' + Date.now(), { cache: 'no-store' })
+      .then(function(r) {
+        _dbgBgHttpStatus = r.status + ' ' + r.statusText;
+        _dbgBgContentType = r.headers.get('content-type') || '—';
+      })
+      .catch(function(e) { _dbgBgHttpStatus = 'FETCH ERROR: ' + e.message; });
+
+    /* 2. Image decode probe */
+    var img = new Image();
+    img.onload = function() {
+      _dbgBgDecoded = 'PASS';
+      _dbgBgWidth   = img.naturalWidth;
+      _dbgBgHeight  = img.naturalHeight;
+      _dbgBgCurrentSrc = img.currentSrc || img.src;
+      _dbgBgStatus  = 'loaded';
+    };
+    img.onerror = function() {
+      _dbgBgDecoded = 'FAIL';
+      _dbgBgStatus  = 'error';
+      _dbgBgCurrentSrc = img.src;
+    };
+    img.src = _BG_URL + '?_dbg=' + Date.now();
+  }
+  _snxDbgRefreshBg();
+
+  /* ────────────────────────────────────────────────────────
+     SERVICE WORKER RUNTIME INSPECTION
+     ──────────────────────────────────────────────────────── */
+  if ('serviceWorker' in navigator) {
+    /* Ask active SW for its version */
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'GET_VERSION' });
+    }
     navigator.serviceWorker.addEventListener('message', function(e) {
       if (e.data && e.data.type === 'SW_VERSION') {
-        _swVer = e.data.version + ' (' + (e.data.buildId || '?') + ')';
+        _dbgSwVer   = e.data.version || '—';
+        _dbgSwBuild = e.data.buildId || '—';
       }
     });
+    /* Get full registration state */
+    navigator.serviceWorker.getRegistration('/').then(function(reg) {
+      if (!reg) return;
+      _dbgSwActive     = reg.active     ? (reg.active.scriptURL || 'active')         : 'NONE';
+      _dbgSwWaiting    = reg.waiting    ? (reg.waiting.scriptURL || 'waiting')        : 'NONE';
+      _dbgSwInstalling = reg.installing ? (reg.installing.scriptURL || 'installing')  : 'NONE';
+    }).catch(function(){});
+    /* List Shadow Nexus caches */
+    if (window.caches) {
+      caches.keys().then(function(keys) {
+        _dbgCacheList = keys.filter(function(k) { return k.indexOf('shadow-nexus') === 0; });
+      }).catch(function(){});
+    }
   }
 
-  function _row(label, val, cls) {
-    return '<div class="snxd-row"><span class="snxd-label">' + label + ':</span>' +
-      '<span class="snxd-val ' + (cls || '') + '">' + (val == null ? '—' : String(val)) + '</span></div>';
+  /* ────────────────────────────────────────────────────────
+     COMPUTED STYLE INSPECTOR — detects covering elements
+     ──────────────────────────────────────────────────────── */
+  function _getCs(sel) {
+    try {
+      var el = (sel === 'html') ? document.documentElement
+             : (sel === 'body') ? document.body
+             : document.querySelector(sel);
+      if (!el) return '(not found)';
+      var cs = window.getComputedStyle(el);
+      var bg = cs.background || cs.backgroundColor;
+      /* Truncate long background values */
+      if (bg && bg.length > 80) bg = bg.slice(0, 80) + '…';
+      var opa = cs.opacity;
+      var vis = cs.visibility;
+      var disp = cs.display;
+      var pos  = cs.position;
+      var zi   = cs.zIndex;
+      return 'bg=' + (bg||'—') + ' op=' + opa + ' vis=' + vis + ' disp=' + disp + ' pos=' + pos + ' z=' + zi;
+    } catch(e) { return 'ERROR: ' + e.message; }
   }
 
-  function _updatePanel() {
-    var st = (typeof window._snxStudioDebugState === 'function')
-             ? window._snxStudioDebugState() : {};
+  function _getBgUrl(sel) {
+    try {
+      var el = (sel === 'html') ? document.documentElement
+             : (sel === 'body') ? document.body
+             : document.querySelector(sel);
+      if (!el) return '(not found)';
+      var cs = window.getComputedStyle(el);
+      return cs.backgroundImage || '—';
+    } catch(e) { return 'ERROR'; }
+  }
 
-    var fsReady   = !!window._snxFirestore;
-    var authUser  = window._snxCurrentUser;
-    var uid       = authUser ? authUser.uid : '—';
-    var remote    = window._snxRemoteBuildId || 'loading…';
-    var buildMatch = window._snxRemoteBuildId
-                     ? (window._snxRemoteBuildId === BUILD_ID ? 'MATCH' : 'MISMATCH — reload required')
-                     : 'checking…';
-    var buildMatchCls = window._snxRemoteBuildId
-                        ? (window._snxRemoteBuildId === BUILD_ID ? 'snxd-ok' : 'snxd-err') : 'snxd-warn';
+  /* ────────────────────────────────────────────────────────
+     RENDER UTILITY
+     ──────────────────────────────────────────────────────── */
+  function _r(k, v, cls) {
+    var c = cls || '';
+    if (!cls) {
+      var vs = String(v || '');
+      if (vs === 'PASS' || vs === 'YES' || vs === 'SIGNED_IN' || vs === 'AVAILABLE' || vs === 'MATCH' || vs === 'ACTIVE' || vs === 'LOADED' || vs === 'CONFIGURED') c = 'ok';
+      else if (vs === 'FAIL' || vs === 'NO' || vs === 'SIGNED_OUT' || vs === 'BLOCKED' || vs === 'MISMATCH' || vs.indexOf('ERROR') === 0 || vs.indexOf('FAIL') === 0) c = 'err';
+      else if (vs === 'PENDING' || vs === 'loading…' || vs === '—' || vs === 'checking…') c = 'warn';
+    }
+    return '<div class="snxd-r"><span class="snxd-k">' + k + '</span><span class="snxd-v ' + c + '">' + (v == null ? '—' : String(v)) + '</span></div>';
+  }
+  function _h(t) { return '<div class="snxd-h">' + t + '</div>'; }
+  function _sep() { return '<div class="snxd-sep"></div>'; }
+  function _ms(ts) { return ts ? '+' + Math.round(ts) + 'ms' : '—'; }
 
-    var swState = !('serviceWorker' in navigator) ? 'not supported'
-                : navigator.serviceWorker.controller ? 'ACTIVE' : 'no controller';
+  /* ────────────────────────────────────────────────────────
+     MAIN PANEL UPDATE
+     ──────────────────────────────────────────────────────── */
+  function _updateDbgPanel() {
+    var t = window.__snxT || {};
+    var e = window.__snxErrors || [];
+    var auth = window._snxAuth;
 
-    var html = '<span id="snxDebugClose" onclick="document.getElementById(\'snxDebugPanel\').style.display=\'none\'">✕ close</span>';
-    html += '<div class="snxd-title">🔧 Shadow Nexus — Developer Diagnostics</div>';
-    html += _row('Page Build ID',       BUILD_ID, 'snxd-ok');
-    html += _row('Remote Build ID',     remote,   buildMatchCls);
-    html += _row('Build Match',         buildMatch, buildMatchCls);
-    html += _row('SW Cache Version',    SW_VER);
-    html += _row('Active SW Version',   _swVer || '—');
-    html += _row('SW State',            swState, swState === 'ACTIVE' ? 'snxd-ok' : 'snxd-warn');
-    html += _row('Environment',         location.hostname === 'shadownexussocial.online' ? 'PRODUCTION' : ('DEV — ' + location.hostname),
-                 location.hostname === 'shadownexussocial.online' ? 'snxd-ok' : 'snxd-warn');
-    html += _row('Firebase Project',    'horr-a08f4');
-    html += _row('Auth Ready',          window._snxAuthResolved ? 'YES' : 'PENDING',
-                 window._snxAuthResolved ? 'snxd-ok' : 'snxd-warn');
-    html += _row('Auth UID',            uid);
-    html += _row('Firestore Ready',     fsReady ? 'YES' : 'NO', fsReady ? 'snxd-ok' : 'snxd-err');
+    /* ── Build / Version ── */
+    var remoteBuild = window._snxRemoteBuildId || 'checking…';
+    var buildMatch  = window._snxRemoteBuildId
+      ? (window._snxRemoteBuildId === BUILD_ID ? 'MATCH' : 'MISMATCH — phone running OLD code')
+      : 'checking…';
 
-    if (st.isLive !== undefined) {
-      html += '<div class="snxd-title">Studio State</div>';
-      html += _row('Studio Session ID',  st.studioSessionId || '—');
-      html += _row('Studio Live Active', st.isLive ? 'YES' : 'NO', st.isLive ? 'snxd-ok' : '');
+    /* ── Auth state ── */
+    var authFirebase  = auth ? (auth.currentUser ? 'SIGNED_IN' : 'SIGNED_OUT') : '(auth not ready)';
+    var authWindow    = window._snxCurrentUser ? 'SIGNED_IN' : 'SIGNED_OUT';
+    var authMismatch  = (auth && auth.currentUser && !window._snxCurrentUser) ||
+                        (!auth || !auth.currentUser) && !!window._snxCurrentUser;
+    var authResult    = t.AUTH_RESULT || (window._snxAuthResolved ? (window._snxCurrentUser ? 'SIGNED_IN' : 'SIGNED_OUT') : 'PENDING');
+    var persistOk     = window.__snxPersistenceConfigured === true ? 'CONFIGURED'
+                      : window.__snxPersistenceConfigured === false && window.__snxPersistenceError ? 'FAILED: ' + window.__snxPersistenceError
+                      : 'pending';
+    var persistState  = (persistOk === 'CONFIGURED' || window.__snxPersistenceConfigured === true);
+
+    /* ── Background ── */
+    var bgComputed    = _getBgUrl('html');
+    var bgHasUrl      = bgComputed && bgComputed.indexOf('shadow-nexus-global-bg') !== -1;
+    var bgDivEl       = document.getElementById('snx-global-world-bg');
+    var bgDivPresent  = bgDivEl ? 'PRESENT' : 'MISSING';
+    var bgDivDisplay  = bgDivEl ? window.getComputedStyle(bgDivEl).display : '—';
+    var bgDivPos      = bgDivEl ? window.getComputedStyle(bgDivEl).position : '—';
+
+    /* ── SW ── */
+    var swController  = !('serviceWorker' in navigator) ? 'NOT SUPPORTED'
+                      : navigator.serviceWorker.controller ? navigator.serviceWorker.controller.scriptURL.replace(/.*\//, '') : 'NO CONTROLLER';
+    var staleCaches   = _dbgCacheList.filter(function(n) { return n !== 'shadow-nexus-' + SW_VER && n !== 'shadow-nexus-media-' + SW_VER; });
+
+    /* ── Covering element check ── */
+    var coveringEl = '(checking)';
+    try {
+      var covering = document.elementFromPoint(Math.floor(window.innerWidth / 2), Math.floor(window.innerHeight / 2));
+      coveringEl = covering ? covering.tagName + (covering.id ? '#' + covering.id : '') + (covering.className ? '.' + String(covering.className).split(' ')[0] : '') : '—';
+    } catch(_) {}
+
+    var o = '';
+
+    /* ═══ BUILD ═══ */
+    o += _h('BUILD');
+    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-WORLD-BG-GLOBAL-001' ? 'ok' : 'err');
+    o += _r('BUILD_ID (deployed)',   remoteBuild);
+    o += _r('BUILD MATCH',           buildMatch,  buildMatch === 'MATCH' ? 'ok' : 'err');
+    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v93' ? 'ok' : 'warn');
+    o += _r('SW VERSION (active)',   _dbgSwVer   ? _dbgSwVer + ' (build=' + _dbgSwBuild + ')' : 'querying…');
+    o += _r('DISPLAY MODE',          _dbgDisplayMode);
+    o += _r('ONLINE',                navigator.onLine ? 'YES' : 'NO');
+
+    /* ═══ FIREBASE APP ═══ */
+    o += _h('FIREBASE APP');
+    o += _r('FIREBASE APP',          window._snxApp ? 'INITIALIZED' : 'NOT READY');
+    o += _r('FIREBASE AUTH READY',   window._snxAuth ? 'YES' : 'NO');
+    o += _r('FIRESTORE READY',       window._snxFirestore ? 'YES' : 'NO');
+    o += _r('LOCAL PERSISTENCE',     persistOk, persistState ? 'ok' : (window.__snxPersistenceError ? 'err' : 'warn'));
+
+    /* ═══ AUTH ═══ */
+    o += _h('AUTH TRACE');
+    o += _r('AUTH RESULT',           authResult);
+    o += _r('auth.currentUser',      authFirebase);
+    o += _r('window._snxCurrentUser',authWindow);
+    o += _r('AUTH STATE MISMATCH',   authMismatch ? 'YES — INVESTIGATE' : 'NO', authMismatch ? 'err' : 'ok');
+    o += _r('AUTH RESOLVED',         window._snxAuthResolved ? 'YES' : 'NO');
+    o += _r('AUTH ROLE',             window._snxRole || 'member');
+    o += _r('AUTH TIMEOUT FIRED',    t.AUTH_TIMEOUT_FIRED ? 'YES — Firebase was slow' : 'no', t.AUTH_TIMEOUT_FIRED ? 'warn' : 'ok');
+
+    /* ═══ STARTUP TIMING ═══ */
+    o += _h('STARTUP TIMING');
+    o += _r('PAGE START',             _ms(t.APP_BOOT));
+    o += _r('FIREBASE INIT',          _ms(t.FIREBASE_INIT));
+    o += _r('PERSISTENCE CONFIGURED', _ms(t.PERSISTENCE_CONFIGURED));
+    o += _r('AUTH LISTENER ATTACHED', _ms(t.AUTH_LISTENER_ATTACHED));
+    o += _r('AUTH FIRST CALLBACK',    _ms(t.AUTH_FIRST_CALLBACK));
+    o += _r('AUTH USER FOUND',        _ms(t.AUTH_USER_FOUND));
+    o += _r('PROFILE READY',          _ms(t.GLOBAL_USER_SET));
+    o += _r('ROLE READY',             _ms(t.ROLE_READY));
+    o += _r('FIRST PAGE RENDER',      _ms(t.FIRST_PAGE_RENDER));
+    o += _r('APP INTERACTIVE',        _ms(t.APP_INTERACTIVE));
+
+    /* ═══ INTRO / AUTH GATE / ROUTER ═══ */
+    o += _h('UI STATE');
+    var introEl   = document.getElementById('snxIntroOverlay');
+    var gateEl    = document.getElementById('snx-auth-gate');
+    var activePages = Array.from(document.querySelectorAll('.page.active')).map(function(el){return el.id;}).join(', ') || '—';
+    o += _r('INTRO OVERLAY',        introEl ? (introEl.style.display === 'none' ? 'hidden' : 'visible') : 'not found');
+    o += _r('AUTH GATE',            gateEl ? (gateEl.classList.contains('resolved') ? 'resolved' : 'BLOCKING') : 'not found',
+             gateEl && !gateEl.classList.contains('resolved') ? 'err' : 'ok');
+    o += _r('ACTIVE PAGE(S)',       activePages || '—');
+    o += _r('APP READY FLAG',       window.__shadowNexusAppReady ? 'YES' : 'NO');
+
+    /* ═══ BACKGROUND ═══ */
+    o += _h('BACKGROUND');
+    o += _r('IMAGE URL',            _BG_URL);
+    o += _r('HTTP STATUS',          _dbgBgHttpStatus, _dbgBgHttpStatus.indexOf('200') === 0 ? 'ok' : (_dbgBgHttpStatus === '—' ? 'warn' : 'err'));
+    o += _r('CONTENT-TYPE',         _dbgBgContentType);
+    o += _r('IMAGE DECODE',         _dbgBgDecoded, _dbgBgDecoded === 'PASS' ? 'ok' : (_dbgBgDecoded === '—' ? 'warn' : 'err'));
+    o += _r('DIMENSIONS',           (_dbgBgWidth !== '—') ? _dbgBgWidth + ' × ' + _dbgBgHeight : '—');
+    o += _r('CURRENT SRC',          _dbgBgCurrentSrc ? _dbgBgCurrentSrc.replace(/.*\//, '') : '—');
+    o += _r('COMPUTED BG (html)',   bgHasUrl ? 'CORRECT (shadow-nexus-global-bg)' : (bgComputed || 'NONE'), bgHasUrl ? 'ok' : 'err');
+    o += _r('COMPUTED BG (body)',   _getBgUrl('body'));
+    o += _r('#snx-global-world-bg', bgDivPresent + ' / display:' + bgDivDisplay + ' / pos:' + bgDivPos,
+            bgDivPresent === 'PRESENT' && bgDivPos === 'fixed' ? 'ok' : 'err');
+    o += _r('ELEMENT AT CENTER',    coveringEl);
+    o += _h('COMPUTED STYLES — KEY ELEMENTS');
+    o += _r('html',                 _getCs('html'));
+    o += _r('body',                 _getCs('body'));
+    o += _r('#app / #snxRealm',     _getCs('#snxRealm') + ' / ' + _getCs('#app'));
+    o += _r('#snx-auth-gate',       _getCs('#snx-auth-gate'));
+
+    /* ═══ SERVICE WORKER ═══ */
+    o += _h('SERVICE WORKER');
+    o += _r('SW CONTROLLER',        swController, swController === 'sw.js' || swController.indexOf('sw.js') !== -1 ? 'ok' : (swController === 'NO CONTROLLER' ? 'warn' : 'warn'));
+    o += _r('ACTIVE SW SCRIPT',     _dbgSwActive   || 'checking…');
+    o += _r('WAITING SW',           _dbgSwWaiting  || 'checking…');
+    o += _r('INSTALLING SW',        _dbgSwInstalling|| 'checking…');
+    o += _r('ACTIVE CACHE NAME',    'shadow-nexus-' + SW_VER);
+    o += _r('ALL SNX CACHES',       _dbgCacheList.length ? _dbgCacheList.join(', ') : 'none found');
+    o += _r('STALE SNX CACHES',     staleCaches.length ? staleCaches.join(', ') : 'NONE', staleCaches.length ? 'err' : 'ok');
+
+    /* ═══ STORAGE ═══ */
+    o += _h('STORAGE AVAILABILITY');
+    o += _r('localStorage',         _dbgStorage.localStorage,  _dbgStorage.localStorage === 'AVAILABLE' ? 'ok' : 'err');
+    o += _r('sessionStorage',       _dbgStorage.sessionStorage, _dbgStorage.sessionStorage === 'AVAILABLE' ? 'ok' : 'err');
+    o += _r('IndexedDB',            _dbgStorage.indexedDB,      _dbgStorage.indexedDB === 'AVAILABLE' ? 'ok' : (_dbgStorage.indexedDB === '—' ? 'warn' : 'err'));
+    o += _r('(Firebase persistence uses IndexedDB)', '');
+
+    /* ═══ ERRORS ═══ */
+    o += _h('ERRORS (last 10)');
+    if (!e.length) {
+      o += _r('GLOBAL JS ERROR',     'NONE', 'ok');
+      o += _r('UNHANDLED REJECTION', 'NONE', 'ok');
+    } else {
+      e.forEach(function(err) {
+        o += _r('[+' + err.t + 'ms] ' + err.type, (err.src ? err.src + ':' + err.line + ' — ' : '') + err.msg, 'err');
+      });
     }
 
-    panel.innerHTML = html;
+    /* ═══ DEVICE TESTS ═══ */
+    o += _h('REAL DEVICE TESTS');
+    o += _r('ANDROID REAL DEVICE TEST', 'NOT PERFORMED', 'warn');
+    o += _r('IPHONE REAL DEVICE TEST',  'NOT PERFORMED', 'warn');
+    o += _r('(Tests require physical device — cannot be automated)', '');
+
+    _dbgPanel.innerHTML = o;
   }
 
-  _updatePanel();
-  setInterval(_updatePanel, 3000);
+  /* Run immediately + refresh every 2s */
+  _updateDbgPanel();
+  setInterval(_updateDbgPanel, 2000);
 })();
 </script>
 
@@ -33025,9 +33432,9 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-TV-STABILITY-001';
-  var _SNX_SW_VER   = 'v74';
-  var _SNX_DEPLOY   = '2026-10-07T00:00:00Z';
+  var _SNX_BUILD    = 'SNS-2026-WORLD-BG-GLOBAL-001';
+  var _SNX_SW_VER   = 'v93';
+  var _SNX_DEPLOY   = '2026-10-02T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 
   function _dRow(label, val, ok) {
@@ -34829,7 +35236,7 @@ window.snxFounderPanelCleanup = (function() {
      The intro overlay appears immediately and covers the page
      while Firebase auth initializes behind it.
      ═══════════════════════════════════════════════════════════ -->
-<script src="nexus-intro.js?v=SNS-2026-STARTUP-001"></script>
+<script src="nexus-intro.js?v=SNS-2026-MORNING-REPAIR-002"></script>
 <script>
   /* ── snxIntroCompleted: called by nexus-intro.js after the exit animation.
      At this point the app is already initialized underneath the intro.

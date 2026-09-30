@@ -10,11 +10,11 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNS-2026-GUEST-MODE-001
+ * Build: SNS-2026-WORLD-BG-GLOBAL-001
  */
 
-const CACHE_VERSION = 'v91';
-const BUILD_ID      = 'SNS-2026-RADIO-PAGE-001';
+const CACHE_VERSION = 'v93';
+const BUILD_ID      = 'SNS-2026-WORLD-BG-GLOBAL-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -58,6 +58,7 @@ const SHELL_FILES = [
   'snx-stage11.css',
   'snx-world-bg.css',
   'assets/images/shadow-nexus-world.webp',
+  'assets/images/shadow-nexus-global-bg.png',
 ];
 
 /** Max entries for the media cache (CDN images / avatars). */
@@ -139,16 +140,24 @@ self.addEventListener('install', (event) => {
           )
         )
       )
-      .then(() => self.skipWaiting())
+    // NOTE: skipWaiting() is intentionally NOT called automatically here.
+    // Auto-skipWaiting causes the SW to take over mid-session on Android,
+    // which results in a page reload that destroys the active Firebase Auth
+    // session and forces re-login.
+    // The new SW activates naturally when all tabs are closed and reopened.
+    // The page explicitly sends SKIP_WAITING (below) only when the user
+    // acknowledges the update toast — that path is safe.
   );
 });
 
 /* ─────────────────────────────────────────────
    ACTIVATE — clean up old caches, claim clients
-   clients.claim() is safe here because the
-   install handler already called skipWaiting().
-   The page-side reload guard (sessionStorage)
-   prevents the claim from causing a loop.
+   clients.claim() is called so new installs
+   (fresh browser, cleared site data) take control
+   of existing pages immediately.
+   For update deployments the SW waits for all
+   tabs to close naturally (no auto-skipWaiting),
+   so claim() is a no-op until that happens.
    ───────────────────────────────────────────── */
 self.addEventListener('activate', (event) => {
   event.waitUntil(

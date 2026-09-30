@@ -1,31 +1,51 @@
 /**
  * snx-world-bg.css
  * Shadow Nexus Social — Global Cinematic Background
+ * Build: SNS-2026-MORNING-REPAIR-002 / v93
+ *
+ * Source image : ChatGPT Image Sep 25, 2026, 07_54_47 AM.png  (supplied)
+ * Website copy : assets/images/shadow-nexus-global-bg.png
+ *
+ * TWO complementary background layers:
+ *   1. #snx-global-world-bg  — dedicated position:fixed <div> element
+ *   2. html::before           — position:fixed pseudo-element fallback
+ * Both reference the SAME supplied PNG. The div element is more reliable
+ * on Android WebView and Samsung Internet which sometimes drop ::before.
  *
  * ONE static background image placed at the root.
  * NO animations, NO parallax, NO canvas, NO video.
  * Loads after all other stylesheets so overrides land cleanly.
  *
  * Visual hierarchy:
- *   SHADOW NEXUS WORLD (static image)
+ *   #snx-global-world-bg / html::before  (z-index: -2 / -2)
  *   ↓ subtle dark overlay (readability)
  *   ↓ interface surfaces (semi-transparent cards)
  *   ↓ content
+ *
+ * IMPORTANT — iOS / Android:
+ *   background-attachment: fixed on <html> is BROKEN on iOS Safari.
+ *   It causes the background to go blank or render at wrong size.
+ *   We use position:fixed on both the div and the pseudo-element
+ *   for true fixed-position backgrounds that work on all platforms.
  */
 
 /* ═══════════════════════════════════════════════════════
-   GLOBAL BACKGROUND
-   Applied once to <html> so it stays truly fixed beneath
-   everything and cannot be double-applied by body overrides.
+   LAYER 1: #snx-global-world-bg
+   A dedicated position:fixed <div> injected as the FIRST child
+   of <body>. More reliable than ::before on Android WebView,
+   Samsung Internet, and older iOS PWA shells.
    ═══════════════════════════════════════════════════════ */
-html {
-  /* Dark fallback — shown instantly before image loads */
-  background-color: #02040a;
+#snx-global-world-bg {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: -9999 !important;       /* absolute bottom of stacking order */
+  pointer-events: none !important;
+  display: block !important;
 
-  /* World image beneath a LIGHT dark readability overlay.
-     Kept intentionally transparent so the fantasy artwork
-     (Reaper, wolf, cats, castle, moon) is clearly visible.
-     Content cards use their own semi-transparent surfaces.  */
+  /* Supplied artwork — lossless PNG, exact pixel copy of source */
   background-image:
     linear-gradient(
       to bottom,
@@ -34,17 +54,67 @@ html {
       rgba(2, 4, 14, 0.28) 60%,
       rgba(2, 4, 14, 0.35) 100%
     ),
-    url('assets/images/shadow-nexus-world.webp');
+    url('assets/images/shadow-nexus-global-bg.png') !important;
 
+  background-color: #02040a;
+  background-size: cover !important;
+  background-position: center center !important;
+  background-repeat: no-repeat !important;
+
+  will-change: transform;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+/* ═══════════════════════════════════════════════════════
+   LAYER 2: html::before (position:fixed pseudo-element)
+   Fallback / reinforcement in case the div is removed by
+   third-party scripts or browser extensions.
+   ═══════════════════════════════════════════════════════ */
+
+/* Step 1: give html a dark background-color fallback so
+   there's no white flash before layers render. */
+html {
+  background-color: #02040a !important;
+  background-image: none !important;
+  background-attachment: scroll !important;
+}
+
+/* Step 2: the world image as a fixed pseudo-element — universally supported */
+html::before {
+  content: '';
+  position: fixed;
+  inset: 0;                      /* top:0; right:0; bottom:0; left:0 */
+  z-index: -2;                   /* below everything except #snx-global-world-bg */
+  pointer-events: none;
+
+  /* SAME supplied artwork as the div above */
+  background-image:
+    linear-gradient(
+      to bottom,
+      rgba(2, 4, 14, 0.30) 0%,
+      rgba(2, 4, 14, 0.25) 30%,
+      rgba(2, 4, 14, 0.28) 60%,
+      rgba(2, 4, 14, 0.35) 100%
+    ),
+    url('assets/images/shadow-nexus-global-bg.png');
+
+  background-color: #02040a;     /* fallback if image fails */
   background-size: cover;
   background-position: center center;
   background-repeat: no-repeat;
-  background-attachment: fixed;
+  /* NO background-attachment here — position:fixed already achieves the
+     "fixed to viewport" behavior without the iOS Safari bug. */
+
+  /* Promote to GPU layer — smooth on all devices */
+  will-change: transform;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
 }
 
 /* ── Remove the competing solid body backgrounds so the world shows through ── */
 /* nexus-glass.css and realm.css both set body { background: … !important }.   */
-/* We override body here to be transparent so html's world shines through.     */
+/* We override body here to be transparent so html::before world shines through. */
 body {
   background: transparent !important;
   background-attachment: unset !important;
@@ -216,11 +286,14 @@ video {
    side on the left and remain dramatic.
    ═══════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
-  html {
-    /* Keep cover, shift to show a dramatic portion of the art */
+  /* Portrait phones: shift the image focus toward the Grim Reaper
+     (left-center) so the most dramatic subject is always visible.
+     The castle/moon remains visible on the right. */
+  #snx-global-world-bg {
+    background-position: 35% center !important;
+  }
+  html::before {
     background-position: 35% center;
-    /* No background-attachment: fixed on mobile — causes scroll lag on iOS */
-    background-attachment: scroll;
   }
 
   /* Remove backdrop-filter on mobile — GPU compositing cost */
@@ -241,9 +314,9 @@ video {
 }
 
 @media (min-width: 641px) and (max-width: 1024px) {
-  html {
-    /* Tablet: remove fixed attachment on mid-tier devices */
-    background-attachment: scroll;
+  /* Tablet: centered crop — show full dramatic composition */
+  html::before {
+    background-position: center center;
   }
 }
 

@@ -22,6 +22,11 @@
 <!-- SNX TV Network — Creator Channels expansion -->
 <link rel="stylesheet" href="snx-tv-network.css?v=SHADOW-TV-2026-GLOBAL-UPDATE-01">
 
+<!-- ── Shadow Nexus World — Global Cinematic Background (loads last so overrides land correctly) ── -->
+<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-WORLD-BG-005">
+<!-- ── Preload the world background image — available before auth resolves ── -->
+<link rel="preload" as="image" href="assets/images/shadow-nexus-global-bg.png" fetchpriority="low">
+
 <style>
 /* ── Override particle canvas opacity for Shadow Nexus look ── */
 #ax-particles { opacity: 0.30; }
@@ -85,6 +90,11 @@
 </style>
 </head>
 <body>
+
+<!-- Global world background — position:fixed, z-index:-9999, below all content.
+     Source: ChatGPT Image Sep 25, 2026, 07_54_47 AM.png
+     Web copy: assets/images/shadow-nexus-global-bg.png -->
+<div id="snx-global-world-bg" aria-hidden="true"></div>
 
 <!-- Ambient background -->
 <div class="ax-ambient" aria-hidden="true"></div>

@@ -1,11 +1,11 @@
 {
-  "buildId": "SNS-2026-GUEST-MODE-001",
-  "swVersion": "v87",
+  "buildId": "SNS-2026-WORLD-BG-GLOBAL-001",
+  "swVersion": "v93",
   "deployedAt": "2026-10-02T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
   "liveVersion": "SNS-2026-LIVE-003",
   "guestModeVersion": "SNS-2026-GUEST-MODE-001",
-  "note": "SNS-2026-GUEST-MODE-001: Complete Guest Mode experience. Firestore: posts + stories public read for guest feed/story bar. announcements public read. albumPhotos public-privacy photos readable without auth. RTDB: liveRooms public read for Feed Live Banner. JS: initTimelineStream + _initStorySystem exposed on window for guest init. snxJoinModal upgraded with SIGN IN button + context-aware title/desc. _hookTvStudio guard added. Nav lock hints (Inbox/Notifications). snxJoinGoSignIn added. _initGuestPublicContent starts feed+stories+live banner for guests. _removeNavLockHints on auth login. Feed error message no longer shows Access Denied to guests."
+  "note": "SNS-2026-WORLD-BG-GLOBAL-001: World background confirmed correct (supplied PNG = deployed WebP, same artwork Q92). Added snx-world-bg.css + image preload to channel.html so the Grim Reaper world appears on all pages. SW cache bumped to v93 to force re-precache."
 }
