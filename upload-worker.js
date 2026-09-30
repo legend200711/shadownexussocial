@@ -2170,13 +2170,19 @@ async function handleBroadcastStatus(request, env, cors, sec) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  SHADOW REAPER AI — Stage 2A (own model adapter)
+//  SHADOW REAPER AI — Stage 3: Shadow Nexus Intelligence
 //  POST /shadow-ai/chat
 //
-//  Security:
-//   • Model endpoint (SHADOW_MODEL_ENDPOINT) stored as Wrangler secret.
-//     Optional auth (SHADOW_MODEL_AUTH) also stored as Wrangler secret.
-//     Neither is ever returned to the client or logged.
+//  Stage 3 additions:
+//   • System prompt updated for SNS-aware, role-aware, device-aware responses.
+//   • safeCtx gains isMobile, platform, isPWA, currentSection from client.
+//   • System prompt embeds current section so "this" resolves to correct feature.
+//   • Founder role receives extended diagnostic context in system prompt.
+//   • Snippets: up to 5 multi-entry knowledge snippets (was 1) from Stage 3 KB.
+//   • Live data boundary: system prompt instructs model not to claim live state.
+//   • Privacy: system prompt explicitly prohibits outputting tokens/credentials.
+//
+//  Security (unchanged from Stage 2B):
 //   • No OpenAI API key required. No third-party AI provider dependency.
 //   • Requires a valid Firebase ID token for authenticated users.
 //     Guest users (no token) are allowed with guest-tier limits.
@@ -2328,7 +2334,7 @@ async function _shadowAIRateCheck(env, rateLimitKey, maxRequests) {
   return { allowed: true, remaining: maxRequests - entry.count };
 }
 
-/* ── Shadow Reaper system prompt builder ───────────────────────────────── */
+/* ── Shadow Reaper system prompt builder — Stage 3 ─────────────────────── */
 function _buildSystemPrompt(role, context, knowledgeSnippets) {
   const snippetText = knowledgeSnippets && knowledgeSnippets.length
     ? '\n\nRELEVANT SHADOW NEXUS KNOWLEDGE:\n' + knowledgeSnippets.map(s =>
@@ -2338,31 +2344,43 @@ function _buildSystemPrompt(role, context, knowledgeSnippets) {
     : '';
 
   const founderExtra = (role === 'founder')
-    ? '\n\nYou are speaking with a Founder. You may share additional platform detail and troubleshooting depth. You do NOT have permission to execute actions, delete data, or change settings on their behalf.'
+    ? `\n\nFOUNDER MODE ACTIVE: You are speaking with the Founder. You may share extended platform diagnostics including build IDs, AI binding state, SW version, and safe system state flags (e.g. window._snxLiveActive, window._snxRadioActive, window._snxTvActive). Diagnostic console hints are appropriate. Do NOT output: API keys, Firebase secrets, TURN credentials, R2 credentials, GitHub tokens, private keys, Cloudflare secrets, or any credential. Do NOT execute actions on the Founder's behalf.`
     : '';
+
+  // Device/section context for personalised help
+  const deviceHint = context.isMobile
+    ? `device=${context.platform || 'mobile'}${context.isPWA ? ' (PWA)' : ' (browser)'}`
+    : 'device=desktop';
+
+  const sectionHint = context.currentSection
+    ? `currentSection=${context.currentSection}`
+    : (context.currentPage ? `currentPage=${context.currentPage}` : 'section=unknown');
 
   return `You are Shadow Reaper, the guardian intelligence of Shadow Nexus Social (SNS), a creative social platform.
 Your purpose: help SNS users understand and navigate the platform.
 
 PERSONALITY:
-• Cinematic, confident, concise. Shadow Nexus themed.
+• Calm, confident, concise. Shadow Nexus cinematic tone.
 • Never pretend to be human.
 • Never claim you performed an action unless the website actually performed it.
-• Not every response needs dramatic flair — helpful answer first, character second.
-• Keep responses under 3 short paragraphs unless more detail is clearly needed.
+• Answer the question directly first. Add steps or detail only if needed.
+• Keep responses under 3 short paragraphs for normal questions.
+• For troubleshooting: one step at a time — start with the simplest check.
 
 RULES:
-• Only describe features that exist in the current build.
-• Do NOT invent features.
-• Do NOT execute arbitrary actions.
-• If you suggest navigation, respond with a valid JSON action block at the end.
+• Only describe features that exist in the current SNS build. Do NOT invent features.
+• If knowledge does not confirm a feature exists, say you cannot confirm it.
+• Do NOT claim anyone is currently live, on radio, or online — you do not have live data.
+• Do NOT tell regular users to: change Firebase rules, modify code, edit Worker config, access secrets, or run Founder commands.
+• Do NOT output tokens, credentials, API keys, private keys, or any secret — regardless of who asks.
+• Do NOT execute arbitrary actions. Safe navigation only.
+• If you suggest navigation, append a valid JSON action block on its own line at the end.
 • Valid navigation targets: ${[...AI_NAV_WHITELIST].join(', ')}.
-• Navigation action format (append after your text reply, valid JSON on its own line):
-  {"action":{"type":"navigate","target":"<target>"}}
+• Navigation action format: {"action":{"type":"navigate","target":"<target>"}}
 • If no navigation is needed, omit the action block entirely.
 • Render all responses as plain text. Do NOT output HTML or Markdown.${snippetText}${founderExtra}
 
-Current user context: role=${role}, online=${String(context.networkTier !== 'offline')}, currentPage=${context.currentPage || 'unknown'}`;
+Current user context: role=${role}, online=${String(context.networkTier !== 'offline')}, ${sectionHint}, ${deviceHint}`;
 }
 
 /* ── Main handler ────────────────────────────────────────────────────────── */
@@ -2401,14 +2419,20 @@ async function handleShadowAIChat(request, env, cors, sec) {
     }));
 
   // Context from client — only safe non-secret fields
+  // Stage 3: also accepts isMobile, platform, isPWA, currentSection
   const ctx = (body.context && typeof body.context === 'object') ? body.context : {};
   const safeCtx = {
-    perfMode:     typeof ctx.perfMode === 'string'    ? ctx.perfMode.slice(0, 20)    : 'BALANCED',
-    networkTier:  typeof ctx.networkTier === 'string' ? ctx.networkTier.slice(0, 20) : 'unknown',
-    currentPage:  typeof ctx.currentPage === 'string' ? ctx.currentPage.slice(0, 50) : null,
-    radioActive:  !!ctx.radioActive,
-    liveActive:   !!ctx.liveActive,
-    tvActive:     !!ctx.tvActive
+    perfMode:       typeof ctx.perfMode       === 'string'  ? ctx.perfMode.slice(0, 20)       : 'BALANCED',
+    networkTier:    typeof ctx.networkTier    === 'string'  ? ctx.networkTier.slice(0, 20)     : 'unknown',
+    currentPage:    typeof ctx.currentPage    === 'string'  ? ctx.currentPage.slice(0, 50)     : null,
+    currentSection: typeof ctx.currentSection === 'string'  ? ctx.currentSection.slice(0, 30)  : null,
+    isMobile:       !!ctx.isMobile,
+    platform:       typeof ctx.platform === 'string'        ? ctx.platform.slice(0, 20)        : 'unknown',
+    isPWA:          !!ctx.isPWA,
+    radioActive:    !!ctx.radioActive,
+    liveActive:     !!ctx.liveActive,
+    tvActive:       !!ctx.tvActive,
+    djActive:       !!ctx.djActive
   };
 
   // Knowledge snippets provided by the client from local knowledge module

@@ -2,51 +2,57 @@
  * snx-shadow-ai.js
  * Shadow Nexus Social — Shadow Reaper AI Core
  *
- * Build: SNS-2026-SHADOW-AI-STAGE2B-CF-AI-001
+ * Build: SNS-2026-SHADOW-VOICE-4A-001
  *
  * Exposes: window.SNXShadowAI
  *
- * Stage 2B changes (over Stage 2A):
- *  • Workers AI binding replaces the external model server adapter.
- *    Shadow Reaper now calls Cloudflare Workers AI directly via env.AI.run().
- *  • Model: @cf/meta/llama-3.2-3b-instruct — current, free-plan compatible.
- *  • No OpenAI API. No SHADOW_MODEL_ENDPOINT. No SHADOW_MODEL_AUTH.
- *    No external GPU server. No laptop server. No Hugging Face.
- *  • New error codes handled: FREE_ALLOCATION_EXHAUSTED, CF_CAPACITY.
- *    Both fall back immediately to local knowledge — no retry on allocation errors.
- *  • AI binding is server-side only. No AI credentials in frontend code.
- *  • All Stage 2A capabilities preserved: conversation history, rate limiting
- *    (KV-backed + in-process fallback), navigation whitelist, Founder
- *    verification, safe text rendering, 20-second timeout, lazy loading,
- *    mobile support.
+ * Stage 3C additions (Deep Intelligence, over Stage 3B):
+ *  • SESSION CONTEXT ENGINE: lightweight short-term context tracking
+ *      - lastTopic, lastFeature, lastCreatorTopic, lastIntent
+ *      - recentIds[], recentNavTarget, turnCount
+ *      - pronoun/follow-up resolution ("it", "he", "that feature")
+ *  • INTENT DETECTION: deterministic local classification
+ *      QUESTION | NAVIGATION | HOW_TO | TROUBLESHOOT | CREATOR |
+ *      FEATURE | PERMISSION | ACCOUNT | PRIVACY | SAFETY | STATUS | UNKNOWN
+ *  • TYPO TOLERANCE: pre-normalization fuzzy corrections before scoring
+ *      (radieo→radio, notifacations→notifications, etc.)
+ *  • CLARIFICATION ENGINE: detects ambiguous multi-feature queries
+ *      and asks ONE focused question rather than guessing wrong.
+ *  • LOCAL ANSWER COMPOSER: multi-record combination, depth control
+ *      (concise | step-by-step | expanded), dedup, related hints.
+ *  • ANSWER DEPTH CONTROL: "step by step" / "tell me more" / "explain"
+ *  • FEATURE RELATIONSHIP ANSWERS: "difference between X and Y" local.
+ *  • "WHAT CAN YOU DO?" handler — fully local, accurate capabilities.
+ *  • Updated local-first routing pipeline:
+ *      PRIVACY/SAFETY GUARD
+ *      → NAVIGATION COMMAND
+ *      → CONTEXT RESOLUTION (pronoun/follow-up)
+ *      → TYPO CORRECTION
+ *      → INTENT DETECTION
+ *      → LOCAL KNOWLEDGE (HIGH/MEDIUM → answer, no AI)
+ *      → LOCAL ANSWER COMPOSITION
+ *      → CONFIDENCE CHECK
+ *      → LOW/NONE → Workers AI with grounding snippets
  *
- * Stage 2A changes (still active):
- *  • OpenAI dependency REMOVED. No SHADOW_AI_API_KEY required.
- *  • MODEL_NOT_CONFIGURED fallback preserved for compatibility.
+ * Stage 3B additions (still active):
+ *  • Creator Knowledge (32 records, 8 categories).
+ *  • Creator privacy guard — blocks private info from Workers AI.
+ *  • Creator grounding flag for Workers AI context.
  *
- * Stage 2 additions (over Stage 1 — still active):
- *  • Real AI connection via POST /shadow-ai/chat (Cloudflare Worker endpoint).
- *  • Provider abstraction: frontend only knows the endpoint, never model secrets.
- *  • Multi-turn conversation sent to server (history bounded to 10 pairs).
- *  • Stage 1 local knowledge used as relevance-matched grounding snippets.
- *  • Stage 1 local knowledge remains as fallback if server is unavailable.
- *  • 20-second client-side timeout with friendly error message.
- *  • HTTP 429 → friendly retry message.
- *  • Network failure → Stage 1 local knowledge fallback.
- *  • Loading/thinking state with duplicate-send protection.
- *  • Navigation intents: server returns {action:{type:"navigate",target}} —
- *    target is whitelisted server-side AND client-side before navigateTo().
- *  • No API keys, provider URLs, or secrets ever leave the server.
- *  • All AI text rendered with textContent (never innerHTML).
+ * Stage 3A additions (still active):
+ *  • LOCAL-FIRST routing pipeline.
+ *  • retrieveKnowledge() / answerLocally() confidence-gated answers.
+ *  • AI-limit mode: FREE_ALLOCATION_EXHAUSTED → LOCAL KNOWLEDGE MODE.
  *
- * Design constraints (unchanged from Stage 1):
- *  • Does NOT create another floating button, panel, navigation item, or
- *    Click Here entry point.  All UI lives INSIDE the existing #grim-panel.
+ * Design constraints (unchanged):
+ *  • Does NOT create another floating button, panel, or navigation item.
  *  • Does NOT restart Radio, TV, Live, Firebase, or the existing GP canvas RAF.
  *  • Does NOT add itself to startup — loaded only when the user opens the panel.
  *  • Idempotent: safe to call init() / open() multiple times.
  *  • No eval(), no new Function(), no unsanitized innerHTML.
  *  • Conversation history is memory-only for this session (≤ 20 pairs).
+ *  • Session context is memory-only — NOT permanently stored.
+ *  • No tokens, credentials, or secrets ever sent to or stored in the frontend.
  *
  * Integration point: toggleGrimPanel() in index.html calls
  *   SNXFeatureLoader.loadFeature('shadow-ai') then SNXShadowAI.open()
@@ -61,7 +67,7 @@
      CONSTANTS
   ───────────────────────────────────────────────────────────────*/
   var MAX_HISTORY = 20; // max conversation turns (user+grim pairs) — bounded for server
-  var BUILD_ID    = 'SNS-2026-SHADOW-AI-STAGE2B-CF-AI-001';
+  var BUILD_ID    = 'SNS-2026-SHADOW-VOICE-4A-001';
 
   /* Cloudflare Worker AI endpoint — never put an API key here */
   var AI_ENDPOINT = 'https://yellow-term-11e6.nthntjrn.workers.dev/shadow-ai/chat';
@@ -93,7 +99,492 @@
   var _busy         = false;       // rapid-send protection
   var _reqSeq       = 0;           // monotonic request id
   var _history      = [];          // [{role:'user'|'grim', text:string}]
-  var _listeners    = [];          // unused in Stage 1, reserved for Stage 2
+  var _listeners    = [];          // reserved
+
+  /* Stage 4B: character state hooks */
+  var _thinkingListeners = [];
+  var _answerListeners   = [];
+
+  /* AI-limit mode — set to true when FREE_ALLOCATION_EXHAUSTED is received.
+     Once true for the session, skip Workers AI entirely and use local knowledge.
+     Shadow Reaper degrades gracefully rather than appearing broken. */
+  var _aiLimitMode  = false;
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: SESSION CONTEXT  — memory-only, never persisted
+     Tracks lightweight short-term state within this session.
+     Context is reset on destroy(). NOT stored to localStorage, DB, or cookies.
+  ───────────────────────────────────────────────────────────────*/
+  var _sessionCtx = {
+    lastTopic:        null,   // human-readable last subject (e.g. "Radio")
+    lastFeature:      null,   // canonical feature key (e.g. "radio")
+    lastCreatorTopic: null,   // last creator sub-topic (e.g. "music")
+    lastIntent:       null,   // last classified intent string
+    recentIds:        [],     // last 3 knowledge entry IDs answered
+    recentNavTarget:  null,   // last navigation target used
+    turnCount:        0,      // number of turns in this session
+    pendingClarify:   null    // stored clarification question state
+  };
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: TYPO CORRECTION TABLE
+     Maps common misspellings → corrected form (pre-normalize step).
+     Applied BEFORE scoring. Do not make so aggressive it overrides valid words.
+  ───────────────────────────────────────────────────────────────*/
+  var _TYPO_MAP = {
+    'radieo':         'radio',
+    'rdaio':          'radio',
+    'radoi':          'radio',
+    'radi0':          'radio',
+    'livve':          'live',
+    'liev':           'live',
+    'livestream':     'live',
+    'live stream':    'live',
+    'livesutraming':  'live',
+    'notifacations':  'notifications',
+    'notificatons':   'notifications',
+    'notifcations':   'notifications',
+    'notifictions':   'notifications',
+    'notifcatins':    'notifications',
+    'messeges':       'inbox',
+    'messags':        'inbox',
+    'messsages':      'inbox',
+    'masseges':       'inbox',
+    'shdow nexus':    'shadow nexus',
+    'shaodw nexus':   'shadow nexus',
+    'shadow nxus':    'shadow nexus',
+    'sdhaow nexus':   'shadow nexus',
+    'shoadow nexus':  'shadow nexus',
+    'snx':            'shadow nexus',
+    'sns':            'shadow nexus social',
+    'setings':        'settings',
+    'settigns':       'settings',
+    'setttings':      'settings',
+    'setingss':       'settings',
+    'profle':         'profile',
+    'proifle':        'profile',
+    'prifole':        'profile',
+    'freinds':        'friends',
+    'freids':         'friends',
+    'firends':        'friends',
+    'frieds':         'friends',
+    'serach':         'search',
+    'saerch':         'search',
+    'seach':          'search',
+    'accuont':        'account',
+    'acount':         'account',
+    'accont':         'account',
+    'inbax':          'inbox',
+    'inboc':          'inbox',
+    'chirs':          'chris',
+    'criss':          'chris',
+    'chrsi':          'chris',
+    'chis':           'chris',
+    'arkade':         'arcade',
+    'arcadde':        'arcade',
+    'comunity':       'community',
+    'commuity':       'community',
+    'communtiy':      'community',
+    'upploads':       'uploads',
+    'uplads':         'uploads',
+    'upoad':          'uploads',
+    'saftey':         'safety',
+    'privacey':       'privacy',
+    'privicy':        'privacy',
+    'camra':          'camera',
+    'camrea':         'camera',
+    'cammera':        'camera',
+    'microfone':      'microphone',
+    'micraphone':     'microphone',
+    'microhpone':     'microphone',
+    'vidio':          'video',
+    'vidoe':          'video',
+    'vido':           'video',
+    'instal':         'install',
+    'installapp':     'install app',
+    'televsion':      'television',
+    'televison':      'television',
+    'livee':          'live',
+    'liive':          'live',
+    'raido':          'radio',
+    'radeo':          'radio'
+  };
+
+  /* Apply typo corrections to raw user input before processing */
+  function _correctTypos(text) {
+    if (!text) return text;
+    var lower = text.toLowerCase();
+    var out   = lower;
+    Object.keys(_TYPO_MAP).forEach(function (bad) {
+      if (out.indexOf(bad) !== -1) {
+        out = out.split(bad).join(_TYPO_MAP[bad]);
+      }
+    });
+    /* Preserve original casing structure if nothing changed */
+    return out === lower ? text : out;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: INTENT DETECTION
+     Deterministic, local, no AI required.
+     Returns one of:
+       NAVIGATION | HOW_TO | TROUBLESHOOT | CREATOR | FEATURE |
+       PERMISSION | ACCOUNT | PRIVACY | SAFETY | STATUS | QUESTION | UNKNOWN
+  ───────────────────────────────────────────────────────────────*/
+  var _INTENT_PATTERNS = [
+    { intent: 'SAFETY',      pattern: /(suicide|kill myself|end my life|want to die|dont want to live|self.harm|hurt myself)/i },
+    { intent: 'PRIVACY',     pattern: /(password|credentials|token|secret|api key|home address|private email|private message|sister.s name)/i },
+    { intent: 'NAVIGATION',  pattern: /^(take me|go to|open|navigate to|show me|get me|bring me)\s+(to\s+)?/i },
+    { intent: 'NAVIGATION',  pattern: /\b(open|show|go to)\s+(radio|live|tv|feed|inbox|settings|search|notifications|friends|community|arcade|rooms|profile)\b/i },
+    { intent: 'HOW_TO',      pattern: /\bhow (do i|can i|to)\s+(go live|start|send|post|create|upload|add|edit|change|request|install|join|get|become|invite|watch|listen|use|play)\b/i },
+    { intent: 'HOW_TO',      pattern: /\b(steps|step by step|walk me through|guide me|how do i|how can i)\b/i },
+    { intent: 'TROUBLESHOOT',pattern: /\b(not working|broken|won.t|wont|doesn.t|doesnt|can.t|cant|isnt|isn.t|error|problem|issue|fix|help|stuck|failing|fail|blocked|denied|not playing|no sound|no audio|loading|buffering|freezing|freeze|crash|black screen)\b/i },
+    { intent: 'TROUBLESHOOT',pattern: /\b(my (camera|mic|microphone|video|audio|stream|radio|tv|feed|profile|upload|notification|message|account|login|sign))\b.{0,40}(not|won.t|can.t|isn.t|broken|stuck|error)/i },
+    { intent: 'PERMISSION',  pattern: /\b(can (guests?|i|users?|members?|viewers?|anyone))\s+(use|watch|listen|request|post|comment|chat|access|view|join|go live|send|upload|react|do)/i },
+    { intent: 'ACCOUNT',     pattern: /\b(sign in|sign out|log in|log out|sign up|register|delete account|forgot password|reset password|password|account|session expired|create account)\b/i },
+    { intent: 'CREATOR',     pattern: /\b(who (is|was|created|built|made|founded|owns?)|chris|legend of shadows|the creator|the founder|stay legendary|why (he|chris)|his (music|story|sister|values|symbols))\b/i },
+    { intent: 'STATUS',      pattern: /\b(what can you do|what do you know|can you help|what can i ask|what are you|who are you|your capabilities|what is shadow reaper)\b/i },
+    { intent: 'FEATURE',     pattern: /\b(what is|how does|tell me about|explain)\s+(radio|live|tv|feed|inbox|notifications|search|friends|community|arcade|storm rooms|support rooms|profile|settings|uploads|pwa|dj|cohost|pwas|channel)\b/i },
+    { intent: 'QUESTION',    pattern: /\b(what|where|when|who|why|which|does|is|are|can)\b/i }
+  ];
+
+  function _detectIntent(text) {
+    var norm = (text || '').toLowerCase();
+    for (var i = 0; i < _INTENT_PATTERNS.length; i++) {
+      if (_INTENT_PATTERNS[i].pattern.test(norm)) {
+        return _INTENT_PATTERNS[i].intent;
+      }
+    }
+    return 'UNKNOWN';
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: FEATURE CONTEXT TABLE
+     Maps user-spoken feature names → canonical feature key
+  ───────────────────────────────────────────────────────────────*/
+  var _FEATURE_NAMES = {
+    'radio':          'radio',
+    'radio studio':   'radio_studio',
+    'dj':             'dj',
+    'dj mode':        'dj',
+    'live':           'live',
+    'live stream':    'live',
+    'stream':         'live',
+    'cohost':         'cohost',
+    'co-host':        'cohost',
+    'tv':             'tv',
+    'tv studio':      'tv_studio',
+    'television':     'tv',
+    'nexus tv':       'tv',
+    'feed':           'feed',
+    'eclipse feed':   'feed',
+    'timeline':       'feed',
+    'profile':        'profile',
+    'search':         'search',
+    'friends':        'friends',
+    'family':         'friends',
+    'inbox':          'inbox',
+    'messages':       'inbox',
+    'dms':            'inbox',
+    'notifications':  'notifications',
+    'alerts':         'notifications',
+    'uploads':        'uploads',
+    'settings':       'settings',
+    'rooms':          'rooms',
+    'storm rooms':    'stormrooms',
+    'support rooms':  'supportrooms',
+    'community':      'community',
+    'arcade':         'arcade',
+    'games':          'arcade',
+    'pwa':            'pwa',
+    'app':            'pwa',
+    'install':        'pwa',
+    'shadow nexus':   'feed',
+    'sns':            'feed'
+  };
+
+  /* Extract canonical feature key from a message */
+  function _extractFeature(text) {
+    var norm = (text || '').toLowerCase();
+    /* Multi-word first */
+    var sorted = Object.keys(_FEATURE_NAMES).sort(function(a,b) { return b.length - a.length; });
+    for (var i = 0; i < sorted.length; i++) {
+      if (norm.indexOf(sorted[i]) !== -1) return _FEATURE_NAMES[sorted[i]];
+    }
+    return null;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: CONTEXT RESOLUTION
+     Resolves pronouns and short follow-up phrases using session context.
+     Returns the enriched message text (never modifies _sessionCtx here).
+  ───────────────────────────────────────────────────────────────*/
+  function _resolveContext(text) {
+    if (!text) return text;
+    var lower = text.toLowerCase().trim();
+
+    /* Very short follow-ups with no feature mention — inject context */
+    var featureInText = _extractFeature(lower);
+
+    /* Pronoun "it" / "that" / "this" without clear feature → inject last feature */
+    if (!featureInText && _sessionCtx.lastFeature) {
+      /* Patterns that suggest reference to previous topic */
+      var refPat = /\b(it|that|this|there|the feature|the thing|the section)\b/i;
+      if (refPat.test(lower) && lower.length < 80) {
+        var featureLabel = _getFeatureLabel(_sessionCtx.lastFeature);
+        /* Prepend context hint — will feed into scoring */
+        text = text + ' [context: ' + featureLabel + ']';
+      }
+    }
+
+    /* Creator pronouns: "he" / "his" / "him" without explicit name */
+    if (!featureInText && _sessionCtx.lastCreatorTopic) {
+      var creatorRef = /\b(he|his|him|the creator|the founder)\b/i;
+      var hasChris   = /\b(chris|legend of shadows)\b/i;
+      if (creatorRef.test(lower) && !hasChris.test(lower) && lower.length < 100) {
+        text = text + ' [context: chris]';
+      }
+    }
+
+    /* Follow-up after a creator question about Shadow Nexus */
+    if (_sessionCtx.lastIntent === 'CREATOR') {
+      var snsRef = /\b(it|sns|the platform|the site|shadow nexus|this)\b/i;
+      var hasSnx = /\b(shadow nexus|sns)\b/i;
+      if (snsRef.test(lower) && !hasSnx.test(lower) && lower.length < 60) {
+        text = text + ' [context: shadow nexus]';
+      }
+    }
+
+    return text;
+  }
+
+  /* Human-readable label for a feature key */
+  function _getFeatureLabel(featureKey) {
+    var labels = {
+      radio: 'Radio', radio_studio: 'Radio Studio', dj: 'DJ',
+      live: 'Live', cohost: 'Cohost', tv: 'TV', tv_studio: 'TV Studio',
+      feed: 'Eclipse Feed', profile: 'Profile', search: 'Search',
+      friends: 'Friends', inbox: 'Inbox', notifications: 'Notifications',
+      uploads: 'Uploads', settings: 'Settings', rooms: 'Rooms',
+      stormrooms: 'Storm Rooms', supportrooms: 'Support Rooms',
+      community: 'Community', arcade: 'Arcade', pwa: 'PWA'
+    };
+    return labels[featureKey] || featureKey;
+  }
+
+  /* Update session context after a successful answer */
+  function _updateSessionCtx(message, intent, result) {
+    _sessionCtx.turnCount++;
+    _sessionCtx.lastIntent = intent;
+
+    /* Feature context */
+    var feat = _extractFeature(message);
+    if (feat) {
+      _sessionCtx.lastFeature = feat;
+      _sessionCtx.lastTopic   = _getFeatureLabel(feat);
+    }
+
+    /* Creator context */
+    var creatorCats = ['CREATOR','CREATOR_STORY','CREATOR_MUSIC','CREATOR_MENTAL_HEALTH',
+                       'CREATOR_FAMILY','CREATOR_VALUES','CREATOR_SYMBOLS','CREATOR_PRIVACY'];
+    if (result && result.category && creatorCats.indexOf(result.category) !== -1) {
+      _sessionCtx.lastCreatorTopic = result.category;
+      if (!feat) {
+        _sessionCtx.lastTopic = 'Chris';
+      }
+    }
+
+    /* Track recent answered IDs */
+    if (result && result.id) {
+      _sessionCtx.recentIds.unshift(result.id);
+      if (_sessionCtx.recentIds.length > 3) _sessionCtx.recentIds.pop();
+    }
+
+    /* Navigation target */
+    if (intent === 'NAVIGATION' && result && result.page) {
+      _sessionCtx.recentNavTarget = result.page;
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: CLARIFICATION ENGINE
+     Detects ambiguous questions where multiple features could match.
+     Returns a clarifying question string, or null if not ambiguous.
+  ───────────────────────────────────────────────────────────────*/
+  var _AMBIGUOUS_PATTERNS = [
+    {
+      pattern: /\b(why won'?t it play|why (isn'?t|is not) it playing|won'?t (it |the )?(audio |video )?play|audio not working|it (won'?t|doesn'?t|don'?t) play)\b/i,
+      features: ['Radio', 'TV', 'Live'],
+      question: "What are you trying to play? Radio, TV, or a Live stream?"
+    },
+    {
+      pattern: /\b(not loading|won'?t load|not opening|slow to load|loading forever)\b/i,
+      features: ['Radio', 'TV', 'Live', 'Feed'],
+      question: "Which part of Shadow Nexus isn't loading? Radio, TV, Live, Feed, or something else?"
+    },
+    {
+      pattern: /\b(camera not working|mic not working|microphone not working)\b/i,
+      features: ['Live', 'Cohost'],
+      question: "Are you trying to go Live or join as a Cohost?"
+    },
+    {
+      pattern: /^(not working|broken|it('?s| is) broken|won'?t work)\s*\.?$/i,
+      features: null,
+      question: "What exactly isn't working? Tell me the feature or what you were trying to do."
+    },
+    {
+      pattern: /\b(can i watch|how do i watch|how to watch)\b/i,
+      features: ['TV', 'Live'],
+      question: "Are you asking about watching TV or watching a Live stream?"
+    }
+  ];
+
+  function _checkClarification(text, intent) {
+    /* Only clarify for TROUBLESHOOT or ambiguous QUESTION intents */
+    if (intent !== 'TROUBLESHOOT' && intent !== 'QUESTION' && intent !== 'UNKNOWN') return null;
+
+    /* If there is already strong feature context, no need to clarify */
+    var feat = _extractFeature(text);
+    if (feat) return null;
+
+    for (var i = 0; i < _AMBIGUOUS_PATTERNS.length; i++) {
+      var ap = _AMBIGUOUS_PATTERNS[i];
+      if (ap.pattern.test(text)) {
+        return ap.question;
+      }
+    }
+    return null;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: ANSWER DEPTH DETECTION
+     Returns 'stepbystep' | 'expanded' | 'concise'
+  ───────────────────────────────────────────────────────────────*/
+  function _detectAnswerDepth(text) {
+    var n = (text || '').toLowerCase();
+    if (/\b(step by step|step-by-step|walk me through|guide me through|give me (the |a )?steps|how exactly|give me instructions|full instructions)\b/.test(n)) {
+      return 'stepbystep';
+    }
+    if (/\b(tell me more|more detail|explain (more|further|fully|it)|full explanation|go deeper|elaborate|expand|give me more|more info|in depth)\b/.test(n)) {
+      return 'expanded';
+    }
+    return 'concise';
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: FEATURE RELATIONSHIP ANSWERS
+     Handles "difference between X and Y" locally.
+  ───────────────────────────────────────────────────────────────*/
+  var _FEATURE_DIFFS = {
+    'live_tv': "Live and TV are two different things on Shadow Nexus Social. Live is real-time video broadcasting — anyone with a member account can go live from their device, and viewers watch in real time. TV is the 24-hour pre-produced channel network — creators upload content to TV Studio and it plays in a scheduled channel format, like a TV network. Live is interactive; TV is broadcast-style.",
+    'live_radio': "Live and Radio are different formats. Live is real-time video broadcasting — you appear on camera and interact with viewers. Radio is Shadow Nexus's 24/7 audio music station — listeners tune in to hear music, make song requests, and leave comments. Radio doesn't use your camera; Live does.",
+    'radio_tv': "Radio and TV are both broadcast-style experiences on Shadow Nexus Social, but they are distinct. Radio is the 24/7 audio music station — no video, just music. You can request songs and comment. TV is the 24-hour video channel network — creators upload video content to TV Studio and it plays in scheduled channels. Radio is audio-only; TV is video.",
+    'stormrooms_supportrooms': "Storm Rooms and Support Rooms are both chat spaces but serve very different purposes. Storm Rooms are anonymous public chat lobbies — great for casual conversation or meeting new people. Support Rooms are peer-support spaces designed for people who need someone to talk to or want to vent. Support Rooms are welcoming and supportive; Storm Rooms are more open and social.",
+    'radio_studio_dj': "Radio Studio and DJ are related but different. Radio Studio is where an authorised broadcaster manages the Shadow Nexus Radio broadcast — setting the music queue, managing the station. DJ mode is a separate feature that lets a DJ take control of the live radio broadcast and play tracks in real time. DJ mode requires special authorisation."
+  };
+
+  function _checkFeatureDiff(text) {
+    var n = (text || '').toLowerCase();
+    if (!/\b(difference|differ|compare|versus|vs\.?|vs |what.s the (difference|diff)|how (is|are).+(different|different from)|compared to)\b/i.test(n)) return null;
+
+    var pairs = [
+      { keys: ['live','tv'],                  id: 'live_tv' },
+      { keys: ['live','radio'],               id: 'live_radio' },
+      { keys: ['radio','tv'],                 id: 'radio_tv' },
+      { keys: ['storm rooms','support rooms'],id: 'stormrooms_supportrooms' },
+      { keys: ['storm','support'],            id: 'stormrooms_supportrooms' },
+      { keys: ['radio studio','dj'],          id: 'radio_studio_dj' },
+      { keys: ['dj','radio studio'],          id: 'radio_studio_dj' }
+    ];
+
+    for (var i = 0; i < pairs.length; i++) {
+      var p = pairs[i];
+      if (n.indexOf(p.keys[0]) !== -1 && n.indexOf(p.keys[1]) !== -1) {
+        var answer = _FEATURE_DIFFS[p.id];
+        if (answer) {
+          return { text: answer, page: null, handled: true, confidence: 'HIGH', id: p.id };
+        }
+      }
+    }
+    return null;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: "WHAT CAN YOU DO?" LOCAL HANDLER
+  ───────────────────────────────────────────────────────────────*/
+  var _CAPABILITIES_TEXT = "I am Shadow Reaper — your guide and guardian through Shadow Nexus Social. Here is what I can help you with:\n\n• Shadow Nexus features — Radio, Live, TV, Feed, Profile, Inbox, Notifications, Search, Friends, Community, Arcade, Storm Rooms, Support Rooms, Uploads, Settings, and more.\n• Navigation — tell me where you want to go and I will take you there directly.\n• How-to guides — step-by-step help for any feature on the platform.\n• Troubleshooting — if something is not working, describe what is happening and I will help diagnose it.\n• Permissions — I can tell you what guests, members, and founders can access.\n• Accounts — sign-in, sign-up, password resets, and settings.\n• The Creator — I know the public story of Chris Legend of Shadows, who built this platform.\n\nI answer almost everything from local knowledge — no AI is needed for most questions. When you ask something complex, I can reason across multiple knowledge sources to give you a complete answer.\n\nJust ask — in plain words, short questions, or follow-ups.";
+
+  var _STATUS_SELF_PATTERNS = /\b(what can you do|what do you know|can you help|what can i ask|introduce yourself|what are you|who are you|what is shadow reaper|your name|what (are|is) your capabilities|help me)\b/i;
+
+  function _checkCapabilities(text) {
+    if (_STATUS_SELF_PATTERNS.test(text)) {
+      return {
+        text:       _CAPABILITIES_TEXT,
+        page:       null,
+        handled:    true,
+        confidence: 'HIGH',
+        id:         'shadowReaper'
+      };
+    }
+    return null;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     STAGE 3C: LOCAL ANSWER COMPOSER
+     Combines multiple knowledge hits into a single coherent answer.
+     Respects answer depth (concise / stepbystep / expanded).
+     Called when answerLocally() returns a result but more records may help.
+  ───────────────────────────────────────────────────────────────*/
+  function _composeAnswer(baseResult, hits, depth, intent) {
+    if (!baseResult) return null;
+
+    var text = baseResult.text || '';
+
+    /* Step-by-step depth: if the best entry has 'how' steps, lead with them */
+    if (depth === 'stepbystep' && baseResult.id) {
+      var entry = global.SNXShadowKnowledge ?
+        global.SNXShadowKnowledge.getEntry(baseResult.id) : null;
+      if (entry && entry.how) {
+        /* Ensure steps are prominent */
+        if (text.indexOf(entry.how) === -1) {
+          text = entry.how;
+        }
+      }
+    }
+
+    /* Expanded depth: append secondary relevant record if it adds unique content */
+    if (depth === 'expanded' && hits && hits.length > 1) {
+      var secondary = hits[1];
+      if (secondary && secondary.score >= 3 && secondary.entry.id !== baseResult.id) {
+        var secEntry = secondary.entry;
+        var secText  = secEntry.description || '';
+        /* Only append if it doesn't just repeat the primary */
+        if (secText && text.indexOf(secText.substring(0, 40)) === -1) {
+          text = text + '\n\nAlso related — ' + secEntry.title + ': ' + secEntry.description;
+        }
+      }
+    }
+
+    /* PERMISSION intent: check guest limitations in secondary results */
+    if (intent === 'PERMISSION' && hits && hits.length > 0) {
+      var guestEntry = null;
+      hits.forEach(function (h) {
+        if (!guestEntry && h.entry.category === 'GUEST_MODE') guestEntry = h.entry;
+      });
+      if (guestEntry && text.indexOf('guest') === -1) {
+        text = text + '\n\nNote: ' + guestEntry.description;
+      }
+    }
+
+    return {
+      text:       text,
+      page:       baseResult.page || null,
+      handled:    true,
+      confidence: baseResult.confidence,
+      id:         baseResult.id,
+      category:   baseResult.category
+    };
+  }
 
   /* ─────────────────────────────────────────────────────────────
      SAFE TEXT HELPERS
@@ -112,6 +603,7 @@
 
   /* ─────────────────────────────────────────────────────────────
      CONTEXT BUILDER  (safe — no tokens, no secrets)
+     Stage 3: adds device type, platform, PWA detection, section.
   ───────────────────────────────────────────────────────────────*/
   function _buildContext() {
     var ctx = {};
@@ -148,7 +640,7 @@
     ctx.tvActive    = !!(global._snxTvActive);
     ctx.djActive    = !!(global._snxDJActive);
 
-    /* Current page hint */
+    /* Current page hint — read first active .page element id */
     var activePage = null;
     var pages = document.querySelectorAll('.page.active');
     if (pages.length) {
@@ -156,7 +648,47 @@
     }
     ctx.currentPage = activePage;
 
+    /* ── Stage 3: device context (safe — no fingerprinting) ──── */
+    /* Mobile vs desktop */
+    ctx.isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    /* Platform hint — Android or iPhone only, both reliably self-report */
+    ctx.platform = 'unknown';
+    if (/Android/i.test(navigator.userAgent)) {
+      ctx.platform = 'android';
+    } else if (/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      ctx.platform = 'ios';
+    } else if (!ctx.isMobile) {
+      ctx.platform = 'desktop';
+    }
+
+    /* PWA mode — display-mode: standalone indicates installed PWA */
+    ctx.isPWA = !!(global.matchMedia && global.matchMedia('(display-mode: standalone)').matches);
+
+    /* Current SNS section — derived from active page id */
+    ctx.currentSection = _inferSection(activePage);
+
     return ctx;
+  }
+
+  /* Infer a human-readable section name from page id */
+  function _inferSection(pageId) {
+    if (!pageId) return null;
+    var p = pageId.toLowerCase();
+    if (p.indexOf('radio') !== -1)          return 'radio';
+    if (p.indexOf('live') !== -1)           return 'live';
+    if (p.indexOf('tv') !== -1)             return 'tv';
+    if (p.indexOf('feed') !== -1 || p === 'index') return 'feed';
+    if (p.indexOf('inbox') !== -1)          return 'inbox';
+    if (p.indexOf('notification') !== -1)   return 'notifications';
+    if (p.indexOf('setting') !== -1)        return 'settings';
+    if (p.indexOf('search') !== -1)         return 'search';
+    if (p.indexOf('friend') !== -1)         return 'friends';
+    if (p.indexOf('profile') !== -1)        return 'profile';
+    if (p.indexOf('storm') !== -1)          return 'stormrooms';
+    if (p.indexOf('support') !== -1)        return 'supportrooms';
+    if (p.indexOf('community') !== -1)      return 'community';
+    return pageId;
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -164,15 +696,34 @@
   ───────────────────────────────────────────────────────────────*/
   function _getCapabilities() {
     return {
+      /* Stage 3A */
       localKnowledge:          true,
-      externalAI:              true,   // Stage 2B — Cloudflare Workers AI
-      workersAIBinding:        true,   // Stage 2B — env.AI.run()
-      openAIDependency:        false,  // Stage 2A/2B — removed
-      ownModelServer:          false,  // Stage 2B — no external server
+      externalAI:              !_aiLimitMode,
+      workersAIBinding:        true,
+      openAIDependency:        false,
+      ownModelServer:          false,
       navigationMap:           true,
       contextBuilder:          true,
       offlineFallback:         true,
-      freeAllocationFallback:  true,   // Stage 2B — fallback on 3036/3040
+      freeAllocationFallback:  true,
+      localBrain:              true,
+      confidenceGating:        true,
+      aiLimitMode:             _aiLimitMode,
+      categoryRetrieval:       true,
+      roleAwareKnowledge:      true,
+      deviceContext:           true,
+      sectionContext:          true,
+      founderDiagnostics:      true,
+      /* Stage 3C — Deep Intelligence */
+      sessionContext:          true,    // short-term pronoun/topic tracking
+      intentDetection:         true,    // deterministic local intent classifier
+      typoTolerance:           true,    // pre-normalization typo correction
+      clarificationEngine:     true,    // ambiguity detection → one clarifying question
+      localAnswerComposer:     true,    // multi-record combination with depth control
+      answerDepthControl:      true,    // concise / step-by-step / expanded
+      featureRelationships:    true,    // "difference between X and Y" local
+      capabilitiesHandler:     true,    // "what can you do" answered locally
+      permanentStorage:        false,   // session context NEVER stored persistently
       build:                   BUILD_ID
     };
   }
@@ -202,6 +753,9 @@
   function navigateTo(feature) {
     var key = (feature || '').toLowerCase().replace(/[^a-z]/g, '');
     if (_NAV_MAP[key]) {
+      /* Stage 3C: track nav target in session context */
+      _sessionCtx.recentNavTarget = key;
+      _sessionCtx.lastIntent      = 'NAVIGATION';
       _close();
       _NAV_MAP[key]();
     }
@@ -209,30 +763,95 @@
 
   /* ─────────────────────────────────────────────────────────────
      LOCAL ANSWER ENGINE
-     Delegates to SNXShadowKnowledge if loaded, otherwise uses
-     inline crisis + unknown fallback.
+     Stage 3A: uses answerLocally() for HIGH/MEDIUM confidence.
+     Returns a result object or null.
   ───────────────────────────────────────────────────────────────*/
+  /* ─────────────────────────────────────────────────────────────
+     CREATOR PRIVACY GUARD
+     Stage 3B: Block requests for private creator information from
+     ever being forwarded to Workers AI. Handled 100% locally.
+     Returns true when the message is a privacy-sensitive request.
+  ───────────────────────────────────────────────────────────────*/
+  var _CREATOR_PRIVACY_PATTERNS = [
+    /* Credentials / secrets */
+    /\b(password|credentials?|token|secret|api key|firebase|cloudflare|github)\b/i,
+    /* Private contact / location */
+    /(home\s+)?address|precise location|current location|phone\s+number|private\s+(email|messages?)/i,
+    /* "Give me / show me" credential requests */
+    /give\s+me\s+(his|chris'?s?)\s+(password|token|credentials?|key|secret)/i,
+    /show\s+me\s+(his|chris'?s?)\s+private/i,
+    /* Private family / friend information */
+    /sister'?s?\s+(name|address|contact|account|phone)/i,
+    /private\s+(family|friend|supporter)\s+(info|information|details?)/i
+  ];
+
+  function _isCreatorPrivacyRequest(message) {
+    for (var i = 0; i < _CREATOR_PRIVACY_PATTERNS.length; i++) {
+      if (_CREATOR_PRIVACY_PATTERNS[i].test(message)) return true;
+    }
+    return false;
+  }
+
   function _askLocal(message) {
     /* Crisis intercept — always highest priority */
     if (/(suicide|kill myself|end my life|want to die|dont want to live|self.harm|hurt myself)/i.test(message)) {
       return {
         text: "I hear you, and what you are feeling matters enormously. Please reach out right now — US: call or text 988 · UK: 116 123 · Australia: 13 11 14. You deserve real support. You do not have to face this alone.",
         page: null,
-        handled: true
+        handled: true,
+        confidence: 'HIGH'
       };
     }
 
-    /* Delegate to knowledge module if available */
-    if (global.SNXShadowKnowledge && typeof global.SNXShadowKnowledge.query === 'function') {
-      var result = global.SNXShadowKnowledge.query(message, _buildContext());
-      if (result) return result;
+    /* Stage 3B: Creator privacy guard — never forward private requests to Workers AI */
+    if (_isCreatorPrivacyRequest(message)) {
+      return {
+        text: "That information is private. Shadow Reaper does not share personal credentials, home addresses, phone numbers, private messages, tokens, or any other private personal details about Chris or anyone connected to Shadow Nexus Social. If you have a question about the creator's public work or Shadow Nexus Social, feel free to ask.",
+        page: null,
+        handled: true,
+        confidence: 'HIGH'
+      };
     }
 
-    /* Unknown question */
+    /* Stage 3C: capabilities check */
+    var capResult = _checkCapabilities(message);
+    if (capResult) return capResult;
+
+    /* Stage 3C: feature difference check */
+    var diffResult = _checkFeatureDiff(message);
+    if (diffResult) return diffResult;
+
+    /* Stage 3C: detect answer depth */
+    var depth = _detectAnswerDepth(message);
+
+    /* Delegate to knowledge module answerLocally() — HIGH/MEDIUM confidence */
+    if (global.SNXShadowKnowledge && typeof global.SNXShadowKnowledge.answerLocally === 'function') {
+      var ctx  = _buildContext();
+      var result = global.SNXShadowKnowledge.answerLocally(message, ctx);
+      if (result) {
+        /* Stage 3C: multi-record composition with depth control */
+        if ((depth === 'stepbystep' || depth === 'expanded') && typeof global.SNXShadowKnowledge.retrieveKnowledge === 'function') {
+          var allHits = global.SNXShadowKnowledge.retrieveKnowledge(message, ctx);
+          var intent  = _detectIntent(message);
+          var composed = _composeAnswer(result, allHits, depth, intent);
+          if (composed) return composed;
+        }
+        return result;
+      }
+    }
+
+    /* Fallback: try legacy query() for LOW-confidence results (snippets only) */
+    if (global.SNXShadowKnowledge && typeof global.SNXShadowKnowledge.query === 'function') {
+      var qResult = global.SNXShadowKnowledge.query(message, _buildContext());
+      if (qResult) return qResult;   // caller checks confidence before answering
+    }
+
+    /* Unknown question — no local match */
     return {
       text: "I do not have enough local Shadow Nexus knowledge to answer that yet. If you have a question about the site, try asking about a specific feature — Radio, Live, TV, Feed, Profile, Settings, and more.",
       page: null,
-      handled: false
+      handled: false,
+      confidence: 'NONE'
     };
   }
 
@@ -268,25 +887,44 @@
 
   /* ─────────────────────────────────────────────────────────────
      RELEVANT KNOWLEDGE SNIPPETS
-     Gather up to 3 knowledge entries relevant to the user message.
-     Sent as grounding context to the server — not the full 23 entries.
+     Stage 3A: uses retrieveKnowledge() for richer ranked snippets.
+     Only safe, non-Founder entries sent unless Founder.
+     Sent as grounding context to the server — not the full KB.
   ───────────────────────────────────────────────────────────────*/
   function _getRelevantSnippets(message) {
-    if (!global.SNXShadowKnowledge || typeof global.SNXShadowKnowledge.query !== 'function') {
-      return [];
-    }
+    if (!global.SNXShadowKnowledge) return [];
     try {
-      /* query() returns the best-matching result; we also check nearby entries */
-      var result = global.SNXShadowKnowledge.query(message, _buildContext());
-      if (!result || !result.id) return [];
-      /* Return the matched entry's summary+how as a snippet object */
-      var entry = global.SNXShadowKnowledge.getEntry(result.id);
-      if (!entry) return [];
-      return [{
-        title:   entry.title   || '',
-        summary: entry.summary || '',
-        how:     entry.how     || ''
-      }];
+      var ctx = _buildContext();
+
+      /* Stage 3A: use retrieveKnowledge() for better ranking */
+      if (typeof global.SNXShadowKnowledge.retrieveKnowledge === 'function') {
+        var hits = global.SNXShadowKnowledge.retrieveKnowledge(message, ctx);
+        if (hits && hits.length) {
+          return hits.slice(0, 5).map(function (h) {
+            return {
+              title:   h.entry.title   || '',
+              summary: h.entry.summary || '',
+              how:     h.entry.how     || ''
+            };
+          });
+        }
+      }
+
+      /* Fallback: legacy query() snippets */
+      if (typeof global.SNXShadowKnowledge.query === 'function') {
+        var result = global.SNXShadowKnowledge.query(message, ctx);
+        if (!result) return [];
+        if (result.snippets && result.snippets.length) {
+          return result.snippets.map(function (s) {
+            return { title: s.title || '', summary: s.summary || '', how: s.how || '' };
+          });
+        }
+        if (result.id) {
+          var entry = global.SNXShadowKnowledge.getEntry(result.id);
+          if (entry) return [{ title: entry.title || '', summary: entry.summary || '', how: entry.how || '' }];
+        }
+      }
+      return [];
     } catch (_) {
       return [];
     }
@@ -305,7 +943,17 @@
   }
 
   /* ─────────────────────────────────────────────────────────────
-     PROVIDER ABSTRACTION  (Stage 2: server AI + local fallback)
+     PROVIDER ABSTRACTION  — Stage 3C Deep Intelligence Pipeline
+     Routing order:
+       1. TYPO CORRECTION
+       2. CONTEXT RESOLUTION (pronoun/follow-up)
+       3. INTENT DETECTION
+       4. CLARIFICATION CHECK (ambiguous → ask one question)
+       5. LOCAL KNOWLEDGE — HIGH/MEDIUM confidence → answer immediately
+       6. AI-LIMIT MODE   → local only (Workers AI skipped)
+       7. OFFLINE         → local only
+       8. Workers AI      → LOW/NONE confidence questions, with snippets + intent
+       9. Workers AI unavailable → local fallback
   ───────────────────────────────────────────────────────────────*/
   var SNXShadowAIProvider = {
     /**
@@ -316,9 +964,106 @@
       var message   = params.message;
       var context   = params.context;
       var history   = params.history || [];
-      var snippets  = _getRelevantSnippets(message);
 
-      /* Build conversation array (last 10 pairs max — keep bandwidth low) */
+      /* ── STAGE 3C STEP 1: TYPO CORRECTION ───────────────────────
+         Correct common misspellings before any processing.
+      ──────────────────────────────────────────────────────────── */
+      var correctedMsg = _correctTypos(message);
+
+      /* ── STAGE 3C STEP 2: CONTEXT RESOLUTION ────────────────────
+         Resolve pronouns ("it", "he", "this") using session context.
+      ──────────────────────────────────────────────────────────── */
+      var resolvedMsg = _resolveContext(correctedMsg);
+
+      /* ── STAGE 3C STEP 3: INTENT DETECTION ──────────────────────
+         Classify intent before routing.
+      ──────────────────────────────────────────────────────────── */
+      var intent = _detectIntent(resolvedMsg);
+
+      /* ── STAGE 3C STEP 4: CLARIFICATION CHECK ───────────────────
+         If ambiguous with no feature context, ask ONE clarifying question.
+      ──────────────────────────────────────────────────────────── */
+      var clarifyQ = _checkClarification(resolvedMsg, intent);
+      if (clarifyQ) {
+        _sessionCtx.lastIntent    = intent;
+        _sessionCtx.turnCount++;
+        _sessionCtx.pendingClarify = { intent: intent, originalMsg: message };
+        callback({
+          text:       clarifyQ,
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'CLARIFY'
+        });
+        return;
+      }
+
+      /* ── STAGE 3C STEP 5: LOCAL KNOWLEDGE ENGINE ─────────────────
+         Try answerLocally first (uses resolved + corrected message).
+         HIGH or MEDIUM confidence → answer now, zero Workers AI calls.
+         This is the primary cost-saving mechanism.
+      ──────────────────────────────────────────────────────────── */
+      var localResult = _askLocal(resolvedMsg);
+      var localConf   = localResult ? (localResult.confidence || 'NONE') : 'NONE';
+
+      if (localResult && (localConf === 'HIGH' || localConf === 'MEDIUM')) {
+        /* Update session context before replying */
+        _updateSessionCtx(resolvedMsg, intent, localResult);
+        /* Local brain answered confidently — skip AI entirely */
+        callback({
+          text:       localResult.text,
+          page:       localResult.page  || null,
+          handled:    true,
+          fromServer: false,
+          confidence: localConf
+        });
+        return;
+      }
+
+      /* ── STAGE 3C STEP 6: AI-LIMIT MODE ─────────────────────────
+         Workers AI daily allocation exhausted this session.
+         Continue using local knowledge only.
+      ──────────────────────────────────────────────────────────── */
+      if (_aiLimitMode) {
+        _updateSessionCtx(resolvedMsg, intent, localResult);
+        return _fallbackToLocal(resolvedMsg, callback, true);
+      }
+
+      /* ── STAGE 3C STEP 7: OFFLINE ───────────────────────────────
+         No network — use local knowledge.
+      ──────────────────────────────────────────────────────────── */
+      if (!navigator.onLine) {
+        return _fallbackToLocal(resolvedMsg, callback);
+      }
+
+      /* ── STAGE 3C STEP 8: WORKERS AI ────────────────────────────
+         LOW confidence or no local match — call Workers AI with
+         local snippets + intent as grounding context (not the full KB).
+      ──────────────────────────────────────────────────────────── */
+      var snippets = _getRelevantSnippets(resolvedMsg);
+
+      /* Stage 3B: detect if any snippets are creator knowledge entries.
+         When true, tell the Worker to include the biography-invention guard
+         so the model stays within supplied creator knowledge. */
+      var hasCreatorSnippets = false;
+      if (global.SNXShadowKnowledge && typeof global.SNXShadowKnowledge.retrieveKnowledge === 'function') {
+        var hits = global.SNXShadowKnowledge.retrieveKnowledge(resolvedMsg, _buildContext());
+        if (hits && hits.length && hits[0].entry && hits[0].entry.category) {
+          var topCat = hits[0].entry.category;
+          hasCreatorSnippets = (
+            topCat === 'CREATOR' ||
+            topCat === 'CREATOR_STORY' ||
+            topCat === 'CREATOR_MUSIC' ||
+            topCat === 'CREATOR_MENTAL_HEALTH' ||
+            topCat === 'CREATOR_FAMILY' ||
+            topCat === 'CREATOR_VALUES' ||
+            topCat === 'CREATOR_SYMBOLS' ||
+            topCat === 'CREATOR_PRIVACY'
+          );
+        }
+      }
+
+      /* Build conversation array (last 10 pairs max) */
       var conversation = history.slice(-20).map(function (h) {
         return { role: h.role, text: h.text };
       });
@@ -328,10 +1073,31 @@
         var headers = { 'Content-Type': 'application/json' };
         if (idToken) headers['Authorization'] = 'Bearer ' + idToken;
 
+        /* If this is a creator question, add a grounding instruction to the
+           context so the Worker can tell the model not to invent biographical
+           facts beyond the supplied knowledge snippets. */
+        var sendContext = context;
+        if (hasCreatorSnippets) {
+          sendContext = Object.assign({}, context, {
+            creatorGrounding: true,
+            creatorGroundingNote: 'Answer only from the supplied creator knowledge snippets. Do not invent biographical facts, personal details, awards, chart positions, record deals, or other claims about Chris that are not present in the snippets.'
+          });
+        }
+
+        /* Stage 3C: include intent and session context in server request
+           for AI grounding. Do NOT send full conversation history or private data. */
+        sendContext = Object.assign({}, sendContext, {
+          intent:           intent,
+          lastTopic:        _sessionCtx.lastTopic,
+          lastFeature:      _sessionCtx.lastFeature,
+          snxGrounding:     'Answer only from supplied Shadow Nexus Social knowledge. Do not invent features, buttons, menus, or creator biography not present in the supplied knowledge snippets.',
+          answerDepth:      _detectAnswerDepth(resolvedMsg)
+        });
+
         var body = JSON.stringify({
-          message:          message,
-          conversation:     conversation,
-          context:          context,
+          message:           resolvedMsg,
+          conversation:      conversation,
+          context:           sendContext,
           knowledgeSnippets: snippets
         });
 
@@ -362,30 +1128,31 @@
             return res.json().then(function (d) {
               var errCode = (d && d.error) ? d.error : '';
               if (errCode === 'FREE_ALLOCATION_EXHAUSTED') {
-                /* Daily neurons exhausted — use local fallback immediately, no retry */
-                return _fallbackToLocal(message, callback);
+                /* Activate AI-limit mode for this session */
+                _aiLimitMode = true;
+                console.log('[SNXShadowAI] Workers AI daily allocation exhausted — entering LOCAL KNOWLEDGE MODE.');
+                return _fallbackToLocal(resolvedMsg, callback, true);
               }
               if (errCode === 'CF_CAPACITY') {
-                /* Cloudflare capacity temporarily exceeded — use local fallback */
-                return _fallbackToLocal(message, callback);
+                return _fallbackToLocal(resolvedMsg, callback);
               }
-              /* Generic rate limit (our own RL or other 429) — friendly message */
+              /* Generic rate limit */
               callback({
                 text: "Shadow Reaper has reached its request limit for the moment. Give it a breath — try again shortly.",
                 page: null, handled: true, fromServer: false
               });
             }).catch(function () {
-              _fallbackToLocal(message, callback);
+              _fallbackToLocal(resolvedMsg, callback);
             });
           }
 
           /* HTTP 503 — AI binding missing or other service unavailable */
           if (res.status === 503) {
-            return _fallbackToLocal(message, callback);
+            return _fallbackToLocal(resolvedMsg, callback);
           }
 
           if (!res.ok) {
-            return _fallbackToLocal(message, callback);
+            return _fallbackToLocal(resolvedMsg, callback);
           }
 
           return res.json().then(function (data) {
@@ -393,7 +1160,7 @@
             var action = (data.action && typeof data.action === 'object') ? data.action : null;
 
             if (!reply) {
-              return _fallbackToLocal(message, callback);
+              return _fallbackToLocal(resolvedMsg, callback);
             }
 
             /* Validate navigation action client-side — whitelist enforced twice */
@@ -405,6 +1172,14 @@
               }
             }
 
+            /* Record AI usage in knowledge diagnostics */
+            if (global.SNXShadowKnowledge && typeof global.SNXShadowKnowledge.recordAIFallback === 'function') {
+              global.SNXShadowKnowledge.recordAIFallback();
+            }
+
+            /* Stage 3C: update session context for AI-answered questions */
+            _updateSessionCtx(resolvedMsg, intent, { page: page });
+
             callback({ text: reply, page: page, handled: true, fromServer: true });
           });
         })
@@ -414,12 +1189,11 @@
 
           var isTimeout = err && (err.name === 'AbortError' || err.name === 'TimeoutError');
           if (isTimeout) {
-            /* Timeout — try local fallback silently */
-            return _fallbackToLocal(message, callback);
+            return _fallbackToLocal(resolvedMsg, callback);
           }
 
           /* Network failure — try local fallback */
-          _fallbackToLocal(message, callback);
+          _fallbackToLocal(resolvedMsg, callback);
         });
       }); /* end _getIdToken */
     } /* end ask */
@@ -427,12 +1201,33 @@
 
   /* ─────────────────────────────────────────────────────────────
      FALLBACK TO LOCAL KNOWLEDGE
-     Used when the server AI endpoint is unavailable.
+     Used when Workers AI is unavailable or in AI-limit mode.
+     isLimitMode: true → graceful "local only" message instead of error.
   ───────────────────────────────────────────────────────────────*/
-  function _fallbackToLocal(message, callback) {
+  function _fallbackToLocal(message, callback, isLimitMode) {
     var result = _askLocal(message);
     if (result && result.handled) {
       callback(result);
+      return;
+    }
+    /* Low-confidence result with snippets — still return what we have */
+    if (result && result.text) {
+      callback({
+        text:       result.text,
+        page:       result.page || null,
+        handled:    false,
+        fromServer: false
+      });
+      return;
+    }
+    /* Nothing in local knowledge */
+    if (isLimitMode) {
+      callback({
+        text: "Shadow Reaper is running in local knowledge mode right now. I can answer most questions about Shadow Nexus Social features directly — try asking about Radio, Live, TV, Feed, Profile, Settings, or any specific feature.",
+        page: null,
+        handled: true,
+        fromServer: false
+      });
     } else {
       callback({
         text: "Shadow Reaper can't reach the Nexus intelligence right now. Try again in a moment.",
@@ -545,6 +1340,11 @@
     _busy = true;
     _setStatus(STATUS.THINKING);
 
+    /* Stage 4B: notify character controller — THINKING */
+    for (var _ti = 0; _ti < _thinkingListeners.length; _ti++) {
+      try { _thinkingListeners[_ti](); } catch (_) {}
+    }
+
     _addToHistory('user', text);
     _appendMessage('user', text);
     _showTyping(true);
@@ -577,6 +1377,16 @@
 
         _addToHistory('grim', replyText);
         var wrapper = _appendMessage('grim', replyText);
+
+        /* Stage 4A: optional spoken response — after text is displayed */
+        if (global.SNXShadowVoice && typeof global.SNXShadowVoice.speak === 'function') {
+          try { global.SNXShadowVoice.speak(replyText); } catch (_) {}
+        }
+
+        /* Stage 4B: notify character controller — answer received */
+        for (var _ai2 = 0; _ai2 < _answerListeners.length; _ai2++) {
+          try { _answerListeners[_ai2](); } catch (_) {}
+        }
 
         /* Navigation button */
         if (result && result.page) {
@@ -706,6 +1516,14 @@
     panel.appendChild(inputRow);
 
     _uiInjected = true;
+
+    /* Stage 4A: initialise voice module now that the input row exists */
+    if (global.SNXShadowVoice && typeof global.SNXShadowVoice.init === 'function') {
+      try {
+        global.SNXShadowVoice.init();
+        global.SNXShadowVoice.injectControls();
+      } catch (_) { /* voice errors never crash text assistant */ }
+    }
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -743,7 +1561,13 @@
 
   function _open_flag() { _open = true; }
 
-  function _close() { _open = false; }
+  function _close() {
+    _open = false;
+    /* Stage 4A: stop mic + TTS when panel closes */
+    if (global.SNXShadowVoice && typeof global.SNXShadowVoice.onPanelClose === 'function') {
+      try { global.SNXShadowVoice.onPanelClose(); } catch (_) {}
+    }
+  }
 
   /* ─────────────────────────────────────────────────────────────
      INIT  — idempotent
@@ -760,12 +1584,31 @@
   ───────────────────────────────────────────────────────────────*/
   function _destroy() {
     _abortPending();
+
+    /* Stage 4A: tear down voice module before cleaning up UI */
+    if (global.SNXShadowVoice && typeof global.SNXShadowVoice.destroy === 'function') {
+      try { global.SNXShadowVoice.destroy(); } catch (_) {}
+    }
+
     _busy = false;
     _open = false;
     _initialized = false;
     _greeted = false;
     _history = [];
     _uiInjected = false;
+    _aiLimitMode = false;  // reset AI-limit mode on account switch / explicit reset
+
+    /* Stage 3C: reset session context — never persisted anyway */
+    _sessionCtx = {
+      lastTopic:        null,
+      lastFeature:      null,
+      lastCreatorTopic: null,
+      lastIntent:       null,
+      recentIds:        [],
+      recentNavTarget:  null,
+      turnCount:        0,
+      pendingClarify:   null
+    };
 
     /* Re-show old GP elements */
     ['gp-messages','gp-typing','gp-input-row','gp-nav-chips','gp-fullpage-link','gp-status']
@@ -778,7 +1621,7 @@
     ['snx-ai-statusbar','snx-ai-conversation','snx-ai-typing','snx-ai-input-row']
       .forEach(function (id) {
         var el = document.getElementById(id);
-        if (el) el.parentNode && el.parentNode.removeChild(el);
+        if (el && el.parentNode) el.parentNode.removeChild(el);
       });
 
     console.log('[SNXShadowAI] Destroyed.');
@@ -810,10 +1653,28 @@
     getContext: _buildContext,
 
     /**
-     * Returns current Stage 1 capabilities.
+     * Returns current capabilities.
      * @returns {object}
      */
     getCapabilities: _getCapabilities,
+
+    /**
+     * Stage 3C: Returns safe session context (no user data, no history, no tokens).
+     * Useful for Founder diagnostics.
+     * @returns {object}
+     */
+    getSessionContext: function () {
+      return {
+        lastTopic:        _sessionCtx.lastTopic,
+        lastFeature:      _sessionCtx.lastFeature,
+        lastCreatorTopic: _sessionCtx.lastCreatorTopic,
+        lastIntent:       _sessionCtx.lastIntent,
+        recentIds:        _sessionCtx.recentIds.slice(),
+        recentNavTarget:  _sessionCtx.recentNavTarget,
+        turnCount:        _sessionCtx.turnCount
+        /* pendingClarify omitted — internal state only */
+      };
+    },
 
     /** Safe navigate to an approved internal destination. */
     navigateTo: navigateTo,
@@ -825,7 +1686,27 @@
     provider: SNXShadowAIProvider,
 
     /** Build identifier */
-    build: BUILD_ID
+    build: BUILD_ID,
+
+    /**
+     * Stage 4B: Register a callback for when AI starts processing (THINKING).
+     * @param {function} fn
+     */
+    onThinking: function (fn) {
+      if (typeof fn === 'function' && _thinkingListeners.indexOf(fn) === -1) {
+        _thinkingListeners.push(fn);
+      }
+    },
+
+    /**
+     * Stage 4B: Register a callback for when AI delivers an answer.
+     * @param {function} fn
+     */
+    onAnswer: function (fn) {
+      if (typeof fn === 'function' && _answerListeners.indexOf(fn) === -1) {
+        _answerListeners.push(fn);
+      }
+    }
   };
 
 })(window);

@@ -155,13 +155,19 @@
     // is handled in prefetchAfterFeed() below.
     'shadow-ai': {
       label: 'SHADOW REAPER AI',
-      css:  ['snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE2-001'],
+      css:  [
+        'snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE2-001',
+        'snx-shadow-voice.css?v=SNS-2026-SHADOW-VOICE-4A-001',
+        'snx-shadow-character.css?v=SNS-2026-SHADOW-CHARACTER-4B-001'
+      ],
       scripts: [
         'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
-        'snx-shadow-ai.js?v=SNS-2026-SHADOW-AI-STAGE2-001'
+        'snx-shadow-ai.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
+        'snx-shadow-voice.js?v=SNS-2026-SHADOW-VOICE-4A-001',
+        'snx-shadow-character.js?v=SNS-2026-SHADOW-CHARACTER-4B-001'
       ],
       esModules: [],
-      init: null   // SNXShadowAI.init() is called by toggleGrimPanel after load
+      init: null   // SNXShadowAI.init() + SNXShadowVoice.init() + SNXShadowCharacter.init() called by toggleGrimPanel after load
     }
   };
 
