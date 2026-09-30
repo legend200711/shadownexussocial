@@ -137,9 +137,260 @@ async function signLiveKitJwt(apiKey, apiSecret, payload) {
   return `${sigInput}.${sigB64}`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  SNX LIVE — self-hosted mediasoup media backend
+//  These routes replace the LiveKit endpoints below.
+//  The Cloudflare Worker acts as the secure credential/token vending layer.
+//  Actual WebRTC/RTP media runs on the self-hosted mediasoup VPS.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Shared utility: sign an HMAC-SHA256 SNX token ────────────────────────────
+// token format: base64url(payload).base64url(signature)
+// Stored Worker secret: SNX_MEDIA_SERVER_SECRET
+async function _signSnxToken(secret, payload) {
+  const enc = new TextEncoder();
+  const key  = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const payloadB64 = btoa(JSON.stringify(payload))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(payloadB64));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  return payloadB64 + '.' + sigB64;
+}
+
+// ── POST /snx-live/room ───────────────────────────────────────────────────────
+// Host pre-registers a Live room so the Worker can record the roomId→hostId
+// mapping for downstream authorization checks (remove-guest, end-live, etc.).
+// Body: { roomName }
+async function handleSnxLiveRoom(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: mergeHeaders(cors, sec) });
+  }
+  let uid;
+  try { uid = await _requireAuth(request, env); } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const { roomName } = body || {};
+  if (!roomName) {
+    return new Response(JSON.stringify({ error: 'roomName is required' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // Store roomId→hostId in Workers KV if available; otherwise no-op (room is created
+  // on first JOIN on the media server, host authorization checked there via token role).
+  if (env.SNX_LIVE_KV) {
+    try {
+      await env.SNX_LIVE_KV.put('room:' + roomName, JSON.stringify({ hostId: uid, createdAt: Date.now() }), { expirationTtl: 86400 });
+    } catch (_) {}
+  }
+
+  return new Response(JSON.stringify({ roomName, registered: true }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// ── POST /snx-live/token ──────────────────────────────────────────────────────
+// Issues a short-lived SNX session token for a participant to JOIN the media room.
+// Body: { roomName, participantName, canPublish }
+// Returns: { token, url }   — token is HMAC-signed, url is the media server WSS endpoint.
+async function handleSnxLiveToken(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: mergeHeaders(cors, sec) });
+  }
+  let verifiedUid;
+  try { verifiedUid = await _requireAuth(request, env); } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const secret = env.SNX_MEDIA_SERVER_SECRET;
+  const mediaUrl = env.SNX_MEDIA_SERVER_URL;
+  if (!secret || !mediaUrl) {
+    return new Response(JSON.stringify({ error: 'SNX media server not configured (set SNX_MEDIA_SERVER_SECRET and SNX_MEDIA_SERVER_URL)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const { roomName, participantName, canPublish = false } = body || {};
+  if (!roomName || !participantName) {
+    return new Response(JSON.stringify({ error: 'roomName and participantName are required' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // participantName must equal the verified Firebase UID (prevent spoofing)
+  if (participantName !== verifiedUid) {
+    return new Response(JSON.stringify({ error: 'participantName must match authenticated uid' }),
+      { status: 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // Determine role — host if canPublish and is registered host for this room; else guest or viewer
+  let role = 'viewer';
+  if (canPublish) {
+    // Check KV for host registration (best-effort; falls back to 'guest' for accepted guests)
+    if (env.SNX_LIVE_KV) {
+      try {
+        const roomData = await env.SNX_LIVE_KV.get('room:' + roomName, { type: 'json' });
+        role = (roomData && roomData.hostId === verifiedUid) ? 'host' : 'guest';
+      } catch { role = 'guest'; }
+    } else {
+      role = 'guest';   // no KV — caller is trusted to send canPublish=true only for accepted guests
+    }
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    uid:    verifiedUid,
+    roomId: roomName,
+    role,
+    iat:    now,
+    exp:    now + 6 * 3600,   // 6-hour validity
+  };
+
+  const token = await _signSnxToken(secret, payload);
+
+  return new Response(JSON.stringify({ token, url: mediaUrl, role }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// ── POST /snx-live/remove-guest ───────────────────────────────────────────────
+// Host removes a guest from the stage.  Proxied to the media server so the
+// server can close their transport.  Also fires a hostEnded signal for the guest.
+// Body: { roomName, guestUid }
+async function handleSnxLiveRemoveGuest(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: mergeHeaders(cors, sec) });
+  }
+  let verifiedUid;
+  try { verifiedUid = await _requireAuth(request, env); } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const { roomName, guestUid } = body || {};
+  if (!roomName || !guestUid) {
+    return new Response(JSON.stringify({ error: 'roomName and guestUid are required' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // Verify caller is the host of this room
+  if (env.SNX_LIVE_KV) {
+    try {
+      const roomData = await env.SNX_LIVE_KV.get('room:' + roomName, { type: 'json' });
+      if (!roomData || roomData.hostId !== verifiedUid) {
+        return new Response(JSON.stringify({ error: 'Forbidden: only the host can remove guests' }),
+          { status: 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+      }
+    } catch (_) {}   // if KV unavailable, pass through (media server double-checks role from token)
+  }
+
+  // The media server is notified via HOST_REMOVE_GUEST WebSocket message, which is
+  // sent from the host's own browser connection.  This Worker endpoint is the HTTP
+  // fallback path for cases where the host needs server-side verification first.
+  // For now: return OK — the snxSfu.removeGuest() call in the browser drives the actual removal.
+  return new Response(JSON.stringify({ removed: true, guestUid }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// ── GET /snx-live/turn ────────────────────────────────────────────────────────
+// Issues short-lived coturn TURN credentials using the HMAC-time-limited method.
+// The coturn config must have:  use-auth-secret=yes
+//                               static-auth-secret=<SNX_TURN_SECRET value>
+// Returns: { iceServers: [{ urls, username, credential }] }
+async function handleSnxLiveTurn(request, env, cors, sec) {
+  let uid;
+  try { uid = await _requireAuth(request, env); } catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const turnSecret = env.SNX_TURN_SECRET;
+  const turnHost   = env.COTURN_HOST || '';
+  const turnPort   = env.COTURN_PORT || '3478';
+  const turnTlsPort = env.COTURN_TLS_PORT || '5349';
+
+  if (!turnSecret || !turnHost) {
+    // Graceful degradation — return empty iceServers; STUN-only fallback applies
+    console.warn('[SNX-TURN] SNX_TURN_SECRET or COTURN_HOST not configured — returning empty TURN list');
+    return new Response(JSON.stringify({ iceServers: [] }),
+      { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json', 'Cache-Control': 'private, max-age=0' }) });
+  }
+
+  // TURN credential TTL: 24 hours (coturn default is 24 h for time-limited credentials)
+  const ttl       = 86400;
+  const timestamp = Math.floor(Date.now() / 1000) + ttl;
+  const username  = timestamp + ':' + uid;
+
+  // HMAC-SHA256(username, turnSecret) → base64
+  const enc = new TextEncoder();
+  const key  = await crypto.subtle.importKey(
+    'raw', enc.encode(turnSecret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const sigBuf    = await crypto.subtle.sign('HMAC', key, enc.encode(username));
+  const credential = btoa(String.fromCharCode(...new Uint8Array(sigBuf)));
+
+  const iceServers = [
+    {
+      urls:       'stun:' + turnHost + ':' + turnPort,
+    },
+    {
+      urls:       'turn:' + turnHost + ':' + turnPort,
+      username,
+      credential,
+    },
+    {
+      urls:       'turn:' + turnHost + ':' + turnPort + '?transport=tcp',
+      username,
+      credential,
+    },
+    {
+      urls:       'turns:' + turnHost + ':' + turnTlsPort + '?transport=tcp',
+      username,
+      credential,
+    },
+  ];
+
+  return new Response(JSON.stringify({ iceServers }),
+    {
+      status: 200,
+      headers: mergeHeaders(cors, sec, {
+        'Content-Type':  'application/json',
+        // Client can cache for (TTL - 60s) so it doesn't use credentials right before expiry
+        'Cache-Control': 'private, max-age=' + (ttl - 60),
+      }),
+    }
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DEPRECATED LiveKit routes — kept for emergency rollback ONLY.
+//  These will be removed once the self-hosted SNX media server is verified.
+//  DO NOT use these in production — they depend on LiveKit Cloud.
+// ══════════════════════════════════════════════════════════════════════════════
+
 // ── LiveKit room creator ──────────────────────────────────────────────────────
 // POST /livekit-room   body: { roomName }
 // Creates the room on the LiveKit server so participants can join it.
+// DEPRECATED — use POST /snx-live/room instead.
 async function handleLiveKitRoom(request, env, cors, sec) {
   if (request.method !== 'POST') {
     return new Response('Method not allowed', { status: 405, headers: mergeHeaders(cors, sec) });
@@ -289,8 +540,26 @@ async function handleLiveKitToken(request, env, cors, sec) {
   });
 }
 
+// ── Firebase ID token verifier ────────────────────────────────────────────────
+// Calls the Google Identity Toolkit getAccountInfo endpoint to verify a Firebase
+// ID token and extract the user's UID.  Returns the verified UID string on success,
+// throws a 401/502 error on failure.
+async function _fbVerifyToken(env, idToken) {
+  const tokenRes = await fetch(
+    `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=${env.FIREBASE_WEB_API_KEY}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }) }
+  ).catch(() => null);
+  if (!tokenRes) throw Object.assign(new Error('Token verification service unreachable'), { status: 502 });
+  const tokenData = await tokenRes.json().catch(() => ({}));
+  if (!tokenRes.ok || !tokenData.users?.[0]?.localId) {
+    const msg = tokenData?.error?.message || 'Invalid or expired token';
+    throw Object.assign(new Error('Unauthorized: ' + msg), { status: 401 });
+  }
+  return tokenData.users[0].localId;
+}
+
 // ── Auth helper: extract + verify Bearer token from Authorization header ──────
-// Returns { uid } on success, throws on failure.
+// Returns uid (string) on success, throws on failure.
 // Endpoints that need authentication call this before processing.
 async function _requireAuth(request, env) {
   const authHeader = request.headers.get('Authorization') || '';
@@ -1460,6 +1729,446 @@ async function handleTurnCredentials(request, env, cors, sec) {
 }
 
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  BROADCAST DESTINATION MANAGER
+//  Stores RTMP/RTMPS destinations (server URL + stream key) on behalf of the
+//  Founder.  Stream keys are NEVER logged and NEVER returned to the client —
+//  only a masked preview (last 4 chars) is sent back.
+//
+//  Storage: Firestore /broadcastDestinations/{destId}
+//    Fields: name, serverUrl, streamKey (encrypted at rest by Firestore), enabled,
+//            createdAt, updatedAt
+//
+//  Rules: isFounderEmail() write-only — enforced in firestore.rules.
+//  These Worker routes are an additional layer: they verify the Firebase ID token
+//  server-side before forwarding any write to Firestore REST.
+//
+//  Routes:
+//    GET    /broadcast/destinations         — list destinations (keys masked)
+//    POST   /broadcast/destinations         — create destination
+//    PATCH  /broadcast/destinations/:id     — update destination
+//    DELETE /broadcast/destinations/:id     — delete destination
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Firestore project ID — used to build REST URLs
+const FIRESTORE_PROJECT_ID = 'shadownexussocial';
+const BROADCAST_COLLECTION = 'broadcastDestinations';
+
+// Mask a stream key — show only last 4 characters, rest as ****
+function _maskKey(key) {
+  if (!key || key.length <= 4) return '****';
+  return '*'.repeat(Math.min(key.length - 4, 20)) + key.slice(-4);
+}
+
+// Build Firestore REST base URL
+function _fsUrl(projectId) {
+  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+}
+
+// Convert a Firestore REST document object → plain JS object
+function _fsDocToObj(doc) {
+  if (!doc || !doc.fields) return null;
+  const obj = { _id: (doc.name || '').split('/').pop() };
+  for (const [k, v] of Object.entries(doc.fields)) {
+    if (v.stringValue  !== undefined) obj[k] = v.stringValue;
+    else if (v.booleanValue !== undefined) obj[k] = v.booleanValue;
+    else if (v.integerValue !== undefined) obj[k] = Number(v.integerValue);
+    else if (v.timestampValue !== undefined) obj[k] = v.timestampValue;
+    else obj[k] = null;
+  }
+  return obj;
+}
+
+// Convert a plain JS object → Firestore REST fields map
+function _objToFsFields(obj) {
+  const fields = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string')  fields[k] = { stringValue: v };
+    else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
+    else if (typeof v === 'number')  fields[k] = { integerValue: String(v) };
+  }
+  return fields;
+}
+
+// ── Verify caller is the Founder via Firebase ID token ───────────────────────
+// Returns the verified UID. Throws if not authenticated or not the Founder.
+async function _requireFounder(request, env) {
+  const uid = await _requireAuth(request, env);
+  // Fetch the user's record from Firestore to confirm founder role
+  // (same check as isFounder() rule, but server-side in the Worker)
+  const userUrl = `${_fsUrl(FIRESTORE_PROJECT_ID)}/users/${uid}`;
+  const authHeader = request.headers.get('Authorization') || '';
+  const userRes = await fetch(userUrl, {
+    headers: { 'Authorization': authHeader }
+  }).catch(() => null);
+  if (!userRes || !userRes.ok) {
+    // If we can't read the user doc, fall back to UID allow-list
+    // (Firestore rule isFounderEmail checks token email — we trust the token)
+    // We still proceed: the Firestore security rules are the final gate.
+    return uid;
+  }
+  const userData = await userRes.json().catch(() => ({}));
+  const role = userData?.fields?.role?.stringValue || '';
+  if (role !== 'founder') {
+    throw Object.assign(new Error('Forbidden: Founder access required'), { status: 403 });
+  }
+  return uid;
+}
+
+// GET /broadcast/destinations
+async function handleBroadcastList(request, env, cors, sec) {
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const authHeader = request.headers.get('Authorization') || '';
+  const listUrl = `${_fsUrl(FIRESTORE_PROJECT_ID)}/${BROADCAST_COLLECTION}`;
+  let fsRes;
+  try { fsRes = await fetch(listUrl, { headers: { 'Authorization': authHeader } }); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: 'Firestore unreachable' }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const fsData = await fsRes.json().catch(() => ({}));
+  const docs = (fsData.documents || []).map(doc => {
+    const obj = _fsDocToObj(doc);
+    if (!obj) return null;
+    // NEVER return the full stream key — only a masked preview
+    if (obj.streamKey) {
+      obj.streamKeyMasked = _maskKey(obj.streamKey);
+      delete obj.streamKey;
+    }
+    return obj;
+  }).filter(Boolean);
+
+  return new Response(JSON.stringify({ destinations: docs }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// POST /broadcast/destinations  body: { name, serverUrl, streamKey, enabled }
+async function handleBroadcastCreate(request, env, cors, sec) {
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const { name, serverUrl, streamKey, enabled = true } = body || {};
+  if (!name || !serverUrl || !streamKey) {
+    return new Response(JSON.stringify({ error: 'name, serverUrl, and streamKey are required' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+  // Validate serverUrl starts with rtmp:// or rtmps://
+  if (!/^rtmps?:\/\//i.test(serverUrl)) {
+    return new Response(JSON.stringify({ error: 'serverUrl must start with rtmp:// or rtmps://' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const now = new Date().toISOString();
+  const docFields = _objToFsFields({ name, serverUrl, streamKey, enabled, createdAt: now, updatedAt: now, createdBy: uid });
+
+  const authHeader = request.headers.get('Authorization') || '';
+  const createUrl = `${_fsUrl(FIRESTORE_PROJECT_ID)}/${BROADCAST_COLLECTION}`;
+  let fsRes;
+  try {
+    fsRes = await fetch(createUrl, {
+      method: 'POST',
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: docFields })
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Firestore write failed: ' + e.message }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  if (!fsRes.ok) {
+    const errData = await fsRes.json().catch(() => ({}));
+    const msg = errData?.error?.message || `Firestore error ${fsRes.status}`;
+    return new Response(JSON.stringify({ error: msg }),
+      { status: fsRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const created = await fsRes.json().catch(() => ({}));
+  const obj = _fsDocToObj(created);
+  if (obj && obj.streamKey) {
+    obj.streamKeyMasked = _maskKey(obj.streamKey);
+    delete obj.streamKey;
+  }
+
+  // Log only name + masked key — never the full key
+  console.log(`[broadcast/create] uid=${uid} name=${name} key=${_maskKey(streamKey)}`);
+
+  return new Response(JSON.stringify({ destination: obj }),
+    { status: 201, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// PATCH /broadcast/destinations/:id  body: { name?, serverUrl?, streamKey?, enabled? }
+async function handleBroadcastUpdate(request, env, cors, sec, destId) {
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  let body;
+  try { body = await request.json(); } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const allowed = ['name', 'serverUrl', 'streamKey', 'enabled'];
+  const update = { updatedAt: new Date().toISOString() };
+  for (const k of allowed) {
+    if (body[k] !== undefined) update[k] = body[k];
+  }
+
+  if (update.serverUrl && !/^rtmps?:\/\//i.test(update.serverUrl)) {
+    return new Response(JSON.stringify({ error: 'serverUrl must start with rtmp:// or rtmps://' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const docFields = _objToFsFields(update);
+  // Build updateMask so only provided fields are touched
+  const updateMask = Object.keys(update).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+
+  const authHeader = request.headers.get('Authorization') || '';
+  const patchUrl = `${_fsUrl(FIRESTORE_PROJECT_ID)}/${BROADCAST_COLLECTION}/${destId}?${updateMask}`;
+  let fsRes;
+  try {
+    fsRes = await fetch(patchUrl, {
+      method: 'PATCH',
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: docFields })
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Firestore write failed: ' + e.message }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  if (!fsRes.ok) {
+    const errData = await fsRes.json().catch(() => ({}));
+    const msg = errData?.error?.message || `Firestore error ${fsRes.status}`;
+    return new Response(JSON.stringify({ error: msg }),
+      { status: fsRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const updated = await fsRes.json().catch(() => ({}));
+  const obj = _fsDocToObj(updated);
+  if (obj && obj.streamKey) {
+    obj.streamKeyMasked = _maskKey(obj.streamKey);
+    delete obj.streamKey;
+  }
+
+  if (body.streamKey) console.log(`[broadcast/update] uid=${uid} id=${destId} key=**** (updated)`);
+  else console.log(`[broadcast/update] uid=${uid} id=${destId}`);
+
+  return new Response(JSON.stringify({ destination: obj }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// DELETE /broadcast/destinations/:id
+async function handleBroadcastDelete(request, env, cors, sec, destId) {
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const authHeader = request.headers.get('Authorization') || '';
+  const delUrl = `${_fsUrl(FIRESTORE_PROJECT_ID)}/${BROADCAST_COLLECTION}/${destId}`;
+  let fsRes;
+  try {
+    fsRes = await fetch(delUrl, {
+      method: 'DELETE',
+      headers: { 'Authorization': authHeader }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Firestore delete failed: ' + e.message }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  if (!fsRes.ok && fsRes.status !== 404) {
+    const errData = await fsRes.json().catch(() => ({}));
+    const msg = errData?.error?.message || `Firestore error ${fsRes.status}`;
+    return new Response(JSON.stringify({ error: msg }),
+      { status: fsRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  console.log(`[broadcast/delete] uid=${uid} id=${destId}`);
+  return new Response(JSON.stringify({ deleted: true, id: destId }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  BROADCAST CONTROL PLANE — proxies to the server-side broadcast engine
+//
+//  The browser cannot reach the broadcast service directly (it listens on
+//  127.0.0.1 only).  This Worker acts as the secure gateway:
+//    1. Verifies the Firebase ID token (Founder only)
+//    2. Signs a short-lived SNX founder token using SNX_MEDIA_SERVER_SECRET
+//    3. Forwards the request to the broadcast service at SNX_BROADCAST_SERVICE_URL
+//
+//  Routes:
+//    POST /broadcast/start   — start the broadcast
+//    POST /broadcast/stop    — stop the broadcast
+//    GET  /broadcast/status  — full engine status (no secrets)
+//
+//  Required Worker secrets / vars:
+//    SNX_MEDIA_SERVER_SECRET   — shared secret for SNX token signing
+//    SNX_BROADCAST_SERVICE_URL — e.g. http://127.0.0.1:3100  (only reachable on VPS)
+//
+//  NEVER forward stream keys, RTMP URLs, or Firebase credentials.
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function handleBroadcastStart(request, env, cors, sec) {
+  // 1. Verify Founder
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const broadcastUrl = env.SNX_BROADCAST_SERVICE_URL;
+  if (!broadcastUrl) {
+    return new Response(JSON.stringify({ error: 'Broadcast service not configured (set SNX_BROADCAST_SERVICE_URL)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+  const secret = env.SNX_MEDIA_SERVER_SECRET;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'Broadcast auth not configured (set SNX_MEDIA_SERVER_SECRET)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // 2. Sign a short-lived SNX founder token
+  const now = Math.floor(Date.now() / 1000);
+  const snxToken = await _signSnxToken(secret, {
+    uid, role: 'founder', roomId: 'broadcast', iat: now, exp: now + 300
+  });
+
+  // 3. Read body (forceRefreshDestinations flag)
+  let body = {};
+  try { body = await request.json(); } catch (_) {}
+
+  // 4. Forward to broadcast service
+  let svcRes;
+  try {
+    svcRes = await fetch(`${broadcastUrl}/broadcast/start`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${snxToken}`, 'Content-Type': 'application/json' },
+      body:    JSON.stringify(body),
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Broadcast service unreachable: ' + e.message }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const data = await svcRes.json().catch(() => ({}));
+  console.log(`[broadcast/start] uid=${uid} status=${svcRes.status}`);
+  return new Response(JSON.stringify(data),
+    { status: svcRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+async function handleBroadcastStop(request, env, cors, sec) {
+  // 1. Verify Founder
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const broadcastUrl = env.SNX_BROADCAST_SERVICE_URL;
+  if (!broadcastUrl) {
+    return new Response(JSON.stringify({ error: 'Broadcast service not configured (set SNX_BROADCAST_SERVICE_URL)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+  const secret = env.SNX_MEDIA_SERVER_SECRET;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'Broadcast auth not configured (set SNX_MEDIA_SERVER_SECRET)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const snxToken = await _signSnxToken(secret, {
+    uid, role: 'founder', roomId: 'broadcast', iat: now, exp: now + 300
+  });
+
+  let svcRes;
+  try {
+    svcRes = await fetch(`${broadcastUrl}/broadcast/stop`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${snxToken}`, 'Content-Type': 'application/json' },
+      body:    '{}',
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Broadcast service unreachable: ' + e.message }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const data = await svcRes.json().catch(() => ({}));
+  console.log(`[broadcast/stop] uid=${uid} status=${svcRes.status}`);
+  return new Response(JSON.stringify(data),
+    { status: svcRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
+async function handleBroadcastStatus(request, env, cors, sec) {
+  // 1. Verify Founder
+  let uid;
+  try { uid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }),
+      { status: e.status || 401, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const broadcastUrl = env.SNX_BROADCAST_SERVICE_URL;
+  if (!broadcastUrl) {
+    return new Response(JSON.stringify({ error: 'Broadcast service not configured (set SNX_BROADCAST_SERVICE_URL)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+  const secret = env.SNX_MEDIA_SERVER_SECRET;
+  if (!secret) {
+    return new Response(JSON.stringify({ error: 'Broadcast auth not configured (set SNX_MEDIA_SERVER_SECRET)' }),
+      { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const snxToken = await _signSnxToken(secret, {
+    uid, role: 'founder', roomId: 'broadcast', iat: now, exp: now + 300
+  });
+
+  let svcRes;
+  try {
+    svcRes = await fetch(`${broadcastUrl}/broadcast/status`, {
+      method:  'GET',
+      headers: { 'Authorization': `Bearer ${snxToken}` },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Broadcast service unreachable: ' + e.message }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const data = await svcRes.json().catch(() => ({}));
+  // Safety: ensure no stream keys leak through the status response
+  // (the broadcast service is supposed to guarantee this, but we double-check)
+  const safeJson = JSON.stringify(data).replace(/"streamKey"\s*:\s*"[^"]*"/g, '"streamKey":"[redacted]"');
+  return new Response(safeJson,
+    { status: svcRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url    = new URL(request.url);
@@ -1476,9 +2185,32 @@ export default {
     if (url.pathname === '/admin/delete-user' && request.method === 'POST') return handleAdminDeleteUser(request, env, cors, sec);
 
 
-    // ── LiveKit endpoints ──
-    if (url.pathname === '/livekit-room')  return handleLiveKitRoom(request, env, cors, sec);
-    if (url.pathname === '/livekit-token') return handleLiveKitToken(request, env, cors, sec);
+    // ── Broadcast Destination Manager (Founder only) ──
+    if (url.pathname === '/broadcast/destinations') {
+      if (request.method === 'GET')  return handleBroadcastList(request, env, cors, sec);
+      if (request.method === 'POST') return handleBroadcastCreate(request, env, cors, sec);
+    }
+    const bdMatch = url.pathname.match(/^\/broadcast\/destinations\/([^/]+)$/);
+    if (bdMatch) {
+      const destId = bdMatch[1];
+      if (request.method === 'PATCH')  return handleBroadcastUpdate(request, env, cors, sec, destId);
+      if (request.method === 'DELETE') return handleBroadcastDelete(request, env, cors, sec, destId);
+    }
+
+    // ── Broadcast Control Plane (Founder only — proxies to snx-broadcast service) ──
+    if (url.pathname === '/broadcast/start'  && request.method === 'POST') return handleBroadcastStart(request, env, cors, sec);
+    if (url.pathname === '/broadcast/stop'   && request.method === 'POST') return handleBroadcastStop(request, env, cors, sec);
+    if (url.pathname === '/broadcast/status' && request.method === 'GET')  return handleBroadcastStatus(request, env, cors, sec);
+
+    // ── SNX Live endpoints (production — self-hosted mediasoup) ──
+    if (url.pathname === '/snx-live/room')         return handleSnxLiveRoom(request, env, cors, sec);
+    if (url.pathname === '/snx-live/token')        return handleSnxLiveToken(request, env, cors, sec);
+    if (url.pathname === '/snx-live/remove-guest') return handleSnxLiveRemoveGuest(request, env, cors, sec);
+    if (url.pathname === '/snx-live/turn')         return handleSnxLiveTurn(request, env, cors, sec);
+
+    // ── LiveKit endpoints (DEPRECATED — emergency rollback only) ──
+    if (url.pathname === '/livekit-room')     return handleLiveKitRoom(request, env, cors, sec);
+    if (url.pathname === '/livekit-token')    return handleLiveKitToken(request, env, cors, sec);
     if (url.pathname === '/turn-credentials') return handleTurnCredentials(request, env, cors, sec);
 
     // ── Chunked / resumable upload endpoints ──

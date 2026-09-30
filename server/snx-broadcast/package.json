@@ -1,0 +1,24 @@
+{
+  "name": "snx-broadcast",
+  "version": "4.1.0",
+  "description": "Shadow Nexus Broadcast Engine — Stage 4B: Manual RTMP Multi-Destination",
+  "main": "src/server.js",
+  "scripts": {
+    "start":   "node src/server.js",
+    "dev":     "node --watch src/server.js",
+    "test":    "node src/test-runner.js",
+    "dry-run": "node src/test-runner.js --dry-run"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv":         "^16.4.5",
+    "express":        "^4.19.2",
+    "firebase-admin": "^12.0.0",
+    "node-fetch":     "^3.3.2"
+  },
+  "devDependencies": {},
+  "license": "UNLICENSED",
+  "private": true
+}

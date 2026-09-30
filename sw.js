@@ -13,8 +13,8 @@
  * Build: SNS-2026-GUEST-MODE-001
  */
 
-const CACHE_VERSION = 'v89';
-const BUILD_ID      = 'SNS-2026-LIVE-008';
+const CACHE_VERSION = 'v91';
+const BUILD_ID      = 'SNS-2026-RADIO-PAGE-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -90,6 +90,12 @@ const TV_NETWORK_FIRST_FILES = [
   // SNS Live engine files — always network-first so fixes are never stale
   'live.js',
   'live.css',
+  // Radio engine files — network-first so listeners always get the latest version
+  'snx-radio.js',
+  'snx-radio-player.js',
+  'snx-radio-studio.js',
+  'snx-radio.css',
+  'snx-audio-coordinator.js',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

@@ -1,0 +1,21 @@
+{
+  "name": "snx-broadcast-worker",
+  "version": "4.4.0",
+  "description": "Shadow Nexus Broadcast Worker — Stage 4D: Cloudflare Container deployment",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "wrangler": "^4.144.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

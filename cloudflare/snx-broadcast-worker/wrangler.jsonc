@@ -1,0 +1,70 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "snx-broadcast-worker",
+  "main": "broadcast-worker.js",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Container definition
+  //
+  // instance_type: standard-2 selected for continuous H.264 encoding workload.
+  //
+  // Why standard-2 (1 vCPU / 6 GiB / 12 GB disk)?
+  //   – standard-1 (0.5 vCPU) is insufficient for real-time 1280×720/30fps
+  //     libx264 "veryfast" encoding.  ffmpeg will lag and drop frames.
+  //   – standard-2 (1 full vCPU) provides reliable headroom for continuous
+  //     encoding + Node.js + Firebase Admin overhead.
+  //   – standard-3 (2 vCPU) is the safe upgrade path if Node+FFmpeg together
+  //     consistently exceed 80% CPU during encode.
+  //
+  // max_instances: 1 — this is a singleton broadcast encoder.  One instance
+  //   receives all RTMP traffic via the tee muxer.
+  // ─────────────────────────────────────────────────────────────────────────
+  "containers": [
+    {
+      "class_name": "BroadcastContainer",
+      "image": "../../server/snx-broadcast/Dockerfile",
+      "instance_type": "standard-2",
+      "max_instances": 1
+    }
+  ],
+
+  // Durable Object binding
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BROADCAST_CONTAINER",
+        "class_name": "BroadcastContainer"
+      }
+    ]
+  },
+
+  // DO class export with SQLite storage
+  "exports": {
+    "BroadcastContainer": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+
+  // ── Secrets ─────────────────────────────────────────────────────────────
+  // These are NOT declared here — they are set via:
+  //   npx wrangler secret put SNX_TOKEN_SECRET              --name snx-broadcast-worker
+  //   npx wrangler secret put FIREBASE_SERVICE_ACCOUNT_JSON --name snx-broadcast-worker
+  //
+  // They are then injected into the container via BroadcastContainer.envVars.
+  // NEVER put secret values in this file.
+  // ─────────────────────────────────────────────────────────────────────────
+  "secrets": {
+    "required": [
+      "SNX_TOKEN_SECRET",
+      "FIREBASE_SERVICE_ACCOUNT_JSON"
+    ]
+  },
+
+  // ── Observability ────────────────────────────────────────────────────────
+  "observability": {
+    "enabled": true
+  }
+}

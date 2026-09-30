@@ -1,6 +1,7 @@
 # Source archives (not deployed)
 *.zip
 _extract/
+_aurenix_ref/
 
 # OS
 .DS_Store
@@ -9,4 +10,38 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
-_aurenix_ref/
+
+# Backup snapshots (not committed)
+.stage6-backup/
+
+# Node modules (all sub-projects)
+node_modules/
+cloudflare/snx-broadcast-worker/node_modules/
+server/snx-broadcast/node_modules/
+server/snx-live/node_modules/
+
+# Wrangler / Cloudflare tooling caches (may contain account IDs / tokens)
+.wrangler/
+**/.wrangler/
+**/node_modules/.cache/wrangler/
+
+# ── snx-broadcast VPS secrets — NEVER commit ─────────────────────────────────
+server/snx-broadcast/.env
+server/snx-broadcast/.env.local
+server/snx-broadcast/.env.production
+server/snx-broadcast/secrets/*.json
+server/snx-broadcast/secrets/*.p12
+server/snx-broadcast/secrets/*.pem
+server/snx-broadcast/broadcast-state.json
+
+# ── snx-live mediasoup server secrets — NEVER commit ─────────────────────────
+server/snx-live/.env
+server/snx-live/.env.local
+server/snx-live/.env.production
+
+# Generic secret file patterns
+*.pem
+*.key
+*-service-account*.json
+firebase-service-account*.json
+credentials*.json

@@ -12,6 +12,8 @@ rules_version = '2';
 //   /posts/{postId}             — feed posts (comments + likes stored inside doc)
 //   /chats/{chatId}             — DM conversations (legacy — kept for existing data)
 //   /siteSettings/{doc}         — site config (maintenance mode, feature flags)
+//   /radioTracks/{trackId}      — radio-specific tracks (Founder write, listener read)
+//   /radioPlaylists/{playlistId}— radio playlists (Founder write, listener read)
 //   /aiModerationLog/{docId}    — AI moderation events
 //   /reports/{docId}            — user reports
 //   /auditLog/{docId}           — admin audit trail
@@ -832,6 +834,82 @@ service cloud.firestore {
           allow write: if isFounderEmail();
         }
       }
+    }
+
+    // ── Radio Tracks ──────────────────────────────────────────────────────────
+    //
+    //   /radioTracks/{trackId}
+    //     title, artist, audioUrl, artworkUrl, duration, enabled, createdAt, ...
+    //
+    // READ:  public — track metadata is required for deterministic playback on
+    //        all listener devices including guests.  Station state is already
+    //        public via siteSettings; track data contains no private information
+    //        (titles, artists, public CDN URLs only).
+    // WRITE: Founder only — enforced via isFounderEmail() (token-based claim).
+
+    match /radioTracks/{trackId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Playlists ───────────────────────────────────────────────────────
+    //
+    //   /radioPlaylists/{playlistId}
+    //     name, trackIds[], enabled, createdAt, updatedAt
+    //
+    // READ:  public — playlist structure (names + track ID arrays) contains no
+    //        private data and must be readable to resolve the active programme.
+    // WRITE: Founder only — via isFounderEmail().
+
+    match /radioPlaylists/{playlistId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Programs (Stage 3) ──────────────────────────────────────────────
+    //
+    //   /radioPrograms/{programId}
+    //     name, artwork, playlistId, enabled, createdAt, updatedAt
+    //
+    // READ:  public — programme names and artwork are shown to all listeners
+    //        including guests in the Now Playing bar.
+    // WRITE: Founder only — via isFounderEmail().
+
+    match /radioPrograms/{programId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Schedule (Stage 3) ──────────────────────────────────────────────
+    //
+    //   /radioSchedule/{slotId}
+    //     hour, minute, programId, label, enabled, order, createdAt, updatedAt
+    //
+    // READ:  public — schedule slots contain only times and programme references;
+    //        no private data.  Guests need this to see the upcoming schedule.
+    // WRITE: Founder only — via isFounderEmail().
+
+    match /radioSchedule/{slotId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Broadcast Destinations (Stage 4A) ─────────────────────────────────────
+    //
+    //   /broadcastDestinations/{destId}
+    //     name, serverUrl, streamKey, enabled, createdAt, updatedAt, createdBy
+    //
+    // STREAM KEYS ARE SECRET.
+    //   READ:  Founder only — stream keys must never be visible to normal users.
+    //          Never allow public reads.  isFounderEmail() is token-based and
+    //          cannot be spoofed regardless of any Firestore role-field write order.
+    //   WRITE: Founder only — via isFounderEmail().
+    //
+    // The Broadcast Engine reads this collection server-side (via the Cloudflare
+    // Worker) only when streaming is active and never exposes keys to clients.
+
+    match /broadcastDestinations/{destId} {
+      allow read, create, update, delete: if isFounderEmail();
     }
 
     // ── Profile Playlists ─────────────────────────────────────────────────────

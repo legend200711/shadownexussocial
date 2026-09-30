@@ -1,0 +1,25 @@
+# Shadow Nexus Broadcast Engine — .gitignore
+
+# Environment variables (contain secrets)
+.env
+.env.local
+.env.production
+
+# Firebase / Google service account credentials
+secrets/*.json
+secrets/*.p12
+secrets/*.pem
+
+# Node modules
+node_modules/
+
+# Broadcast runtime state (transient — not secrets, but not needed in repo)
+broadcast-state.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db

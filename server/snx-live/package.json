@@ -1,0 +1,22 @@
+{
+  "name": "snx-live-server",
+  "version": "1.0.0",
+  "description": "Shadow Nexus Live — self-hosted mediasoup media server",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev":   "node --watch src/server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "mediasoup": "^3.14.0",
+    "ws": "^8.17.1",
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {},
+  "license": "UNLICENSED",
+  "private": true
+}

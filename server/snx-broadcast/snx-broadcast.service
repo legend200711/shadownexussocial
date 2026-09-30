@@ -1,0 +1,54 @@
+[Unit]
+Description=Shadow Nexus Broadcast Engine (Stage 4C)
+Documentation=https://github.com/shadow-nexus/snx-broadcast
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+# Run as a dedicated user (create with: useradd -r -s /bin/false snx-broadcast)
+User=snx-broadcast
+Group=snx-broadcast
+
+# Working directory — must contain .env and secrets/
+WorkingDirectory=/opt/snx-broadcast
+
+# Environment
+# Do NOT put secrets here — use .env in WorkingDirectory
+EnvironmentFile=/opt/snx-broadcast/.env
+
+# Start command
+ExecStart=/usr/bin/node /opt/snx-broadcast/src/server.js
+
+# Graceful shutdown — SIGTERM triggers broadcast stop then process exit
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# Auto-restart behaviour:
+#   - Restart if the process exits for any reason (crash, OOM, etc.)
+#   - Do NOT restart if manually stopped with `systemctl stop`
+Restart=on-failure
+RestartSec=5s
+
+# Bounded restarts — give up after 5 failures within 60 seconds
+# (prevents runaway loop on permanent misconfiguration)
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# IMPORTANT: The encoder does NOT automatically start broadcasting on VPS reboot.
+# The systemd service starts snx-broadcast (the control API + source listener).
+# To resume a broadcast after reboot, POST /broadcast/start from the Broadcast Studio.
+# This is intentional — never silently start pushing an RTMP stream without Founder action.
+
+# Security hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/opt/snx-broadcast
+
+# Standard I/O
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=snx-broadcast
+
+[Install]
+WantedBy=multi-user.target

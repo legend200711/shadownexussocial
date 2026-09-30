@@ -136,19 +136,25 @@ function _buildIceConfig() {
 const _ICE_CONFIG = { iceServers: _STUN_SERVERS };  // kept for backward compat; peers call _buildIceConfig()
 
 /**
- * Fetch short-lived TURN credentials from the worker and store them in
- * window.__snxTurnConfig.  Called once at the start of each Live session
- * (host) and once when a viewer is accepted as a guest.
+ * Fetch short-lived TURN credentials from the Shadow Nexus Cloudflare Worker
+ * and store them in window.__snxTurnConfig.
+ *
+ * Endpoint: GET /snx-live/turn
+ * Authentication: Firebase ID token (Bearer)
+ * Returns:  { iceServers: [...] }  — coturn HMAC-time-limited credentials.
  *
  * Silently falls back to STUN-only if the request fails — the session
  * still works on same-network; cross-NAT may fail without TURN.
+ *
+ * NOTE: This replaced the old /turn-credentials endpoint which sourced
+ * TURN credentials from LiveKit Cloud's infrastructure.  Self-hosted
+ * coturn is now the only TURN provider.
  */
 async function _fetchTurnConfig() {
   try {
     const user = _user();
     if (!user) return;
 
-    // Get the Firebase ID token to authenticate the worker request
     let idToken = null;
     try {
       const auth = window._snxAuth;
@@ -162,7 +168,7 @@ async function _fetchTurnConfig() {
       return;
     }
 
-    const resp = await fetch(_WORKER_BASE + '/turn-credentials', {
+    const resp = await fetch(_WORKER_BASE + '/snx-live/turn', {
       method:  'GET',
       headers: { 'Authorization': 'Bearer ' + idToken },
     });
@@ -179,14 +185,9 @@ async function _fetchTurnConfig() {
       return;
     }
 
-    // Filter to TURN entries only (STUN entries from LiveKit are redundant with ours)
-    const turnOnly = servers.filter(s => {
-      const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-      return urls.some(u => typeof u === 'string' && u.startsWith('turn:'));
-    });
-
-    window.__snxTurnConfig = turnOnly.length ? turnOnly : servers;
-    _log('TURN: configured — ' + (window.__snxTurnConfig.length) + ' TURN server(s) from LiveKit');
+    // Accept all entries (STUN + TURN) from our own coturn server
+    window.__snxTurnConfig = servers;
+    _log('TURN: configured — ' + servers.length + ' ICE server(s) from self-hosted coturn');
   } catch (e) {
     _log('TURN: fetch failed (' + e.message + ') — STUN-only fallback');
   }
@@ -318,6 +319,8 @@ const _S = {
   viewConnTimeout: null,  // 30-second connection watchdog
   viewReqUnsub:  null,    // Firestore boxRequest status listener unsub (viewer side)
   viewSfuToken:  null,    // LiveKit JWT when viewer is connected via SFU
+  /* guest stage */
+  _guestStageOpen: false, // true while guest is active in the multi-box stage
   /* hub */
   hubRef:        null,
   hubCb:         null,
@@ -329,7 +332,14 @@ const _S = {
    All calls are no-ops if snxSfu is not loaded (P2P fallback).
 ════════════════════════════════════════════════════════════ */
 
-/** True when snx-sfu.js has been loaded and LiveKit is configured. */
+/**
+ * True when snx-sfu.js has been loaded and the SNX media server provider is ready.
+ * When false, live.js falls back to the P2P mesh — which has known limitations:
+ *   - guests CANNOT see other guests
+ *   - viewers CANNOT see guests
+ *   - host creates one RTCPeerConnection per viewer (does not scale)
+ * Never claim multi-guest distribution is working when SFU is unavailable.
+ */
 function _sfuAvailable() {
   return typeof window.snxSfu === 'object' && window.snxSfu !== null;
 }
@@ -397,9 +407,60 @@ function _buildHostSfuCallbacks(hostUid) {
 
 /**
  * Build the SFU callback object for the viewer screen.
- * Drives the solo video element (no box grid on pure-viewer screens).
+ *
+ * This handles MULTIPLE publishers (host + guests).  The first publisher's
+ * stream is attached to the solo viewer video (which hides the loader and
+ * starts playback).  When additional publishers join (guests), we add them
+ * into the box grid via snxBoxManager so the viewer sees HOST + GUEST(s).
+ *
+ * Layout transitions:
+ *   1 publisher  → solo video element (snxLiveViewerVideo)
+ *   2+ publishers → box grid (host box + guest box(es)) via snxBoxManager
+ *
+ * The viewer never publishes camera/mic.
  */
 function _buildViewerSfuCallbacks(roomId) {
+  // Track the first UID whose stream was attached to the solo video.
+  // When a second participant arrives we must switch to box-grid mode.
+  let _soloUid = null;
+
+  function _attachSoloVideo(stream) {
+    const video = _el('snxLiveViewerVideo');
+    if (!video) return;
+    video.srcObject = stream;
+    const p = video.play();
+    if (p) {
+      p.then(() => {
+        _clearViewerTimeout();
+        _setViewerStatus('playing');
+      }).catch(() => _setViewerStatus('tap-to-play'));
+    }
+  }
+
+  function _ensureViewerBoxGrid(hostUid, hostStream) {
+    // Lazily build the box grid on the viewer stage when guests appear.
+    // Only call this once — guard with _boxState.
+    if (_boxState.has('_host_')) return;  // already built
+
+    // Hide solo video; box grid will cover it
+    const viewerVid = _el('snxLiveViewerVideo');
+    if (viewerVid) viewerVid.style.display = 'none';
+
+    // Build host box using the stream we already have
+    _ensureBoxGrid();
+    const hostBox = _buildBox('_host_', 'HOST', 'host');
+    const grid = document.querySelector('.snx-live-boxes');
+    if (grid) grid.appendChild(hostBox.el);
+    _boxState.set('_host_', hostBox);
+    if (hostStream) {
+      hostBox.videoEl.srcObject = hostStream;
+      hostBox.videoEl.muted = false;
+      hostBox.videoEl.play().catch(() => {});
+      _setBxState('_host_', 'ready');
+    }
+    _recalcLayout();
+  }
+
   return {
     onConnected(uid) {
       _log('[SFU] viewer connected: ' + uid);
@@ -413,31 +474,101 @@ function _buildViewerSfuCallbacks(roomId) {
       _log('[SFU] viewer connection state: ' + state);
       if (state === 'reconnecting') _setViewerStatus('connecting');
       if (state === 'connected')    _setViewerStatus('connected');
+      if (state === 'removed')      _setViewerStatus('ended');
+      if (state === 'ended')        _setViewerStatus('ended');
     },
     onParticipantJoined(uid, name) {
       _log('[SFU] viewer sees participant: ' + uid);
+      // If we are already in box-grid mode (2+ participants), add a guest box.
+      if (_boxState.size > 0 && uid !== _soloUid) {
+        window.snxBoxManager.addGuest(uid, name || uid, '');
+      }
     },
     onParticipantLeft(uid) {
       _log('[SFU] viewer: participant left: ' + uid);
-    },
-    onTrackSubscribed(uid, stream) {
-      // First track from the host — attach to the viewer video element.
-      _log('[SFU] viewer track subscribed from: ' + uid);
-      const video = _el('snxLiveViewerVideo');
-      if (video && !video.srcObject) {
-        video.srcObject = stream;
-        const p = video.play();
-        if (p) {
-          p.then(() => {
-            _clearViewerTimeout();
-            _setViewerStatus('playing');
-          }).catch(() => _setViewerStatus('tap-to-play'));
+      if (uid === _soloUid) {
+        // Host left — clear solo video
+        const video = _el('snxLiveViewerVideo');
+        if (video) { video.srcObject = null; video.style.display = ''; }
+        _soloUid = null;
+        _setViewerStatus('ended');
+      } else if (_boxState.has(uid)) {
+        window.snxBoxManager.removeGuest(uid);
+        // If only the host box remains, collapse back to solo video
+        if (_boxState.size === 1 && _boxState.has('_host_')) {
+          const hostBox = _boxState.get('_host_');
+          const hostStream = hostBox ? hostBox.videoEl.srcObject : null;
+          // Remove the box grid and go back to solo video
+          _boxState.forEach(b => { if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el); });
+          _boxState.clear();
+          const viewerVid = _el('snxLiveViewerVideo');
+          if (viewerVid && hostStream) {
+            viewerVid.srcObject = hostStream;
+            viewerVid.style.display = '';
+            viewerVid.play().catch(() => {});
+          }
+          const stage = _getStage();
+          if (stage) { delete stage.dataset.boxes; delete stage.dataset.layout; }
         }
       }
     },
-    onTrackUnsubscribed() {},
+    onTrackSubscribed(uid, stream) {
+      _log('[SFU] viewer track subscribed from: ' + uid + ' tracks=' + stream.getTracks().length);
+
+      if (!_soloUid) {
+        // ── First publisher (host) — attach to solo video ──
+        _soloUid = uid;
+        _attachSoloVideo(stream);
+
+      } else if (uid === _soloUid) {
+        // ── Same publisher, stream updated (new track added) ──
+        if (_boxState.has('_host_')) {
+          // In box-grid mode: update host box stream
+          const hostBox = _boxState.get('_host_');
+          if (hostBox) {
+            hostBox.videoEl.srcObject = stream;
+            hostBox.videoEl.play().catch(() => {});
+            _setBxState('_host_', 'ready');
+          }
+        } else {
+          // Still solo mode: update solo video
+          _attachSoloVideo(stream);
+        }
+
+      } else {
+        // ── Second+ publisher (guest joined) ──
+        // Transition from solo to box grid if not already in grid mode.
+        if (!_boxState.has('_host_')) {
+          // Grab the existing solo video stream for the host box
+          const soloVideo = _el('snxLiveViewerVideo');
+          const existingHostStream = soloVideo ? soloVideo.srcObject : null;
+          _ensureViewerBoxGrid(_soloUid, existingHostStream);
+        }
+        // Add or update guest box
+        if (!_boxState.has(uid)) {
+          window.snxBoxManager.addGuest(uid, uid, '');
+        }
+        window.snxBoxManager.setGuestStream(uid, stream);
+      }
+    },
+    onTrackUnsubscribed(uid) {
+      _log('[SFU] viewer track unsubscribed: ' + uid);
+      if (uid === _soloUid && !_boxState.has('_host_')) {
+        // Solo host stream lost
+        const video = _el('snxLiveViewerVideo');
+        if (video) video.srcObject = null;
+      } else if (_boxState.has(uid)) {
+        window.snxBoxManager.setGuestState(uid, 'disconnected');
+      }
+    },
     onTrackMuteChanged() {},
-    onActiveSpeakersChanged() {},
+    onActiveSpeakersChanged(uids) {
+      // Apply speaking indicator to boxes if in grid mode
+      _boxState.forEach((box, bUid) => {
+        const mappedUid = (bUid === '_host_') ? _soloUid : bUid;
+        box.el.classList.toggle('snx-box-speaking', uids.includes(mappedUid));
+      });
+    },
     onError(err) {
       console.error('[SFU] viewer error:', err);
       _setViewerStatus('failed');
@@ -762,11 +893,12 @@ async function _startLive(user, localStream, title, facingMode, camOn, micOn) {
   _S.hostSfuToken   = null;
   _S.hostSfuUrl     = null;
 
-  // ── SFU media path (LiveKit) ──────────────────────────────────────────────
-  // When snxSfu is loaded, connect to the LiveKit room and publish.
+  // ── SFU media path (mediasoup) ────────────────────────────────────────────
+  // When snxSfu is loaded, connect to the SNX mediasoup server and publish.
   // On failure, fall through silently to the P2P path.
   if (_sfuAvailable()) {
-    _log('[SFU] Host: connecting — roomId: ' + roomId);
+    _log('[SFU] Host: connecting — provider: ' + window.snxSfu.providerType + ' roomId: ' + roomId);
+    console.log('[SNX LIVE] Media provider:', window.snxSfu.providerType);
     try {
       await window.snxSfu.ensureRoom(roomId);
       const ud2 = _userData();
@@ -1266,6 +1398,9 @@ function _buildHubCard(room) {
 
 /** Update the viewer status text shown over the video. */
 function _setViewerStatus(status) {
+  // When the guest stage is open the loader must stay hidden regardless of
+  // P2P viewer PC state changes that would otherwise re-show it.
+  if (_S._guestStageOpen) return;
   const loaderText = _el('snxViewerLoaderText');
   const loader     = _el('snxViewerLoader');
   const tapBtn     = _el('snxViewerTapToPlay');
@@ -1356,10 +1491,11 @@ async function _openViewerScreen(roomId) {
   _S.viewUnsubs.push(() => off(presAllRef, 'value', presAllCb));
 
   // ── SFU viewer path ───────────────────────────────────────────────────────
-  // When snxSfu is available, the viewer connects to LiveKit as a subscriber.
-  // The SFU streams the host's track directly — no P2P signaling required.
+  // When snxSfu is available, the viewer connects to the mediasoup room as a
+  // subscriber.  The SFU streams all publisher tracks — no P2P signaling needed.
   if (_sfuAvailable()) {
-    _log('[SFU] Viewer: connecting to room ' + roomId);
+    console.log('[SNX LIVE] Media provider:', window.snxSfu.providerType);
+    _log('[SFU] Viewer: connecting to room ' + roomId + ' provider: ' + window.snxSfu.providerType);
     try {
       const { token, url: sfuUrl } = await window.snxSfu.fetchToken(
         roomId, user.uid, /* canPublish */ false
@@ -1707,13 +1843,18 @@ function _cleanupViewer() {
   // Stop guest stage (does NOT recurse — _guestViewerCleanup is called below)
   if (_guestStageActive) {
     _guestStageActive = false;
+    _S._guestStageOpen = false;
     _stopGuestSpeakerDetection();
     const stage = _getStage();
     if (stage) {
       stage.classList.remove('is-guest-stage');
       const dock = stage.querySelector('.snx-guest-controls');
       if (dock) dock.remove();
+      delete stage.dataset.boxes;
+      delete stage.dataset.layout;
     }
+  } else {
+    _S._guestStageOpen = false;
   }
   // Clean up guest connection if viewer was in a guest box
   _guestViewerCleanup();
@@ -3304,6 +3445,13 @@ async function _guestJoinAsViewer(roomId, db, btn) {
         try { window.snxSfu.disconnect(); } catch (_) {}
         _S.viewSfuToken = null;
       }
+
+      // ── Open the guest stage UI BEFORE connecting to SFU ──
+      // This ensures _boxState has the '_host_' entry registered before
+      // _buildGuestSfuCallbacks.onTrackSubscribed fires during connect().
+      if (typeof toastNotification === 'function') toastNotification('🎙 You are now LIVE!');
+      _openGuestStageView(roomId, db, guestStream);
+
       await window.snxSfu.connect({
         sfuUrl,
         token,
@@ -3314,10 +3462,6 @@ async function _guestJoinAsViewer(roomId, db, btn) {
       });
       await window.snxSfu.publishLocalStream(guestStream);
       console.log('[SFU] Guest connected and publishing — roomId:', roomId);
-
-      // ── Open the guest stage UI (HOST + YOU boxes) ──
-      if (typeof toastNotification === 'function') toastNotification('🎙 You are now LIVE!');
-      _openGuestStageView(roomId, db, guestStream);
 
       // ── Listen for hostEnded signal on guestSignaling ──
       // (host uses this to signal removal or live end)
@@ -3335,6 +3479,26 @@ async function _guestJoinAsViewer(roomId, db, btn) {
     } catch (sfuErr) {
       console.error('[SFU] Guest connect failed — falling back to P2P:', sfuErr.message);
       try { window.snxSfu.disconnect(); } catch (_) {}
+      // If the guest stage was already opened, clean it up before the P2P fallback
+      // re-opens it with a fresh state.
+      if (_guestStageActive) {
+        _guestStageActive = false;
+        _S._guestStageOpen = false;
+        const _sfuStage = _getStage();
+        if (_sfuStage) {
+          _sfuStage.classList.remove('is-guest-stage');
+          const _sfuDock = _sfuStage.querySelector('.snx-guest-controls');
+          if (_sfuDock) _sfuDock.remove();
+          _boxState.forEach(b => { if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el); });
+          _boxState.clear();
+          delete _sfuStage.dataset.boxes;
+          delete _sfuStage.dataset.layout;
+        }
+        const _sfuLoader = _el('snxViewerLoader');
+        if (_sfuLoader) _sfuLoader.style.display = '';
+        const _sfuVid = _el('snxLiveViewerVideo');
+        if (_sfuVid) _sfuVid.style.display = '';
+      }
       // Fall through to P2P path
     }
   }
@@ -3575,14 +3739,34 @@ async function _guestJoinAsViewer(roomId, db, btn) {
  * the guest's own local camera as a muted "YOU" preview tile.
  */
 function _openGuestStageView(roomId, db, localStream) {
-  if (_guestStageActive) return;   // guard re-entry
+  // Reset stale active flag so a previously crashed session doesn't block re-entry.
+  // _guestLeaveStage always sets this to false; guard only true re-entrancy within
+  // the same acceptance flow.
+  if (_guestStageActive) {
+    console.warn('[SNX-GUEST-STAGE] Re-entry blocked — already active. Resetting first.');
+    _guestStageActive = false;
+  }
   _guestStageActive = true;
 
   const stage = _getStage();
   if (!stage) {
     console.warn('[SNX-GUEST-STAGE] No stage element found');
+    _guestStageActive = false;
     return;
   }
+
+  // ── Kill the connecting loader immediately and permanently for this session ──
+  // Loader has z-index:60 and covers everything. We forcibly hide it and prevent
+  // _setViewerStatus() callbacks from the underlying P2P viewer PC from re-showing it.
+  const loader = _el('snxViewerLoader');
+  if (loader) {
+    loader.classList.remove('show');
+    loader.style.display = 'none';    // belt-and-suspenders — block CSS .show re-adds
+  }
+
+  // Silence the underlying viewer status callbacks so they cannot re-show the loader
+  // or stomp guest-stage state once we are live as a guest.
+  _S._guestStageOpen = true;
 
   // Mark stage as guest participant stage (enables guest-specific CSS)
   stage.classList.add('is-guest-stage');
@@ -3591,16 +3775,19 @@ function _openGuestStageView(roomId, db, localStream) {
   _boxState.clear();
   _ensureBoxGrid();
 
-  // ── HOST box — driven by the existing viewer PC remote stream ──
-  // _S.viewPc is the RTCPeerConnection already live with host media.
-  // We collect tracks from it; if they're already present grab them now,
-  // otherwise wait for the ontrack event.
+  // ── HOST box ──
+  // P2P path: _S.viewPc already carries the host broadcast stream.
+  // SFU path:  _S.viewPc is null; host stream arrives later via
+  //            _buildGuestSfuCallbacks → onTrackSubscribed which calls
+  //            snxBoxManager.setGuestStream / directly updates _boxState.
+  //            We therefore register the box in _boxState NOW so the SFU
+  //            callback can find it regardless of timing.
   const hostBox = _buildGuestBox('_host_', 'HOST', 'host');
   const grid = stage.querySelector('.snx-live-boxes');
   if (grid) grid.appendChild(hostBox.el);
   _boxState.set('_host_', hostBox);
 
-  // Collect existing tracks from the viewer PC remoteStream
+  // Collect existing tracks from the viewer P2P PC (no-op when SFU is in use)
   function _attachHostStream() {
     const vpc = _S.viewPc;
     if (!vpc) return;
@@ -3620,12 +3807,11 @@ function _openGuestStageView(roomId, db, localStream) {
   }
   _attachHostStream();
 
-  // Also hook ontrack so late-arriving tracks are captured
+  // Also hook ontrack so late-arriving P2P tracks are captured
   const origViewPcOntrack = _S.viewPc ? _S.viewPc.ontrack : null;
   if (_S.viewPc) {
     _S.viewPc.ontrack = (e) => {
       if (typeof origViewPcOntrack === 'function') origViewPcOntrack(e);
-      // Re-attach whenever a new track arrives
       _attachHostStream();
     };
   }
@@ -3642,14 +3828,10 @@ function _openGuestStageView(roomId, db, localStream) {
     _setBxState('_you_', 'ready');
   }
 
-  // ── Layout ──
+  // ── Layout — set data-boxes BEFORE data-layout so CSS grid activates correctly ──
   _recalcGuestLayout();
 
-  // ── Hide the connecting loader (if still visible) ──
-  const loader = _el('snxViewerLoader');
-  if (loader) loader.classList.remove('show');
-
-  // ── Hide the solo viewer video (we use box grid now) ──
+  // ── Hide the solo viewer video (CSS already hides it via data-boxes; JS belt-and-suspenders) ──
   const viewerVid = _el('snxLiveViewerVideo');
   if (viewerVid) viewerVid.style.display = 'none';
 
@@ -3737,6 +3919,9 @@ function _attachGuestControls(roomId, db, localStream) {
   micBtn.addEventListener('click', () => {
     micOn = !micOn;
     if (localStream) localStream.getAudioTracks().forEach(t => { t.enabled = micOn; });
+    // Notify SFU — pauses/resumes the audio producer at the server so all
+    // participants (host, viewers) immediately stop/restart receiving guest audio.
+    if (_sfuAvailable() && window.snxSfu.isConnected) window.snxSfu.setMicMuted(!micOn);
     micBtn.textContent = micOn ? '🎤' : '🔇';
     micBtn.classList.toggle('off', !micOn);
   });
@@ -3751,6 +3936,9 @@ function _attachGuestControls(roomId, db, localStream) {
   camBtn.addEventListener('click', () => {
     camOn = !camOn;
     if (localStream) localStream.getVideoTracks().forEach(t => { t.enabled = camOn; });
+    // Notify SFU — pauses/resumes the video producer at the server so all
+    // participants (host, viewers) immediately stop/restart receiving guest video.
+    if (_sfuAvailable() && window.snxSfu.isConnected) window.snxSfu.setCamMuted(!camOn);
     camBtn.textContent = camOn ? '📷' : '🚫';
     camBtn.classList.toggle('off', !camOn);
     // Update YOU box cam-off overlay
@@ -3832,6 +4020,7 @@ function _guestLeaveStage(hostEnded) {
     return;
   }
   _guestStageActive = false;
+  _S._guestStageOpen = false;
   _stopGuestSpeakerDetection();
 
   // Remove guest-stage chrome
@@ -3845,7 +4034,18 @@ function _guestLeaveStage(hostEnded) {
       if (b.el && b.el.parentNode) b.el.parentNode.removeChild(b.el);
     });
     _boxState.clear();
+    // Restore dataset so CSS reverts to solo-video mode
+    delete stage.dataset.boxes;
+    delete stage.dataset.layout;
   }
+
+  // Restore loader element so the re-opened viewer screen can show it again
+  const _leaveLoader = _el('snxViewerLoader');
+  if (_leaveLoader) _leaveLoader.style.display = '';
+
+  // Restore solo viewer video visibility
+  const _leaveVid = _el('snxLiveViewerVideo');
+  if (_leaveVid) _leaveVid.style.display = '';
   _guestStageHostStream = null;
   _stopGuestSpeakerDetection();
 
