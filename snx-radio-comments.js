@@ -248,18 +248,44 @@ async function _onPost() {
     }
   } catch (_) {}
 
-  /* Resolve display info */
-  const displayName = user.displayName || '';
-  const photoURL    = user.photoURL    || '';
-  /* Prefer the SNX username from _snxUserData (set after auth resolves) */
-  let username = '';
-  try {
-    const userData = window._snxUserData;
-    if (userData) {
-      username = userData.username || userData.handle || '';
+  /* ── Resolve identity from Firestore profile (_snxUserData is the live
+     onSnapshot of users/{uid} — most reliable source for SNS identity).
+     If not yet populated, do a one-shot Firestore fetch so we never fall
+     back to Firebase Auth fields (which SNS leaves empty). ── */
+  let username    = '';
+  let displayName = '';
+  let photoURL    = '';
+
+  const _resolveIdentity = async () => {
+    // Primary: in-memory snapshot (available after auth resolves)
+    const ud = window._snxUserData;
+    if (ud && (ud.username || ud.displayName)) {
+      username    = ud.username    || ud.displayName || '';
+      displayName = ud.displayName || ud.username    || '';
+      photoURL    = ud.avatar      || ud.photoURL    || user.photoURL || '';
+      return;
     }
-  } catch (_) {}
-  if (!username && displayName) username = displayName;
+    // Secondary: one-shot Firestore read (handles race on first page load)
+    try {
+      const mods2 = window._snxFirestore;
+      if (mods2 && mods2.db && mods2.doc && mods2.getDoc) {
+        const snap = await mods2.getDoc(mods2.doc(mods2.db, 'users', user.uid));
+        if (snap.exists()) {
+          const d  = snap.data();
+          username    = d.username    || d.displayName || '';
+          displayName = d.displayName || d.username    || '';
+          photoURL    = d.avatar      || d.photoURL    || user.photoURL || '';
+          return;
+        }
+      }
+    } catch (_) {}
+    // Final fallback: Firebase Auth fields (rarely populated on SNS)
+    displayName = user.displayName || '';
+    photoURL    = user.photoURL    || '';
+    username    = displayName;
+  };
+
+  await _resolveIdentity();
 
   /* Build doc */
   const mods = window._snxFirestore;
@@ -276,13 +302,13 @@ async function _onPost() {
       mods.collection(mods.db, COL_COMMENTS),
       {
         uid:         user.uid,
-        username:    username,
-        displayName: displayName,
-        photoURL:    photoURL,
+        username:    username    || '',
+        displayName: displayName || '',
+        photoURL:    photoURL    || '',
         message:     msg,
-        trackId:     trackId,
-        trackTitle:  trackTitle,
-        trackArtist: trackArtist,
+        trackId:     trackId     || '',
+        trackTitle:  trackTitle  || '',
+        trackArtist: trackArtist || '',
         createdAt:   mods.serverTimestamp(),
       }
     );
@@ -292,7 +318,8 @@ async function _onPost() {
       _onTextareaInput();
     }
   } catch (e) {
-    console.error('[SNX-RC] post error:', e.message);
+    // Log code + message so future failures are diagnosable — no tokens/secrets
+    console.error('[SNX-RC] post error — code:', e.code, '| message:', e.message);
     /* Show brief error toast if available — never affect Radio */
     try {
       if (typeof window.toastNotification === 'function') {
@@ -447,14 +474,26 @@ function _render() {
 function _renderComment(c, myUid, isFounder) {
   var canDelete = isFounder || (myUid && c.uid === myUid);
 
+  /* ── For comments where stored identity is blank (legacy "Listener" docs),
+     check in-memory _snxUserData for the current user — zero extra reads. ── */
+  var displayName = c.displayName || c.username || '';
+  var username    = c.username    || '';
+  var photoURL    = c.photoURL    || '';
+  if (!displayName && c.uid && c.uid === myUid && window._snxUserData) {
+    var ud = window._snxUserData;
+    displayName = ud.displayName || ud.username || displayName;
+    username    = ud.username    || ud.displayName || username;
+    photoURL    = ud.avatar      || ud.photoURL    || photoURL;
+  }
+
   /* Avatar */
-  var avatarHtml = c.photoURL
-    ? '<img class="snxrc-avatar" src="' + _esc(c.photoURL) + '" alt="" loading="lazy">'
-    : '<div class="snxrc-avatar snxrc-avatar--fallback">' + _initials(c.displayName || c.username || '?') + '</div>';
+  var avatarHtml = photoURL
+    ? '<img class="snxrc-avatar" src="' + _esc(photoURL) + '" alt="" loading="lazy">'
+    : '<div class="snxrc-avatar snxrc-avatar--fallback">' + _initials(displayName || '?') + '</div>';
 
   /* Name */
-  var name = _esc(c.displayName || c.username || 'Listener');
-  var handle = c.username ? '<span class="snxrc-handle">@' + _esc(c.username) + '</span>' : '';
+  var name   = _esc(displayName || 'Listener');
+  var handle = username ? '<span class="snxrc-handle">@' + _esc(username) + '</span>' : '';
 
   /* Time */
   var timeStr = _fmtTime(c.createdAt);
