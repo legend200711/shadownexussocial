@@ -633,11 +633,14 @@ function _buildGuestSfuCallbacks(roomId, localStream) {
 window.goLiveOrWatch = function() { window.snxLiveOpenGoLive(); };
 
 window.snxLiveOpenGoLive = function() {
+  _log('[LIVE] GO LIVE clicked');
   const user = _user();
   if (!user) {
+    _log('[LIVE] GO LIVE — no auth user, aborting');
     if (typeof toastNotification === 'function') toastNotification('⛔ Log in to go live.');
     return;
   }
+  _log('[LIVE] GO LIVE — auth OK, opening setup screen');
   _openSetupScreen();
 };
 
@@ -652,7 +655,9 @@ window.snxLiveOpenViewer = function(roomId) {
 };
 
 window.snxLivePageOpen = function() {
-  _log('livePage opened');
+  _log('[LIVE] init started — snxLivePageOpen');
+  _log('[LIVE] auth ready — user=' + (_user() ? _user().uid.slice(0,8) + '…' : 'null'));
+  _log('[LIVE] db ready — _db()=' + (!!_db()));
   _renderHub();
 };
 
@@ -683,7 +688,8 @@ function _closeOverlay() {
    STAGE 1 — SETUP / GO LIVE SCREEN
 ════════════════════════════════════════════════════════════ */
 function _openSetupScreen() {
-  _log('Opening Go Live setup');
+  _log('[LIVE] host startup entered');
+  _log('[LIVE] requesting media');
   _showOverlay(_buildSetupHTML());
 
   const previewVideo = _el('snxLivePreviewVideo');
@@ -1339,11 +1345,16 @@ async function _endLive(user, roomId, db, presRef, presCb) {
    STAGE 4 — LIVE HUB
 ════════════════════════════════════════════════════════════ */
 function _renderHub() {
+  _log('[LIVE] list subscription attaching');
   const container = _el('snxLiveHubCards');
-  if (!container) return;
+  if (!container) {
+    _log('[LIVE] list subscription — snxLiveHubCards not found in DOM');
+    return;
+  }
 
   const db = _db();
   if (!db) {
+    _log('[LIVE] list subscription — _db() null, retrying in 500ms');
     container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>Live is loading…</div>';
     setTimeout(() => { if (_db()) _renderHub(); }, 500);
     return;
@@ -1352,18 +1363,24 @@ function _renderHub() {
   if (_S.hubRef && _S.hubCb) { try { off(_S.hubRef, 'value', _S.hubCb); } catch (_) {} }
 
   const roomsRef = ref(db, 'liveRooms');
+  _log('[LIVE] list subscription ready — listening to liveRooms');
   const hubCb = onValue(roomsRef, (snap) => {
     container.innerHTML = '';
     if (!snap.exists()) {
+      _log('[LIVE] list subscription ready — 0 rooms (snap does not exist)');
       container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>No one is live right now.</div>';
       return;
     }
     const active = _filterActiveRooms(snap.val());
+    _log('[LIVE] list subscription ready — active rooms: ' + active.length);
     if (!active.length) {
       container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>No one is live right now.</div>';
       return;
     }
     active.forEach(room => container.appendChild(_buildHubCard(room)));
+  }, (err) => {
+    _log('[LIVE] list subscription error — ' + err.code + ': ' + err.message);
+    container.innerHTML = '<div class="live-hub-empty"><span class="live-hub-empty-icon">📡</span>Unable to load live streams.</div>';
   });
 
   _S.hubRef = roomsRef;

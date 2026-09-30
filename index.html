@@ -22119,16 +22119,26 @@ function navTo(pageId) {
     }
     // ── Shadow Nexus Live — lazy-load then open hub when page activates ──
     // Stage 2B: live.css + snx-sfu.js + live.js are deferred until first use.
+    // live.js is an ES module — SNXFeatureLoader uses esModules[] for it.
     if (pageId === 'livePage') {
+        console.log('[LIVE] feature requested');
         if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('live')) {
             window.SNXFeatureLoader.loadFeature('live')
                 .then(function () {
-                    if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
+                    console.log('[LIVE] live.js loaded — calling snxLivePageOpen');
+                    if (typeof window.snxLivePageOpen === 'function') {
+                        window.snxLivePageOpen();
+                    } else {
+                        console.error('[LIVE ERROR] snxLivePageOpen undefined after feature load — live.js may have failed to execute');
+                        if (typeof toastNotification === 'function') toastNotification('⚠ Live failed to initialize. Please refresh.');
+                    }
                 })
                 .catch(function (err) {
-                    console.warn('[navTo] Live feature load failed:', err && err.message);
+                    console.error('[LIVE ERROR] Live feature load failed:', err && err.message);
+                    if (typeof toastNotification === 'function') toastNotification('⚠ Live failed to load. Tap to retry.');
                 });
         } else {
+            console.log('[LIVE] feature already loaded — calling snxLivePageOpen');
             if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
         }
     }
@@ -32215,7 +32225,29 @@ window.toggleGrimPanel = function () {
         if (menuBtn) { menuBtn.classList.remove('is-open'); menuBtn.setAttribute('aria-expanded','false'); }
         if (sideOverlay) sideOverlay.classList.remove('visible');
         if (mobileMenuBtn) { mobileMenuBtn.classList.remove('menu-open'); mobileMenuBtn.setAttribute('aria-expanded','false'); }
-        // Lazy-init on first open
+        // ── Shadow Reaper AI: lazy-load the AI feature on first open ──────────
+        // Falls back to the existing GP.init() path if the feature fails to load.
+        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('shadow-ai')) {
+            window.SNXFeatureLoader.loadFeature('shadow-ai')
+                .then(function () {
+                    if (window.SNXShadowAI) {
+                        window.SNXShadowAI.init();
+                        window.SNXShadowAI.open();
+                    }
+                })
+                .catch(function () {
+                    // Feature load failed — fall back to existing GP panel
+                    if (!GP.initialized) GP.init();
+                    setTimeout(() => { const inp = document.getElementById('gp-input'); if (inp) inp.focus(); }, 360);
+                });
+            return; // AI load is async; return now — panel is already open
+        }
+        // ── If AI already loaded, open it directly ────────────────────────────
+        if (window.SNXShadowAI && window.SNXFeatureLoader && window.SNXFeatureLoader.isLoaded('shadow-ai')) {
+            window.SNXShadowAI.open();
+            return;
+        }
+        // ── Existing GP fallback (no feature loader or not available) ─────────
         if (!GP.initialized) GP.init();
         // Focus input (delay allows animation to complete)
         setTimeout(() => { const inp = document.getElementById('gp-input'); if (inp) inp.focus(); }, 360);

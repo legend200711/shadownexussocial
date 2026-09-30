@@ -100,12 +100,20 @@
     },
 
     // ── Live / cohost stack
-    // snx-sfu.js must load before live.js; order is preserved by sequential loading.
+    // snx-sfu.js is a classic (non-module) script — must load first.
+    // live.js is an ES module (top-level import) — must be loaded via
+    // dynamic import(), NOT as a classic <script> tag.  Loading it with
+    // _loadScript() causes a SyntaxError at parse time and prevents
+    // window.snxLivePageOpen / window.snxLiveOpenGoLive from ever being
+    // defined, which is the root cause of the stuck "Loading live streams…"
+    // and the dead GO LIVE button on physical devices.
     live: {
       label: 'LIVE',
       css:  ['live.css?v=SNS-2026-LIVE-003'],
       scripts: [
-        'snx-sfu.js',
+        'snx-sfu.js'
+      ],
+      esModules: [
         'live.js?v=SNS-2026-LIVE-010'
       ],
       init: null
@@ -138,6 +146,22 @@
       esModules: [],
       init: null,
       _alreadyInPage: true   // all code already parsed at startup (inline)
+    },
+
+    // ── Shadow Reaper AI — Stage 1: local knowledge foundation
+    // NOT loaded at startup. NOT preloaded on 2G/save-data/LITE.
+    // Loaded on demand when user clicks the existing "Click Here" entry point.
+    // Optional idle prefetch of CSS only in FULL mode + good/excellent connection
+    // is handled in prefetchAfterFeed() below.
+    'shadow-ai': {
+      label: 'SHADOW REAPER AI',
+      css:  ['snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE1-001'],
+      scripts: [
+        'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE1-001',
+        'snx-shadow-ai.js?v=SNS-2026-SHADOW-AI-STAGE1-001'
+      ],
+      esModules: [],
+      init: null   // SNXShadowAI.init() is called by toggleGrimPanel after load
     }
   };
 
@@ -360,12 +384,20 @@
       });
     } else {
       // FULL — hint CSS for radio + live after a short delay
+      // Also hint shadow-ai CSS only on FULL mode + good/excellent connection + idle.
       schedule(function () {
         if (_getState('radio') === 'idle') {
           _loadCSS('snx-radio.css?v=SNS-2026-RADIO-PAGE-001').catch(function () {});
         }
         if (_getState('live') === 'idle') {
           _loadCSS('live.css?v=SNS-2026-LIVE-003').catch(function () {});
+        }
+        // Optional shadow-ai CSS prefetch: FULL + good/excellent connection only.
+        // Never prefetch JS — that waits for the user's first Click Here.
+        var tier = global.SNX_NET ? global.SNX_NET.tierId : 'unknown';
+        if (_getState('shadow-ai') === 'idle' &&
+            (tier === 'good' || tier === 'excellent' || tier === 'unknown')) {
+          _loadCSS('snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE1-001').catch(function () {});
         }
       });
     }

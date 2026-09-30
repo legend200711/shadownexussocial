@@ -10,26 +10,33 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNS-2026-STAGE2G-FINAL
- * Changes: Stage 2F Runtime/Listener/Timer/Subscription Cleanup.
- *   - grim-reaper-character-widget.js: RAF loop now page-hidden-aware (pauses on
- *     visibilitychange hidden, resumes on visible).
- *   - grim-speech-bubble.js: auto-message timer pauses when page hidden, resets on return.
- *   - album.js: removed 2s polling setInterval for currentUser sync (liveUser() reads live).
- *   - profile-theme.js: canvas particle resize listener stored in _canvasResizeHandler and
- *     removed in stopEffects() to prevent accumulation across profile re-entries.
- *   - snx-radio.js: _initialized flag prevents duplicate Firebase subscriptions on repeated
- *     init() calls; idempotent guards on _subscribeStation/_subscribeSchedule/
- *     _subscribePrograms/_subscribeSettings; _initialized reset on destroy().
+ * Build: SNS-2026-LIVE-REPAIR-001
+ * Changes: SNS Live — Stage 1 Repair.
+ *   - snx-feature-loader.js: live.js moved from scripts[] to esModules[].
+ *     live.js uses top-level ES module import statements and cannot be loaded
+ *     as a classic <script> tag.  Loading it via _loadScript() caused a
+ *     SyntaxError at parse time, preventing window.snxLivePageOpen and
+ *     window.snxLiveOpenGoLive from ever being defined — the root cause of
+ *     the stuck "Loading live streams…" and dead GO LIVE button on all devices.
+ *   - live.js: diagnostic [LIVE] console checkpoints added at init, hub
+ *     subscription, GO LIVE click, host startup, and media request.
+ *     Firebase error callback added to the liveRooms listener.
+ *   - index.html (navTo livePage block): [LIVE] diagnostic logs added;
+ *     explicit [LIVE ERROR] toast if snxLivePageOpen is still undefined
+ *     after feature load (secondary safety net).
+ *   NOTE: SW version bumped v99 → v100 to evict stale snx-feature-loader.js
+ *   from mobile caches that would otherwise continue serving the broken version.
+ *   - (Previous) SNS-2026-SHADOW-AI-STAGE1-001: Shadow Reaper AI Stage 1.
+ *   - (Previous) SNS-2026-STAGE2G-FINAL: Stage 2F Runtime/Listener/Timer/Subscription Cleanup.
  *   - (Previous) Stage 2E CSS + Rendering Performance Optimization.
  *   - (Previous) Stage 2D: SNXMediaController shared IntersectionObserver.
  *   - (Previous) Stage 2C Firebase + Network Efficiency.
  *   - (Previous) Stage 2B feature lazy loading.
- *   v98
+ *   v100
  */
 
-const CACHE_VERSION = 'v98';
-const BUILD_ID      = 'SNS-2026-STAGE2G-FINAL';
+const CACHE_VERSION = 'v100';
+const BUILD_ID      = 'SNS-2026-LIVE-REPAIR-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
