@@ -1,7 +1,7 @@
 /**
  * snx-world-bg.css
  * Shadow Nexus Social — Global Cinematic Background
- * Build: SNS-2026-MORNING-REPAIR-002 / v93
+ * Build: SNS-2026-DJ-MIC-001 / v94
  *
  * Source image : ChatGPT Image Sep 25, 2026, 07_54_47 AM.png  (supplied)
  * Website copy : assets/images/shadow-nexus-global-bg.png
@@ -16,11 +16,16 @@
  * NO animations, NO parallax, NO canvas, NO video.
  * Loads after all other stylesheets so overrides land cleanly.
  *
- * Visual hierarchy:
- *   #snx-global-world-bg / html::before  (z-index: -2 / -2)
- *   ↓ subtle dark overlay (readability)
- *   ↓ interface surfaces (semi-transparent cards)
- *   ↓ content
+ * Visual hierarchy (z-index stack, lowest to highest):
+ *   html::before                          z-index: -2  (fallback)
+ *   #snx-global-world-bg                  z-index: -1  (primary world art)
+ *   #snxStarsCanvas / #bg-canvas          z-index:  0  (atmospheric canvas)
+ *   rain/energy effects                   z-index:  1  (ambient)
+ *   navigation / content                  auto / 2000+ (all content)
+ *   body::after (fog)                     z-index: 9997
+ *   body::before (vignette)               z-index: 9998
+ *   #snx-auth-gate (world bg during auth) z-index: 9990
+ *   cinematic intro                       z-index: 999999
  *
  * IMPORTANT — iOS / Android:
  *   background-attachment: fixed on <html> is BROKEN on iOS Safari.
@@ -41,7 +46,11 @@
   left: 0 !important;
   width: 100vw !important;
   height: 100vh !important;
-  z-index: -9999 !important;       /* absolute bottom of stacking order */
+  /* z-index -1 — behind all normal body content, but above the html background
+     color. Using -9999 was too deep (rendered behind the root element entirely
+     on many browsers). Using -1 places it correctly as the first visual layer
+     behind body content. The html::before fallback uses z-index -2 (below this). */
+  z-index: -1 !important;
   pointer-events: none !important;
   display: block !important;
 

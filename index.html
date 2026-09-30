@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="snx-commit" content="SNS-2026-WORLD-BG-GLOBAL-001">
+<meta name="snx-commit" content="SNS-2026-DJ-MIC-001">
 <title>Shadow Nexus Social — Stay Legendary 🌑🔥</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 
@@ -68,11 +68,11 @@
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
-<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-WORLD-BG-005">
+<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-DJ-MIC-001">
 <!-- ── Shadow Nexus Radio — player + standalone page styles ── -->
 <link rel="stylesheet" href="snx-radio.css?v=SNS-2026-RADIO-PAGE-001">
 <!-- ── Preload the world background image so it appears without flash ── -->
-<link rel="preload" as="image" href="assets/images/shadow-nexus-global-bg.png" fetchpriority="low">
+<link rel="preload" as="image" href="assets/images/shadow-nexus-global-bg.png" fetchpriority="high">
 
 <!-- ── Preconnect to Firebase + R2 CDN so first load is faster ── -->
 <link rel="preconnect" href="https://www.gstatic.com">
@@ -82,8 +82,20 @@
 <link rel="dns-prefetch" href="https://pub-1cb8318faddb49f0b2c91fbd098c271f.r2.dev">
 
 <style>
-/* ── Prevent any white/bright flash before CSS loads ── */
-html { background-color: #02040a !important; margin: 0; }
+/* ── Prevent any white/bright flash before CSS loads ──
+   html gets the world background immediately so even if external
+   CSS hasn't loaded yet, the user sees the artwork not a black screen. */
+html {
+    background-color: #02040a !important;
+    background-image:
+        linear-gradient(to bottom, rgba(2,4,14,0.38) 0%, rgba(2,4,14,0.35) 40%, rgba(2,4,14,0.42) 100%),
+        url('assets/images/shadow-nexus-global-bg.png') !important;
+    background-size: cover !important;
+    background-position: center center !important;
+    background-repeat: no-repeat !important;
+    background-attachment: scroll !important;
+    margin: 0;
+}
 body { background: transparent !important; margin: 0; }
 :root {
     /* ── Shadow Nexus Social — Dark Blue + Bright Blue + Neon Green ── */
@@ -173,7 +185,9 @@ body::after {
     left: 0;
     width: 100vw;
     height: 100vh;
-    z-index: -1;
+    /* Raised from -1 to 0 so it sits above #snx-global-world-bg (z-index:-1)
+       but still behind all body content. The world art remains the bottom layer. */
+    z-index: 0;
     pointer-events: none;
 }
 
@@ -6322,20 +6336,38 @@ body.arcade-fs-ios body::after { display:none !important; }
     position: fixed;
     inset: 0;
     /* BELOW the cinematic intro (intro z-index: 999999).
-       Provides a dark background to prevent login-page flash when
-       Firebase resolves auth state. The intro covers it completely
-       during first-session startup. On subsequent sessions (no intro),
-       it prevents the login page from flashing while Firebase checks
-       the cached session. No spinner or loading content — silent. */
+       Shows the world artwork during auth restoration so users NEVER see a
+       black screen while Firebase checks the cached session.
+       On first-session startup the intro covers this completely.
+       On reopen/refresh it keeps the world visible while auth resolves.
+       No spinner or loading content — silent except for the background. */
     z-index: 9990;
-    background: #02040a;
+    /* World background as fallback — same image as #snx-global-world-bg.
+       This ensures the artwork is visible even before snx-world-bg.css renders
+       the fixed background div (which is at z-index:-1 and therefore BELOW this). */
+    background-color: #02040a;
+    background-image:
+        linear-gradient(
+            to bottom,
+            rgba(2, 4, 14, 0.45) 0%,
+            rgba(2, 4, 14, 0.40) 30%,
+            rgba(2, 4, 14, 0.43) 60%,
+            rgba(2, 4, 14, 0.50) 100%
+        ),
+        url('assets/images/shadow-nexus-global-bg.png');
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
     pointer-events: none;
-    transition: opacity 0.28s ease, visibility 0.28s ease;
+    transition: opacity 0.38s ease, visibility 0.38s ease;
 }
 #snx-auth-gate.resolved {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
+}
+@media (max-width: 640px) {
+    #snx-auth-gate { background-position: 35% center; }
 }
 /* Legacy class references — keep as no-op so JS doesn't throw */
 .snx-gate-logo, .snx-gate-spinner, .snx-gate-label { display: none !important; }
@@ -6343,10 +6375,11 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 <body>
 
-<!-- Global world background — position:fixed, z-index:-9999, below all content.
-     Source: ChatGPT Image Sep 25, 2026, 07_54_47 AM.png
+<!-- Global world background — position:fixed, z-index:-1, below all body content.
+     Source: ChatGPT Image Sep 25, 2026, 07_54_47 AM.png  (verified: MD5 matches project copy)
      Web copy: assets/images/shadow-nexus-global-bg.png
-     Complements html::before in snx-world-bg.css for full cross-platform coverage. -->
+     Complements html::before in snx-world-bg.css for full cross-platform coverage.
+     z-index: -1 (not -9999) so it renders ABOVE the html root background but BELOW all content. -->
 <div id="snx-global-world-bg" aria-hidden="true"></div>
 
 <!-- Auth gate — invisible sentinel; cinematic intro is the real startup experience -->
@@ -13516,8 +13549,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               setTimeout(() => navTo(_pendPage), 700);
           }
           if (typeof window._initStorySystem === 'function') window._initStorySystem();
-          // Check if user has earned the OG badge (first 100 users, 50+ days old account)
-          checkOGBadgeEligibility(user.uid);
+          // Check if user has earned the OG badge — deferred 5s so it doesn't compete
+          // with the initial feed load (does a Firestore read + collection query)
+          setTimeout(() => checkOGBadgeEligibility(user.uid), 5000);
           // ── Timing: app is now interactive (all critical init complete) ──
           if (window.__snxT) {
               window.__snxT.APP_INTERACTIVE = performance.now();
@@ -13721,6 +13755,52 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                   try { _rtdbSet(_rtdbRef(_presenceRtdb, 'users/' + auth.currentUser.uid), { online: true, live: false, lastSeen: _rtdbServerTimestamp() }); } catch(_) {}
               }
           }, 30000);
+      }
+  });
+
+  /* ── visibilitychange — auth gate re-sync on mobile resume ─────────────────────
+     On Android and iOS, when the user switches back to Shadow Nexus from another
+     app or from the home screen, visibilitychange fires with document.hidden=false.
+     The page is NOT reloaded (no Firebase re-init needed), but we must:
+       1. Ensure the auth gate is always resolved so the dark overlay never re-appears.
+       2. Confirm window._snxCurrentUser matches auth.currentUser (defensive sync).
+       3. Restart the RTDB presence heartbeat if it somehow stopped while backgrounded.
+     We do NOT re-initialize Firebase, re-attach onAuthStateChanged, or call signOut.
+  ─────────────────────────────────────────────────────────────────────────────── */
+  document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return; // Tab going hidden — nothing to do
+
+      // Track resume count for ?snxdebug=1 diagnostic panel
+      window.__snxVisibilityResumeCount = (window.__snxVisibilityResumeCount || 0) + 1;
+      console.log('[SNX RESUME] visibilitychange — resume #' + window.__snxVisibilityResumeCount);
+
+      // 1. Always resolve the auth gate in case it was never dismissed
+      //    (defensive guard: normally resolved by onAuthStateChanged already)
+      const _resumeGate = document.getElementById('snx-auth-gate');
+      if (_resumeGate && !_resumeGate.classList.contains('resolved') && _authFirstResolved) {
+          _resumeGate.classList.add('resolved');
+          console.log('[SNX RESUME] visibilitychange — auth gate resolved on resume');
+      }
+
+      // 2. If auth has resolved, sync the current user state defensively
+      if (_authFirstResolved) {
+          const _liveUser = auth.currentUser;
+          if (_liveUser && !window._snxCurrentUser) {
+              // In-memory state wiped (unlikely but possible on some Android WebViews)
+              window._snxCurrentUser = _liveUser;
+              window._snxAuthResolved = true;
+              console.log('[SNX RESUME] visibilitychange — _snxCurrentUser restored from auth.currentUser');
+          }
+
+          // 3. Restart RTDB presence heartbeat if it stopped while app was backgrounded
+          if (_liveUser && !_presenceHeartbeatTimer) {
+              _presenceHeartbeatTimer = setInterval(() => {
+                  if (auth.currentUser) {
+                      try { _rtdbSet(_rtdbRef(_presenceRtdb, 'users/' + auth.currentUser.uid), { online: true, live: false, lastSeen: _rtdbServerTimestamp() }); } catch(_) {}
+                  }
+              }, 30000);
+              console.log('[SNX RESUME] visibilitychange — presence heartbeat restarted');
+          }
       }
   });
 
@@ -30946,7 +31026,9 @@ window.switchAdminTab = function(tab) {
       banner.innerHTML =
         '<span class="snxr-dj-dot"></span>' +
         '<span class="snxr-dj-label" id="snxrDjLabel">🔴 DJ LIVE ON AIR</span>' +
-        '<span class="snxr-dj-name"  id="snxrDjName"></span>';
+        '<span class="snxr-dj-name"  id="snxrDjName"></span>' +
+        /* Compact mic ON AIR indicator — shown to listeners when mic is active */
+        '<span class="snxr-dj-mic-onair snxr-hidden" id="snxrDjMicOnAir">🎙 ON AIR</span>';
       /* Insert before playerWrap so it appears at the top */
       var pw = document.getElementById('snxRadioPlayerWrap');
       if (pw && pw.parentNode) {
@@ -30962,12 +31044,14 @@ window.switchAdminTab = function(tab) {
      Called by SNXRadioDJ when Firestore DJ state changes.
   ─────────────────────────────────────────────────────────────────────────── */
   function _onDjStateChanged(state) {
-    var banner  = document.getElementById('snxrDjBanner');
-    var nameEl  = document.getElementById('snxrDjName');
-    var labelEl = document.getElementById('snxrDjLabel');
-    var ctrlEl  = document.getElementById('snxrDjControls');
+    var banner    = document.getElementById('snxrDjBanner');
+    var nameEl    = document.getElementById('snxrDjName');
+    var labelEl   = document.getElementById('snxrDjLabel');
+    var ctrlEl    = document.getElementById('snxrDjControls');
+    var micOnAir  = document.getElementById('snxrDjMicOnAir');
 
-    var isActive = !!(state && state.active);
+    var isActive  = !!(state && state.active);
+    var micActive = !!(state && state.micActive);
 
     if (banner) {
       if (isActive) {
@@ -30979,6 +31063,8 @@ window.switchAdminTab = function(tab) {
         if (nameEl)  nameEl.textContent  = '';
         if (labelEl) labelEl.textContent = '🔴 DJ LIVE ON AIR';
       }
+      /* 🎙 ON AIR badge: shown to all users when mic is actively live */
+      if (micOnAir) micOnAir.classList.toggle('snxr-hidden', !(isActive && micActive));
     }
 
     /* Update Founder DJ controls if they exist */
@@ -30999,16 +31085,128 @@ window.switchAdminTab = function(tab) {
     ctrl.id = 'snxrDjControls';
     ctrl.className = 'snxr-dj-ctrl';
     ctrl.innerHTML =
+      /* ── DJ session status ── */
       '<div class="snxr-dj-status" id="snxrDjStatus">DJ STATUS: <span id="snxrDjStatusText">OFF AIR</span></div>' +
+      /* ── GO / END buttons ── */
       '<div class="snxr-dj-ctrl-btns">' +
         '<button class="snxr-dj-go-btn" id="snxrDjGoBtn"  type="button">🎙 GO DJ LIVE</button>' +
         '<button class="snxr-dj-end-btn snxr-hidden" id="snxrDjEndBtn" type="button">■ END DJ</button>' +
       '</div>' +
+      /* ── Microphone row — hidden until DJ is live ── */
+      '<div class="snxr-dj-mic-row snxr-hidden" id="snxrDjMicRow">' +
+        /* Mic status badge */
+        '<div class="snxr-dj-mic-status" id="snxrDjMicStatus">' +
+          '<span class="snxr-dj-mic-icon" id="snxrDjMicIcon">🎙</span>' +
+          '<span class="snxr-dj-mic-label" id="snxrDjMicLabel">MIC OFF</span>' +
+        '</div>' +
+        /* Mic toggle button */
+        '<button class="snxr-dj-mic-btn snxr-hidden" id="snxrDjMicBtn" type="button" title="Toggle microphone on/off">MIC ON/OFF</button>' +
+        /* Level meter — shown only when mic is ON */
+        '<div class="snxr-dj-meter-wrap snxr-hidden" id="snxrDjMeterWrap" aria-label="Microphone level" aria-live="off">' +
+          '<div class="snxr-dj-meter" id="snxrDjMeter">' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar0"></div>' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar1"></div>' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar2"></div>' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar3"></div>' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar4"></div>' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar5"></div>' +
+            '<div class="snxr-dj-meter-bar" id="snxrDjMeterBar6"></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      /* Blocked / error notice — shown on permission issues */
+      '<p class="snxr-dj-mic-blocked snxr-hidden" id="snxrDjMicBlocked">' +
+        'Microphone permission is required for DJ voice.' +
+      '</p>' +
+      /* General DJ message line */
       '<p class="snxr-dj-msg" id="snxrDjMsg"></p>';
+
     wrap.appendChild(ctrl);
 
     document.getElementById('snxrDjGoBtn').addEventListener('click',  _onDjGoLive);
     document.getElementById('snxrDjEndBtn').addEventListener('click', _onDjEnd);
+    document.getElementById('snxrDjMicBtn').addEventListener('click', _onMicToggle);
+
+    /* ── Register SNXRadioDJ callbacks for mic status + level meter ── */
+
+    /* Called by snx-radio-dj.js whenever mic status changes */
+    window.snxRadioDjMicStatus = function(status) {
+      _applyMicStatus(status);
+    };
+
+    /* Called by snx-radio-dj.js ~15×/s with a 0–1 RMS level */
+    window.snxRadioDjMicLevel = function(level) {
+      _updateMicMeter(level);
+    };
+  }
+
+  /* Microphone status → label text, colour, and meter visibility */
+  var _MIC_LABELS = {
+    'off':          { icon: '🎙', text: 'MIC OFF',          color: '#5a7a9a', meter: false },
+    'connecting':   { icon: '🎙', text: 'CONNECTING…',      color: '#f59e0b', meter: false },
+    'on':           { icon: '🎙', text: 'MIC ON',           color: '#39FF14', meter: true  },
+    'blocked':      { icon: '⚠',  text: 'MIC BLOCKED',      color: '#ef4444', meter: false },
+    'error':        { icon: '⚠',  text: 'MIC ERROR',        color: '#ef4444', meter: false },
+    'disconnected': { icon: '⚠',  text: 'MIC DISCONNECTED', color: '#ef4444', meter: false },
+  };
+
+  function _applyMicStatus(status) {
+    var info     = _MIC_LABELS[status] || _MIC_LABELS['off'];
+    var iconEl   = document.getElementById('snxrDjMicIcon');
+    var labelEl  = document.getElementById('snxrDjMicLabel');
+    var meterWrap= document.getElementById('snxrDjMeterWrap');
+    var blockedEl= document.getElementById('snxrDjMicBlocked');
+    var micBtn   = document.getElementById('snxrDjMicBtn');
+
+    if (iconEl)  iconEl.textContent  = info.icon;
+    if (labelEl) { labelEl.textContent = info.text; labelEl.style.color = info.color; }
+
+    /* Level meter: only visible when mic is ON */
+    if (meterWrap) meterWrap.classList.toggle('snxr-hidden', !info.meter);
+
+    /* Blocked notice */
+    var isBlocked = (status === 'blocked' || status === 'error');
+    if (blockedEl) blockedEl.classList.toggle('snxr-hidden', !isBlocked);
+
+    /* Mic toggle button: only when DJ is live and not blocked/error */
+    if (micBtn) {
+      var canToggle = _djIsLive() && status !== 'blocked' && status !== 'error' && status !== 'connecting';
+      micBtn.classList.toggle('snxr-hidden', !canToggle);
+    }
+
+    /* Zero meter when mic goes off */
+    if (!info.meter) _updateMicMeter(0);
+  }
+
+  /* Update the 7-bar level meter with a 0–1 RMS value */
+  var _METER_BARS = 7;
+  function _updateMicMeter(level) {
+    /* Scale: 0–1 RMS → 0–7 bars. Apply sqrt for perceptual scaling. */
+    var scaled = Math.min(1, level * 4);          // boost sensitivity
+    var bars   = Math.round(scaled * _METER_BARS); // 0-7 active bars
+
+    for (var i = 0; i < _METER_BARS; i++) {
+      var bar = document.getElementById('snxrDjMeterBar' + i);
+      if (!bar) continue;
+      var active = i < bars;
+      bar.classList.toggle('snxr-dj-bar-active', active);
+      /* Color gradient: low=green, mid=yellow, high=red */
+      if (active) {
+        var pct = i / (_METER_BARS - 1);
+        bar.style.background = pct < 0.5
+          ? '#39FF14'
+          : pct < 0.8
+            ? '#f59e0b'
+            : '#ef4444';
+      } else {
+        bar.style.background = '';
+      }
+    }
+  }
+
+  /* Helper: is the DJ currently live (per local _djActive state check via SNXRadioDJ) */
+  function _djIsLive() {
+    return !!(window.SNXRadioDJ && window.SNXRadioDJ.isActive);
   }
 
   function _refreshDjControls(isActive, state) {
@@ -31016,17 +31214,29 @@ window.switchAdminTab = function(tab) {
     var goBtn      = document.getElementById('snxrDjGoBtn');
     var endBtn     = document.getElementById('snxrDjEndBtn');
     var djMsg      = document.getElementById('snxrDjMsg');
+    var micRow     = document.getElementById('snxrDjMicRow');
+    var micBtn     = document.getElementById('snxrDjMicBtn');
 
     if (statusText) statusText.textContent = isActive ? 'ON AIR 🔴' : 'OFF AIR';
     if (statusText) statusText.style.color = isActive ? '#ef4444' : '#888';
     if (goBtn)  goBtn.classList.toggle('snxr-hidden',  isActive);
     if (endBtn) endBtn.classList.toggle('snxr-hidden', !isActive);
-    if (djMsg && !isActive) djMsg.textContent = '';
+
+    /* Mic row: visible only while DJ is live */
+    if (micRow) micRow.classList.toggle('snxr-hidden', !isActive);
+
+    /* When DJ ends, reset mic UI to off */
+    if (!isActive) {
+      if (djMsg) djMsg.textContent = '';
+      _applyMicStatus('off');
+      _updateMicMeter(0);
+      if (micBtn) micBtn.classList.add('snxr-hidden');
+    }
   }
 
   function _onDjGoLive() {
     var msg = document.getElementById('snxrDjMsg');
-    if (msg) msg.textContent = 'Requesting microphone…';
+    if (msg) { msg.textContent = 'Requesting microphone…'; msg.style.color = '#aaa'; }
     if (!window.SNXRadioDJ) { if (msg) msg.textContent = '✗ DJ module not loaded'; return; }
     window.SNXRadioDJ.djStart(function(result) {
       if (!msg) return;
@@ -31034,7 +31244,7 @@ window.switchAdminTab = function(tab) {
         msg.textContent = '✗ ' + result.error;
         msg.style.color = '#ef4444';
       } else {
-        msg.textContent = '✓ DJ Live — you are on air!';
+        msg.textContent = '🔴 DJ session active';
         msg.style.color = '#39FF14';
       }
     });
@@ -31049,6 +31259,11 @@ window.switchAdminTab = function(tab) {
     }).catch(function(e) {
       if (msg) { msg.textContent = '✗ ' + e.message; msg.style.color = '#ef4444'; }
     });
+  }
+
+  function _onMicToggle() {
+    if (!window.SNXRadioDJ) return;
+    window.SNXRadioDJ.micToggle();
   }
 
 })();
@@ -33003,63 +33218,29 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-WORLD-BG-GLOBAL-001';
-  var SW_VER   = 'v93';
+  var BUILD_ID = 'SNS-2026-DJ-MIC-001';
+  var SW_VER   = 'v94';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
   /* ══════════════════════════════════════════════════════
-     SERVICE WORKER REGISTRATION & UPDATE HANDLING
-     ── Runs on every page load ──
-     The SW uses skipWaiting()+clients.claim() so it
-     activates immediately on install. The controllerchange
-     event reloads the page ONCE (guarded by sessionStorage)
-     to ensure the new SW serves fresh assets.
+     SERVICE WORKER NOTES
+     SW registration is handled solely by script.js.
+     This block NO LONGER registers the SW a second time —
+     the previous registration used /sw.js?v=BUILD_ID which
+     caused the browser to treat every new build as a
+     different SW URL, firing controllerchange → reload
+     cycles that destroyed Android/iOS Firebase Auth sessions.
      ══════════════════════════════════════════════════════ */
+
+  /* ── Version cross-check via /version.json ──
+       Fetches the deployed manifest once per session (network-only, no-cache).
+       Used as a diagnostic signal for the Founder panel. */
   if ('serviceWorker' in navigator) {
-
-    /* ── Register the app service worker ── */
-    navigator.serviceWorker.register('/sw.js?v=' + BUILD_ID)
-      .then(function(reg) {
-        /* Trigger an update check immediately and every 10 minutes */
-        reg.update().catch(function() {});
-        setInterval(function() { reg.update().catch(function() {}); }, 10 * 60 * 1000);
-      })
-      .catch(function() {});
-
-    /* ── On controllerchange, reload ONCE to get fresh assets ──
-         Guard with sessionStorage so a loop can never form.
-         After SW activates: delete all obsolete shadow-nexus caches,
-         then reload once to serve the newest TV JavaScript. */
-    navigator.serviceWorker.addEventListener('controllerchange', function() {
-      var key = 'snx_sw_reload_' + BUILD_ID;
-      if (!sessionStorage.getItem(key)) {
-        sessionStorage.setItem(key, '1');
-        // Best-effort: delete all old shadow-nexus caches before reload
-        // so the new SW's precache is the only copy in the browser.
-        if (window.caches) {
-          caches.keys().then(function(keys) {
-            var del = keys.filter(function(k) {
-              return k.startsWith('shadow-nexus-') && k !== ('shadow-nexus-' + SW_VER) && k !== ('shadow-nexus-media-' + SW_VER);
-            });
-            Promise.all(del.map(function(k) { return caches.delete(k); }))
-              .then(function() { window.location.reload(); });
-          }).catch(function() { window.location.reload(); });
-        } else {
-          window.location.reload();
-        }
-      }
-    });
-
-    /* ── Version cross-check via /version.json ──
-         Fetches the deployed manifest once per session (network-only, no-cache).
-         Used as a diagnostic signal for the Founder panel. */
-    var _remoteBuildId = null;
     fetch('/version.json?_=' + Date.now(), { cache: 'no-store' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        _remoteBuildId = data.buildId || null;
-        window._snxRemoteBuildId = _remoteBuildId;
+        window._snxRemoteBuildId = data.buildId || null;
       })
       .catch(function() {});
   }
@@ -33316,10 +33497,11 @@ document.addEventListener('click', function(e) {
 
     /* ═══ BUILD ═══ */
     o += _h('BUILD');
-    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-WORLD-BG-GLOBAL-001' ? 'ok' : 'err');
+    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-DJ-MIC-001' ? 'ok' : 'err');
     o += _r('BUILD_ID (deployed)',   remoteBuild);
     o += _r('BUILD MATCH',           buildMatch,  buildMatch === 'MATCH' ? 'ok' : 'err');
-    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v93' ? 'ok' : 'warn');
+    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v94' ? 'ok' : 'warn');
+    /* SW registration note */
     o += _r('SW VERSION (active)',   _dbgSwVer   ? _dbgSwVer + ' (build=' + _dbgSwBuild + ')' : 'querying…');
     o += _r('DISPLAY MODE',          _dbgDisplayMode);
     o += _r('ONLINE',                navigator.onLine ? 'YES' : 'NO');
@@ -33340,6 +33522,7 @@ document.addEventListener('click', function(e) {
     o += _r('AUTH RESOLVED',         window._snxAuthResolved ? 'YES' : 'NO');
     o += _r('AUTH ROLE',             window._snxRole || 'member');
     o += _r('AUTH TIMEOUT FIRED',    t.AUTH_TIMEOUT_FIRED ? 'YES — Firebase was slow' : 'no', t.AUTH_TIMEOUT_FIRED ? 'warn' : 'ok');
+    o += _r('VISIBILITY RESUME COUNT', window.__snxVisibilityResumeCount || 0);
 
     /* ═══ STARTUP TIMING ═══ */
     o += _h('STARTUP TIMING');
@@ -33432,8 +33615,8 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-WORLD-BG-GLOBAL-001';
-  var _SNX_SW_VER   = 'v93';
+  var _SNX_BUILD    = 'SNS-2026-DJ-MIC-001';
+  var _SNX_SW_VER   = 'v94';
   var _SNX_DEPLOY   = '2026-10-02T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 

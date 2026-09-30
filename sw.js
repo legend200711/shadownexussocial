@@ -10,11 +10,13 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNS-2026-WORLD-BG-GLOBAL-001
+ * Build: SNS-2026-DJ-MIC-001
+ * Changes: DJ mic status + level meter (v1.1.0), visibilitychange auth re-sync,
+ *          snx-radio-dj.js added to network-first so v1.1.0 always served fresh.
  */
 
-const CACHE_VERSION = 'v93';
-const BUILD_ID      = 'SNS-2026-WORLD-BG-GLOBAL-001';
+const CACHE_VERSION = 'v94';
+const BUILD_ID      = 'SNS-2026-DJ-MIC-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -97,6 +99,8 @@ const TV_NETWORK_FIRST_FILES = [
   'snx-radio-studio.js',
   'snx-radio.css',
   'snx-audio-coordinator.js',
+  // DJ engine — network-first so mic v1.1.0 is never served from stale cache
+  'snx-radio-dj.js',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

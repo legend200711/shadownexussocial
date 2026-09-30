@@ -49,7 +49,7 @@
 
 (function () {
 
-const DJ_VERSION      = '1.0.0';
+const DJ_VERSION      = '1.1.0';
 
 /* ── Firestore ── */
 const COL_SITE        = 'siteSettings';
@@ -109,6 +109,18 @@ let _staleTimer       = null;
 let _userVolume       = 0.9;   // captured before ducking
 let _duckRamp         = null;  // requestAnimationFrame handle
 
+/* ── Microphone status state machine ── */
+// States: 'off' | 'connecting' | 'on' | 'blocked' | 'error' | 'disconnected'
+let _micStatus        = 'off';
+let _micMuted         = false; // true = track disabled (soft mute), false = track enabled
+
+/* ── Web Audio analyser (level metering only — no speaker playback) ── */
+let _micAudioCtx      = null;  // AudioContext — level analysis only
+let _micAnalyser      = null;  // AnalyserNode
+let _micSource        = null;  // MediaStreamAudioSourceNode
+let _micMeterRaf      = null;  // requestAnimationFrame handle for meter updates
+let _micLevelBuf      = null;  // Uint8Array for getByteTimeDomainData
+
 /* ════════════════════════════════════════════════════════════
    PUBLIC API
 ════════════════════════════════════════════════════════════ */
@@ -117,9 +129,12 @@ window.SNXRadioDJ = {
   init,
   djStart,
   djEnd,
+  micToggle,
   destroy,
   get isActive()      { return _djActive; },
   get djState()       { return _djState; },
+  get micStatus()     { return _micStatus; },
+  get isMicMuted()    { return _micMuted; },
   get version()       { return DJ_VERSION; },
 };
 
@@ -213,6 +228,9 @@ async function djStart(onResult) {
   }
 
   // Step 1: Request microphone
+  // Notify UI: connecting
+  _setMicStatus('connecting');
+
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({
@@ -225,8 +243,21 @@ async function djStart(onResult) {
     });
   } catch (e) {
     console.warn('[SNX-DJ] Microphone error:', e.name, e.message);
+    // Distinguish permission-denied from other errors
+    const isBlocked = (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError');
+    _setMicStatus(isBlocked ? 'blocked' : 'error');
     if (onResult) onResult({ error: 'Microphone error: ' + (e.message || e.name) });
     // Radio state is untouched — do not proceed
+    return;
+  }
+
+  // Verify the track is actually live before proceeding
+  const audioTracks = stream.getAudioTracks();
+  if (!audioTracks.length || audioTracks[0].readyState !== 'live' || !audioTracks[0].enabled) {
+    console.warn('[SNX-DJ] getUserMedia returned stream but audio track is not live');
+    stream.getTracks().forEach(t => t.stop());
+    _setMicStatus('error');
+    if (onResult) onResult({ error: 'Microphone track is not active' });
     return;
   }
 
@@ -243,6 +274,20 @@ async function djStart(onResult) {
   _djSessionId = _randId();
   _djStream    = stream;
   _djActive    = true;
+  _micMuted    = false;
+
+  // Wire track.onended — detects physical device removal or OS mic kill
+  const _track = stream.getAudioTracks()[0];
+  if (_track) {
+    _track.onended = () => {
+      // Only report disconnected if we are still actively DJ-ing
+      if (_djActive && _micStatus === 'on') {
+        console.warn('[SNX-DJ] Microphone track ended unexpectedly');
+        _setMicStatus('disconnected');
+        _stopMicAnalyser();
+      }
+    };
+  }
 
   const sessionPath = RTDB_DJ_SESSIONS + '/' + _djSessionId;
   _djSessionRef = api.ref(rtdb, sessionPath);
@@ -280,6 +325,12 @@ async function djStart(onResult) {
   // Founder's own music is ducked so they can hear themselves through monitor
   _duckMusic();
 
+  // Step 7: Update mic status → ON (track is live-verified above)
+  _setMicStatus('on');
+
+  // Step 8: Start Web Audio analyser for visual level metering (no speaker output)
+  _startMicAnalyser(stream);
+
   console.log('[SNX-DJ] DJ Mode started — session:', _djSessionId);
   if (onResult) onResult({ active: true });
 }
@@ -292,6 +343,10 @@ async function djEnd() {
   if (!_djActive) return;
 
   console.log('[SNX-DJ] DJ Mode ending…');
+
+  // Stop analyser and clear mic status immediately
+  _stopMicAnalyser();
+  _setMicStatus('off');
 
   // Stop heartbeat
   if (_djHeartbeatTimer) { clearInterval(_djHeartbeatTimer); _djHeartbeatTimer = null; }
@@ -334,12 +389,182 @@ async function djEnd() {
   _djActive    = false;
   _djSessionId = null;
   _djCandidateBuf = {};
+  _micMuted    = false;
 
   // Unduck music for founder
   _unduckMusic();
 
   console.log('[SNX-DJ] DJ Mode ended');
 }
+
+/* ════════════════════════════════════════════════════════════
+   MICROPHONE STATUS + LEVEL METERING
+   ════════════════════════════════════════════════════════════ */
+
+/**
+ * Set the mic status and notify the UI immediately.
+ * Never exposes security-sensitive data — status label only.
+ */
+function _setMicStatus(status) {
+  _micStatus = status;
+  console.log('[SNX-DJ] mic status:', status);
+  if (typeof window.snxRadioDjMicStatus === 'function') {
+    try { window.snxRadioDjMicStatus(status); } catch (_) {}
+  }
+  /* Sync micActive to Firestore so listeners see the 🎙 ON AIR badge in real time.
+     Only write when DJ session is active (avoids writes on startup/teardown). */
+  if (_djActive) {
+    const micActive = (status === 'on');
+    _writeDjState({ micActive }).catch(() => {});
+  }
+}
+
+/**
+ * Toggle microphone on/off while DJ session is active.
+ * ON  → enable the audio track (listeners hear DJ voice again).
+ * OFF → disable the audio track (listeners hear silence on DJ channel).
+ *
+ * IMPORTANT: We enable/disable the track — we do NOT stop() it.
+ * Stopping would require getUserMedia again and creates a new stream.
+ * Disabling is instant and reversible without a new permission prompt.
+ *
+ * Guards against duplicate stream creation: if called rapidly, the
+ * existing stream is always reused.
+ */
+function micToggle() {
+  if (!_djActive || !_djStream) return;
+
+  const tracks = _djStream.getAudioTracks();
+  if (!tracks.length) return;
+
+  if (_micMuted) {
+    // Unmute: re-enable track and verify it's still live
+    const track = tracks[0];
+    if (track.readyState !== 'live') {
+      // Track died while muted (e.g. device removed) — report disconnected
+      _setMicStatus('disconnected');
+      return;
+    }
+    track.enabled = true;
+    _micMuted = false;
+    _setMicStatus('on');
+    // Resume analyser (it was paused while muted but AudioContext stays open)
+    if (!_micMeterRaf && _micAnalyser) {
+      _micMeterRaf = requestAnimationFrame(_micMeterTick);
+    }
+  } else {
+    // Mute: disable track
+    tracks.forEach(t => { t.enabled = false; });
+    _micMuted = true;
+    _setMicStatus('off');
+    // Pause analyser RAF — saves CPU; AudioContext stays open
+    if (_micMeterRaf) { cancelAnimationFrame(_micMeterRaf); _micMeterRaf = null; }
+    // Zero out the meter immediately
+    _notifyMicLevel(0);
+  }
+}
+
+/**
+ * Start Web Audio analyser for level metering.
+ * The signal chain is:
+ *   MediaStream → MediaStreamAudioSourceNode → AnalyserNode
+ * There is no destination connection, so the Founder's mic audio
+ * is NEVER routed to their own speaker — no feedback risk.
+ */
+function _startMicAnalyser(stream) {
+  _stopMicAnalyser(); // clean up any previous instance
+
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return; // browser too old
+
+    _micAudioCtx = new AudioCtx();
+
+    // On mobile, AudioContext may start in 'suspended' state
+    // (requires a user gesture). djStart() IS a user gesture, so resume.
+    if (_micAudioCtx.state === 'suspended') {
+      _micAudioCtx.resume().catch(() => {});
+    }
+
+    _micAnalyser = _micAudioCtx.createAnalyser();
+    _micAnalyser.fftSize      = 256;
+    _micAnalyser.smoothingTimeConstant = 0.75;
+
+    _micSource = _micAudioCtx.createMediaStreamSource(stream);
+    // Connect source → analyser ONLY. NOT connected to destination.
+    // This is the key that prevents speaker playback / echo / feedback.
+    _micSource.connect(_micAnalyser);
+
+    _micLevelBuf = new Uint8Array(_micAnalyser.frequencyBinCount);
+
+    // Start the meter update loop
+    _micMeterRaf = requestAnimationFrame(_micMeterTick);
+
+  } catch (e) {
+    console.warn('[SNX-DJ] Web Audio analyser error:', e.message);
+    // Non-fatal: mic works but no visual meter
+  }
+}
+
+/**
+ * Stop the analyser and release Web Audio resources.
+ */
+function _stopMicAnalyser() {
+  if (_micMeterRaf) { cancelAnimationFrame(_micMeterRaf); _micMeterRaf = null; }
+  try { if (_micSource)   { _micSource.disconnect(); _micSource = null; } } catch (_) {}
+  try { if (_micAnalyser) { _micAnalyser.disconnect(); _micAnalyser = null; } } catch (_) {}
+  try { if (_micAudioCtx && _micAudioCtx.state !== 'closed') {
+    _micAudioCtx.close();
+  }} catch (_) {}
+  _micAudioCtx = null;
+  _micLevelBuf = null;
+  // Zero the meter display
+  _notifyMicLevel(0);
+}
+
+/**
+ * RAF callback — reads time-domain data from AnalyserNode and
+ * computes a 0–1 RMS level for the UI meter.
+ * Throttled to ~15 fps (every ~67ms) so it doesn't burn CPU.
+ */
+let _micMeterLastTs = 0;
+function _micMeterTick(ts) {
+  // Throttle to ~15 fps
+  if (ts - _micMeterLastTs >= 66) {
+    _micMeterLastTs = ts;
+
+    if (_micAnalyser && _micLevelBuf) {
+      _micAnalyser.getByteTimeDomainData(_micLevelBuf);
+
+      // Compute RMS from 128 (silence = 128 in unsigned byte representation)
+      let sumSq = 0;
+      const len = _micLevelBuf.length;
+      for (let i = 0; i < len; i++) {
+        const s = (_micLevelBuf[i] - 128) / 128;
+        sumSq += s * s;
+      }
+      const rms = Math.sqrt(sumSq / len);
+      _notifyMicLevel(rms);
+    }
+  }
+
+  // Re-schedule only if still active and not muted
+  if (_djActive && !_micMuted && _micStatus === 'on') {
+    _micMeterRaf = requestAnimationFrame(_micMeterTick);
+  } else {
+    _micMeterRaf = null;
+  }
+}
+
+/**
+ * Fire the UI meter callback with a 0–1 level value.
+ */
+function _notifyMicLevel(level) {
+  if (typeof window.snxRadioDjMicLevel === 'function') {
+    try { window.snxRadioDjMicLevel(level); } catch (_) {}
+  }
+}
+
 
 /* ════════════════════════════════════════════════════════════
    DJ — WEBRTC: LISTEN FOR LISTENERS AND SEND OFFERS
@@ -755,6 +980,7 @@ function _serverTimestamp() {
 ════════════════════════════════════════════════════════════ */
 
 function destroy() {
+  _stopMicAnalyser();
   if (_djActive) djEnd().catch(() => {});
   if (_listenerPc) _listenerDisconnect();
   if (_djStateUnsub) { try { _djStateUnsub(); } catch (_) {} _djStateUnsub = null; }

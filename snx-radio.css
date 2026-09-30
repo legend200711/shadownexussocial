@@ -2197,3 +2197,137 @@
     width: 100%;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   DJ MIC CONTROLS v1.1  (added with microphone status + meter)
+   ══════════════════════════════════════════════════════════════ */
+
+/* Mic row — flex container below GO/END buttons, hidden until DJ is live */
+.snxr-dj-mic-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+/* Status badge container */
+.snxr-dj-mic-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 130px;
+}
+
+/* Emoji icon inside status badge */
+.snxr-dj-mic-icon {
+  font-size: 15px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Text label inside status badge */
+.snxr-dj-mic-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #5a7a9a;
+  transition: color 0.2s ease;
+}
+
+/* Mic toggle button */
+.snxr-dj-mic-btn {
+  background: rgba(57,255,20,0.12);
+  border: 1px solid rgba(57,255,20,0.35);
+  color: #39FF14;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.snxr-dj-mic-btn:hover {
+  background: rgba(57,255,20,0.22);
+  border-color: rgba(57,255,20,0.6);
+}
+.snxr-dj-mic-btn:active {
+  background: rgba(57,255,20,0.32);
+}
+
+/* Level meter wrapper */
+.snxr-dj-meter-wrap {
+  display: flex;
+  align-items: center;
+}
+
+/* Bar row */
+.snxr-dj-meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+}
+
+/* Single meter bar — inactive state */
+.snxr-dj-meter-bar {
+  width: 6px;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.1);
+  transition: background 0.06s linear;
+}
+
+/* Active bar — colour set inline by JS (green/yellow/red gradient) */
+.snxr-dj-bar-active {
+  background: #39FF14; /* overridden per-bar by JS */
+}
+
+/* Blocked / permission error notice */
+.snxr-dj-mic-blocked {
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 5px;
+  color: #ef4444;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* 🎙 ON AIR badge — shown in listener DJ banner when mic is active */
+.snxr-dj-mic-onair {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: rgba(57,255,20,0.15);
+  border: 1px solid rgba(57,255,20,0.4);
+  border-radius: 20px;
+  color: #39FF14;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  animation: snxr-mic-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes snxr-mic-pulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* Mobile: tighten mic row on narrow screens */
+@media (max-width: 420px) {
+  .snxr-dj-mic-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .snxr-dj-mic-btn {
+    width: 100%;
+    text-align: center;
+  }
+}

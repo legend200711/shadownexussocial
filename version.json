@@ -1,11 +1,12 @@
 {
-  "buildId": "SNS-2026-WORLD-BG-GLOBAL-001",
-  "swVersion": "v93",
-  "deployedAt": "2026-10-02T00:00:00Z",
+  "buildId": "SNS-2026-DJ-MIC-001",
+  "swVersion": "v94",
+  "deployedAt": "2026-10-02T06:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
   "liveVersion": "SNS-2026-LIVE-003",
   "guestModeVersion": "SNS-2026-GUEST-MODE-001",
-  "note": "SNS-2026-WORLD-BG-GLOBAL-001: World background confirmed correct (supplied PNG = deployed WebP, same artwork Q92). Added snx-world-bg.css + image preload to channel.html so the Grim Reaper world appears on all pages. SW cache bumped to v93 to force re-precache."
+  "djVersion": "1.1.0",
+  "note": "SNS-2026-DJ-MIC-001: DJ mic status/level meter (v1.1.0), visibilitychange auth gate re-sync for mobile resume, snx-radio-dj.js network-first in SW, micActive field synced to Firestore for listener badge, SW v93→v94."
 }
