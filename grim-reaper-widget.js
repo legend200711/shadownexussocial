@@ -7,6 +7,25 @@
 (function(global){
 'use strict';
 
+/* ── 0. RAF pause/resume — shared across all 3 canvas loops ── */
+/* widgetOpen is declared below; we read it at runtime.          */
+var _grimRafPaused = false;
+var _grimRafSceneId = 0;   // scene background loop
+var _grimRafFabId   = 0;   // FAB skull loop
+var _grimRafCharId  = 0;   // full character loop
+
+/* Called when ANY of the 3 loops needs to be restarted after pause */
+function _grimResume(){
+  _grimRafPaused = false;
+  /* Each loop restarts itself if its RAF id is 0 (was cancelled).
+     We call the stored restart functions if they were registered. */
+  if(_grimRafSceneId === 0 && typeof _grimRestartScene === 'function') _grimRestartScene();
+  if(_grimRafFabId   === 0 && typeof _grimRestartFab   === 'function') _grimRestartFab();
+  if(_grimRafCharId  === 0 && typeof _grimRestartChar  === 'function') _grimRestartChar();
+}
+
+var _grimRestartScene, _grimRestartFab, _grimRestartChar;
+
 /* ── 1. Inject stylesheet ──────────────────────────────────── */
 (function(){
   var base = (function(){
@@ -158,10 +177,13 @@ function initSceneCanvas(){
            al:Math.random()*.18+.03,phase:Math.random()*Math.PI*2};
   }
   resize();
-  window.addEventListener('resize',resize);
-  window.addEventListener('orientationchange',function(){ setTimeout(resize,150); });
+  var _sceneResizeRaf=0;
+  function _schedSceneResize(){ if(_sceneResizeRaf) return; _sceneResizeRaf=requestAnimationFrame(function(){ _sceneResizeRaf=0; resize(); }); }
+  window.addEventListener('resize',_schedSceneResize);
+  window.addEventListener('orientationchange',function(){ setTimeout(_schedSceneResize,150); });
 
   function frame(){
+    if(_grimRafPaused){ _grimRafSceneId=0; return; }
     t++;
     ctx.clearRect(0,0,W,H);
     /* dark bg */
@@ -196,9 +218,10 @@ function initSceneCanvas(){
       ctx.beginPath(); ctx.arc(m.x,m.y,m.r,0,Math.PI*2); ctx.fill();
     }
     ctx.restore();
-    requestAnimationFrame(frame);
+    _grimRafSceneId=requestAnimationFrame(frame);
   }
-  frame();
+  _grimRestartScene=function(){ _grimRafSceneId=requestAnimationFrame(frame); };
+  _grimRafSceneId=requestAnimationFrame(frame);
 }
 
 function gwDrawTrees(ctx,W,H,t,side){
@@ -232,6 +255,7 @@ function initFabCanvas(){
   var ctx=cv.getContext('2d');
   var W=52,H=52,t=0;
   function frame(){
+    if(_grimRafPaused){ _grimRafFabId=0; return; }
     t++;
     ctx.clearRect(0,0,W,H);
     var eg=0.55+0.45*Math.sin(t*.048);
@@ -262,9 +286,10 @@ function initFabCanvas(){
     erG.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=erG; ctx.beginPath(); ctx.ellipse(cx+5,cy-7,6*eg,4.5*eg,-.28,0,Math.PI*2); ctx.fill();
     ctx.restore();
-    requestAnimationFrame(frame);
+    _grimRafFabId=requestAnimationFrame(frame);
   }
-  frame();
+  _grimRestartFab=function(){ _grimRafFabId=requestAnimationFrame(frame); };
+  _grimRafFabId=requestAnimationFrame(frame);
 }
 
 /* ── 6. Full Grim Reaper character canvas ──────────────────── */
@@ -281,8 +306,10 @@ function initCharCanvas(){
     cv.style.width=(CW*scale)+'px'; cv.style.height=(CH*scale)+'px';
   }
   resize();
-  window.addEventListener('resize',resize);
-  window.addEventListener('orientationchange',function(){ setTimeout(resize,150); });
+  var _charResizeRaf=0;
+  function _schedCharResize(){ if(_charResizeRaf) return; _charResizeRaf=requestAnimationFrame(function(){ _charResizeRaf=0; resize(); }); }
+  window.addEventListener('resize',_schedCharResize);
+  window.addEventListener('orientationchange',function(){ setTimeout(_schedCharResize,150); });
 
   var t=0,breathPhase=0,walkPhase=0;
   var isSpeaking=false,speakAmt=0,eyeGlow=0;
@@ -296,10 +323,15 @@ function initCharCanvas(){
   for(var i=0;i<PARTICLES;i++) embers.push(newEmber());
 
   /* On resize recalculate particle budget without rebuilding the whole canvas */
+  var _emberResizeRaf=0;
   window.addEventListener('resize',function(){
-    var newP=gwParticles();
-    while(embers.length>newP) embers.pop();
-    while(embers.length<newP) embers.push(newEmber());
+    if(_emberResizeRaf) return;
+    _emberResizeRaf=requestAnimationFrame(function(){
+      _emberResizeRaf=0;
+      var newP=gwParticles();
+      while(embers.length>newP) embers.pop();
+      while(embers.length<newP) embers.push(newEmber());
+    });
   });
   function newEmber(){
     return{x:CW*.3+Math.random()*CW*.4,y:CH*.55+Math.random()*CH*.35,
@@ -328,6 +360,7 @@ function initCharCanvas(){
   global.grimSpeaking=function(on){ isSpeaking=on; };
 
   function loop(){
+    if(_grimRafPaused){ _grimRafCharId=0; return; }
     t++; breathPhase+=.019; walkPhase+=.028;
     targetLeanX=mouseX*8; leanX+=(targetLeanX-leanX)*.06;
     ctx.clearRect(0,0,CW,CH);
@@ -338,7 +371,7 @@ function initCharCanvas(){
     else speakAmt=Math.max(0,speakAmt-.04);
     eyeGlow=.55+.45*Math.sin(t*.048);
     drawScene(walk,walkBob,breathe);
-    requestAnimationFrame(loop);
+    _grimRafCharId=requestAnimationFrame(loop);
   }
 
   function drawScene(walk,walkBob,breathe){
@@ -627,7 +660,8 @@ function initCharCanvas(){
     ctx.beginPath(); ctx.roundRect(cx-15,mY,30,mH,2); ctx.fill();
   }
 
-  loop();
+  _grimRestartChar=function(){ _grimRafCharId=requestAnimationFrame(loop); };
+  _grimRafCharId=requestAnimationFrame(loop);
 }
 
 /* ── 7. GRIM AI engine ─────────────────────────────────────── */
@@ -926,6 +960,8 @@ function openWidget(){
   unreadCount=0;
   var badge=document.getElementById('gw-badge');
   if(badge){badge.textContent='';badge.classList.remove('gw-show');}
+  /* Resume scene + char canvas loops now the window is visible */
+  if(!document.hidden) _grimResume();
   /* focus input — skip auto-focus on mobile to avoid keyboard pop */
   setTimeout(function(){
     var inp=document.getElementById('gw-usr-in');
@@ -943,6 +979,13 @@ function closeWidget(){
   widgetOpen=false;
   win.classList.remove('gw-visible');
   fab.classList.remove('gw-open');
+  /* Pause scene + char canvas loops — widget window is hidden.
+     FAB canvas (always visible) continues independently via _grimRafFabId. */
+  _grimRafPaused = true;
+  /* FAB must keep running — restart it immediately so only scene+char stop */
+  _grimRafPaused = false;
+  if(_grimRafSceneId) { cancelAnimationFrame(_grimRafSceneId); _grimRafSceneId=0; }
+  if(_grimRafCharId)  { cancelAnimationFrame(_grimRafCharId);  _grimRafCharId=0;  }
 }
 
 function minimizeWidget(){
@@ -1055,6 +1098,23 @@ function init(){
   initFabCanvas();
   initSceneCanvas();
   initCharCanvas();
+
+  /* ── Page visibility: pause all decorative RAF work when tab hidden ── */
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){
+      /* Cancel all 3 loops */
+      if(_grimRafSceneId){ cancelAnimationFrame(_grimRafSceneId); _grimRafSceneId=0; }
+      if(_grimRafFabId)  { cancelAnimationFrame(_grimRafFabId);   _grimRafFabId=0;   }
+      if(_grimRafCharId) { cancelAnimationFrame(_grimRafCharId);  _grimRafCharId=0;  }
+    } else {
+      /* Resume FAB always; resume scene+char only if widget is open */
+      if(_grimRafFabId===0  && typeof _grimRestartFab   === 'function') _grimRestartFab();
+      if(widgetOpen){
+        if(_grimRafSceneId===0 && typeof _grimRestartScene === 'function') _grimRestartScene();
+        if(_grimRafCharId===0  && typeof _grimRestartChar  === 'function') _grimRestartChar();
+      }
+    }
+  });
 
   /* restore API key */
   var keyInp=document.getElementById('gw-api-key-in');

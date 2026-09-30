@@ -179,6 +179,8 @@ window.SNXRadio = {
  * @param {Function} [opts.onAutoplayBlocked] cb()
  * @param {Function} [opts.onError]          cb(msg)
  */
+let _initialized = false;
+
 async function init(opts = {}) {
   if (_destroyed) { console.warn('[SNX-RADIO] destroyed — call SNXRadio again to rebuild'); return; }
 
@@ -196,12 +198,18 @@ async function init(opts = {}) {
   // Live data callbacks
   if (opts.onTracksChange)    on('tracksChange',     opts.onTracksChange);
 
+  // Register callbacks before the idempotent guard so pageEnter re-registrations
+  // still wire the UI, but only start subscriptions once.
+  const firstInit = !_initialized;
+  if (firstInit) _initialized = true;
+
   _emit('stateChange', 'loading');
 
   try {
     // Step 1 — resolve Firebase handles
     _resolveFirebase();
 
+    if (firstInit) {
     // Step 2 — sync server time (non-blocking; falls back to local clock)
     _syncServerTime().catch(() => {});
 
@@ -212,7 +220,17 @@ async function init(opts = {}) {
     _subscribeSchedule();
     _subscribePrograms();
     _subscribeSettings();
+    } else {
+      // Already initialized — re-emit current state so the UI refreshes
+      if (_station && _station.enabled) {
+        _emit('stateChange', _playing ? 'on-air' : 'loading');
+        _emit('nowPlaying', _playlist[_trackIdx] || null);
+        _emit('upNext', _playlist[(_trackIdx + 1) % Math.max(_playlist.length, 1)] || null);
+      } else {
+        _emit('stateChange', 'off-air');
+      }
 
+    }
   } catch (err) {
     console.error('[SNX-RADIO] init error:', err.message);
     _emit('error', err.message);
@@ -296,6 +314,7 @@ function setVolume(v) {
 
 function destroy() {
   _destroyed = true;
+  _initialized = false;
   _stopTick();
   _stopAudio();
   if (_stationUnsub)  { try { _stationUnsub(); }  catch (_) {} _stationUnsub  = null; }
@@ -411,6 +430,7 @@ function _serverNow() {
 
 function _subscribeStation() {
   if (!_firestore) return;
+  if (_stationUnsub) return; // already subscribed — idempotent
 
   // Use modular Firestore SDK helpers — loaded in same session as firebase-config.js
   const mods = window._snxFirestore || window._snxFirestoreModules;
@@ -762,8 +782,44 @@ function _subscribeAllTracksFallback() {
 
 function _subscribeRadioTracks() {
   if (_tracksUnsub) return; // already subscribed
-  if (!_firestore) return;
 
+  // Prefer the shared SNXRadioTrackStore to avoid a duplicate Firestore listener.
+  // Fall back to a direct listener only if the store is not available.
+  if (window.SNXRadioTrackStore) {
+    _tracksUnsub = window.SNXRadioTrackStore.subscribe(function (docs) {
+      if (_destroyed) return;
+
+      // Build a map from the store's raw doc array
+      const trackMap = {};
+      docs.forEach(function (d) { trackMap[d.id] = d; });
+
+      // Update any matching entries in _playlist (metadata only)
+      let metaChanged = false;
+      _playlist.forEach(function (t, i) {
+        const fresh = trackMap[t.id];
+        if (!fresh) return;
+        const norm = _normaliseTrack(fresh.id, fresh);
+        if (norm.title !== t.title || norm.artist !== t.artist ||
+            norm.artworkUrl !== t.artworkUrl || norm.enabled !== t.enabled) {
+          _playlist[i] = norm;
+          metaChanged = true;
+        }
+      });
+
+      if (metaChanged) {
+        _notifyNowPlaying();
+        _notifyUpNext();
+      }
+
+      // Notify track library / request modal listeners
+      _emit('tracksChange', Object.values(trackMap));
+      console.log('[SNX-RADIO] /radioTracks update (via store) —', docs.length, 'tracks');
+    });
+    return;
+  }
+
+  // Fallback: direct listener when store is not loaded
+  if (!_firestore) return;
   const mods = window._snxFirestore || window._snxFirestoreModules;
   if (!mods || !mods.collection || !mods.onSnapshot) return;
 
@@ -773,17 +829,14 @@ function _subscribeRadioTracks() {
   const unsub = onSnapshot(colRef, (snap) => {
     if (_destroyed) return;
 
-    // Build a map of all current radioTracks
     const trackMap = {};
     snap.forEach(d => { trackMap[d.id] = { id: d.id, ...d.data() }; });
 
-    // Update any matching entries in _playlist (metadata only)
     let metaChanged = false;
     _playlist.forEach((t, i) => {
       const fresh = trackMap[t.id];
       if (!fresh) return;
       const norm = _normaliseTrack(fresh.id, fresh);
-      // Detect actual metadata changes before overwriting
       if (norm.title !== t.title || norm.artist !== t.artist ||
           norm.artworkUrl !== t.artworkUrl || norm.enabled !== t.enabled) {
         _playlist[i] = norm;
@@ -796,13 +849,11 @@ function _subscribeRadioTracks() {
       _notifyUpNext();
     }
 
-    // Always notify track library / request modal listeners
     _emit('tracksChange', Object.values(trackMap));
-
-    console.log('[SNX-RADIO] /radioTracks live update —', snap.size, 'tracks');
+    console.log('[SNX-RADIO] /radioTracks live update (direct) —', snap.size, 'tracks');
   }, (err) => {
     console.warn('[SNX-RADIO] radioTracks snapshot error:', err.message);
-    _tracksUnsub = null; // allow re-subscription on next attempt
+    _tracksUnsub = null;
   });
 
   _tracksUnsub = unsub;
@@ -944,6 +995,8 @@ function _ensureAudio() {
   _audioEl.preload    = 'auto';
   _audioEl.crossOrigin = 'anonymous';
   _audioEl.volume     = 0.9;
+  // Lock preload so snx-net.js tier changes never touch the Radio audio element
+  _audioEl.setAttribute('data-snx-preload-locked', '1');
 
   _audioEl.addEventListener('play',  () => {
     _playing = true;
@@ -1407,6 +1460,7 @@ async function _deleteDoc(col, id) {
 
 function _subscribeSchedule() {
   if (!_firestore) return;
+  if (_scheduleUnsub) return; // already subscribed — idempotent
   const mods = window._snxFirestore || window._snxFirestoreModules;
   try {
     if (mods && mods.collection && mods.onSnapshot && mods.query && mods.orderBy) {
@@ -1447,6 +1501,7 @@ function _onScheduleUpdated() {
 
 function _subscribePrograms() {
   if (!_firestore) return;
+  if (_programsUnsub) return; // already subscribed — idempotent
   const mods = window._snxFirestore || window._snxFirestoreModules;
   try {
     if (mods && mods.collection && mods.onSnapshot) {
@@ -1476,6 +1531,7 @@ function _subscribePrograms() {
 
 function _subscribeSettings() {
   if (!_firestore) return;
+  if (_settingsUnsub) return; // already subscribed — idempotent
   const mods = window._snxFirestore || window._snxFirestoreModules;
   try {
     if (mods && mods.doc && mods.onSnapshot) {

@@ -137,7 +137,11 @@ function _buildParticles() {
 
   function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
   resize();
-  window.addEventListener('resize', resize);
+  let _bcResizeRaf = 0;
+  window.addEventListener('resize', function () {
+    if (_bcResizeRaf) return;
+    _bcResizeRaf = requestAnimationFrame(function () { _bcResizeRaf = 0; resize(); });
+  });
 
   function mkParticle() {
     return { x: Math.random()*W, y: Math.random()*H, r: Math.random()*1.4+0.3,

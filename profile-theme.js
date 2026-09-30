@@ -94,6 +94,7 @@
 
   let _canvas = null;
   let _animFrame = null;
+  let _canvasResizeHandler = null;  // stored to allow removal on stopEffects
 
   // ── Firebase helpers ──────────────────────────────────────────
   function fs() { return window._snxFirestore; }
@@ -244,6 +245,10 @@
     document.querySelectorAll('#profile .section-card').forEach(el => el.classList.remove('snx-anim-neon-border','snx-anim-pulse-glow'));
     if (_canvas) { _canvas.remove(); _canvas = null; }
     if (_animFrame) { cancelAnimationFrame(_animFrame); _animFrame = null; }
+    if (_canvasResizeHandler) {
+      window.removeEventListener('resize', _canvasResizeHandler);
+      _canvasResizeHandler = null;
+    }
     const vid = profile.querySelector('.snx-profile-bg-video');
     if (vid) vid.remove();
   }
@@ -264,7 +269,12 @@
       _canvas.height = container.offsetHeight;
     }
     resize();
-    window.addEventListener('resize', resize);
+    var _ptResizeRaf = 0;
+    _canvasResizeHandler = function () {
+      if (_ptResizeRaf) return;
+      _ptResizeRaf = requestAnimationFrame(function () { _ptResizeRaf = 0; resize(); });
+    };
+    window.addEventListener('resize', _canvasResizeHandler);
 
     // Seed particles
     function spawn() {

@@ -270,10 +270,15 @@
 
   var embers = [];
   for (var ei = 0; ei < PARTICLES; ei++) embers.push(newEmber());
+  var _gcwEmbersRaf = 0;
   window.addEventListener('resize', function(){
-    var np = gcwParticles();
-    while(embers.length > np) embers.pop();
-    while(embers.length < np) embers.push(newEmber());
+    if (_gcwEmbersRaf) return;
+    _gcwEmbersRaf = requestAnimationFrame(function () {
+      _gcwEmbersRaf = 0;
+      var np = gcwParticles();
+      while(embers.length > np) embers.pop();
+      while(embers.length < np) embers.push(newEmber());
+    });
   });
   function newEmber() {
     return {
@@ -610,10 +615,25 @@
   }
 
   /* ── Main loop ─────────────────────────────────────────────── */
+  var _gcwRafId = 0;
+  var _gcwRafPaused = false;
+
   function loop() {
+    if (_gcwRafPaused) { _gcwRafId = 0; return; }
     drawScene();
     drawChar();
-    requestAnimationFrame(loop);
+    _gcwRafId = requestAnimationFrame(loop);
+  }
+
+  function _gcwPause() {
+    _gcwRafPaused = true;
+    if (_gcwRafId) { cancelAnimationFrame(_gcwRafId); _gcwRafId = 0; }
+  }
+
+  function _gcwResume() {
+    if (!_gcwRafPaused) return;
+    _gcwRafPaused = false;
+    if (_gcwRafId === 0) _gcwRafId = requestAnimationFrame(loop);
   }
 
   /* ── Lazy init via IntersectionObserver / requestIdleCallback ── */
@@ -652,11 +672,19 @@
     ready = true;
     /* Responsive resize + orientation change (some Android only fires orientationchange) */
     function onViewportChange() { applySize(CFG.size); }
-    window.addEventListener('resize', onViewportChange);
+    var _gcwResizeRaf = 0;
+    window.addEventListener('resize', function () {
+      if (_gcwResizeRaf) return;
+      _gcwResizeRaf = requestAnimationFrame(function () { _gcwResizeRaf = 0; onViewportChange(); });
+    });
     window.addEventListener('orientationchange', function() {
       setTimeout(onViewportChange, 150);
     });
-    loop();
+    /* Pause/resume RAF loop with page visibility */
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { _gcwPause(); } else { _gcwResume(); }
+    });
+    _gcwRafId = requestAnimationFrame(loop);
   }
 
   /* Use requestIdleCallback when available so the widget doesn't

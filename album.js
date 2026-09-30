@@ -90,10 +90,8 @@
            increment, arrayUnion, arrayRemove }
             = window._snxFirestore);
 
-        // Keep currentUser in sync — always overwrite so a token refresh is picked up
-        setInterval(() => {
-            currentUser = window._snxCurrentUser || currentUser;
-        }, 2000);
+        // currentUser is kept live via liveUser() which always reads window._snxCurrentUser.
+        // No polling interval is needed — all write paths call liveUser() directly.
 
         injectHTML();
         bindEvents();
@@ -672,6 +670,14 @@
     function closeUploadModal() {
         const modal = document.getElementById('snxAlbumUploadModal');
         if (modal) modal.classList.remove('open');
+        // Revoke any preview blob URLs that are still alive
+        const container = document.getElementById('snxAumPreviews');
+        if (container) {
+            container.querySelectorAll('img[data-blob-url]').forEach(el => {
+                try { URL.revokeObjectURL(el.getAttribute('data-blob-url')); } catch (_) {}
+            });
+            container.innerHTML = '';
+        }
         _pendingFiles = [];
     }
 
@@ -698,11 +704,16 @@
     function renderPreviews(files) {
         const container = document.getElementById('snxAumPreviews');
         if (!container) return;
+        // Revoke any existing blob URLs before replacing the previews
+        container.querySelectorAll('img[data-blob-url]').forEach(el => {
+            try { URL.revokeObjectURL(el.getAttribute('data-blob-url')); } catch (_) {}
+        });
         container.innerHTML = '';
         files.forEach(f => {
             const url = URL.createObjectURL(f);
             const img = document.createElement('img');
             img.src = url;
+            img.setAttribute('data-blob-url', url); // tracked for revocation
             img.className = 'snx-aum-thumb-preview';
             img.title = f.name;
             container.appendChild(img);

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="snx-commit" content="SNS-2026-DJ-MIC-001">
+<meta name="snx-commit" content="SNS-2026-STAGE2G-FINAL">
 <title>Shadow Nexus Social — Stay Legendary 🌑🔥</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 
@@ -62,17 +62,25 @@
 <!-- ── Shadow Nexus Platform Upgrade (Status, Announcements, Search, Security, Maintenance, Audit) ── -->
 <link rel="stylesheet" href="shadow-nexus-upgrade.css?v=SNS-2026-ALBUM-PRIVACY-001">
 <!-- ── Shadow Nexus Adaptive Cinematic Performance System ── -->
-<link rel="stylesheet" href="snx-perf.css?v=SNS-2026-PERF-001">
+<link rel="stylesheet" href="snx-perf.css?v=SNS-2026-STAGE2E-001">
 <!-- ── Nexus Cinematic Glass Visual Upgrade (loads last — overrides land above perf quality gates) ── -->
 <link rel="stylesheet" href="nexus-glass.css?v=SNS-2026-GLASS-001">
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
-<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-DJ-MIC-001">
-<!-- ── Shadow Nexus Radio — player + standalone page styles ── -->
-<link rel="stylesheet" href="snx-radio.css?v=SNS-2026-RADIO-PAGE-001">
-<!-- ── Preload the world background image so it appears without flash ── -->
-<link rel="preload" as="image" href="assets/images/shadow-nexus-global-bg.png" fetchpriority="high">
+<link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-STAGE2A-001">
+<!-- ── Shadow Nexus Radio — player + standalone page styles ──
+     CSS deferred: loaded by SNXFeatureLoader when user opens the Radio page.
+     The link tag below is intentionally REMOVED from startup; loader injects it.
+     Stage 2B: SNS-2026-STAGE2B-001 -->
+<!-- ── Stage 2A.1: Cold-Start Background Optimization ──
+     NO unconditional preloads here. The snxColdStart bootstrap script (below)
+     reads the saved performance override (or runs a fast sync detection) and
+     injects exactly ONE <link rel="preload"> for the correct derivative BEFORE
+     any network request for the background begins.
+     LITE  → shadow-nexus-global-bg-lite.webp     (~80 KB)
+     BAL   → shadow-nexus-global-bg-balanced.webp (~223 KB)
+     FULL  → shadow-nexus-global-bg.png           (~2.90 MB)  ── -->
 
 <!-- ── Preconnect to Firebase + R2 CDN so first load is faster ── -->
 <link rel="preconnect" href="https://www.gstatic.com">
@@ -81,19 +89,131 @@
 <link rel="dns-prefetch" href="https://pub-e5efe8c515324a8ab89ca15c5fa731dd.r2.dev">
 <link rel="dns-prefetch" href="https://pub-1cb8318faddb49f0b2c91fbd098c271f.r2.dev">
 
+<!-- ══════════════════════════════════════════════════════════════
+     SNX COLD-START BOOTSTRAP — Stage 2A.1
+     Runs SYNCHRONOUSLY in <head> before any CSS or script is parsed.
+     Makes a single lightweight decision (localStorage + cheap hints)
+     and:
+       1. Injects ONE <link rel="preload"> for the correct background.
+       2. Writes a tiny <style> that sets the html background to that
+          image so the shell is visible immediately without waiting for
+          snx-world-bg.css or snx-adaptive-performance.js.
+       3. Exposes window._SNXBootstrap = { mode, src } so the full
+          performance controller can adopt it and skip a re-swap.
+     No Firebase. No network requests. No async work.
+     ══════════════════════════════════════════════════════════════ -->
+<script>
+(function () {
+  'use strict';
+  var STORAGE_KEY = 'snxAdaptiveMode';
+  var GRAD = 'linear-gradient(to bottom,rgba(2,4,14,0.30) 0%,rgba(2,4,14,0.25) 30%,rgba(2,4,14,0.28) 60%,rgba(2,4,14,0.35) 100%)';
+  var BG = {
+    LITE:     'assets/images/shadow-nexus-global-bg-lite.webp',
+    BALANCED: 'assets/images/shadow-nexus-global-bg-balanced.webp',
+    FULL:     'assets/images/shadow-nexus-global-bg.png'
+  };
+
+  /* ── Step 1: Read saved user override ── */
+  var stored = null;
+  try { stored = localStorage.getItem(STORAGE_KEY); } catch (_) {}
+  var mode = null;
+
+  if (stored === 'LITE' || stored === 'BALANCED' || stored === 'FULL') {
+    mode = stored; // honour explicit user choice immediately
+  } else {
+    /* ── Step 2: Fast synchronous AUTO detection ─────────────────
+       Only inspects cheap, already-available browser values.
+       No network calls, no Firebase, no async.
+       Conservative bias: uncertain → BALANCED (never FULL unless clearly capable).
+    ────────────────────────────────────────────────────────────── */
+    try {
+      var score = 0;
+      var conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (conn) {
+        if (conn.saveData) { mode = 'LITE'; }
+        else {
+          var eff = conn.effectiveType || '4g';
+          if (eff === 'slow-2g' || eff === '2g') score -= 3;
+          else if (eff === '3g')                  score -= 1;
+          else if (eff === '4g')                  score += 1;
+        }
+      }
+      if (!mode) {
+        var cores = navigator.hardwareConcurrency;
+        if (cores) {
+          if (cores >= 8)      score += 2;
+          else if (cores >= 4) score += 1;
+          else if (cores <= 2) score -= 1;
+        }
+        var mem = navigator.deviceMemory;
+        if (mem) {
+          if (mem >= 8)      score += 2;
+          else if (mem >= 4) score += 1;
+          else if (mem <= 1) score -= 2;
+          else if (mem <= 2) score -= 1;
+        }
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          mode = score <= 0 ? 'LITE' : 'BALANCED';
+        }
+        if (!mode) {
+          // Conservative: require score >= 3 for FULL; default uncertain → BALANCED
+          if (score >= 3)      mode = 'FULL';
+          else if (score >= 0) mode = 'BALANCED';
+          else                 mode = 'LITE';
+        }
+      }
+    } catch (_) {
+      mode = 'BALANCED'; // safe fallback on any error
+    }
+  }
+
+  var src = BG[mode] || BG['BALANCED'];
+
+  /* ── Step 3: Inject exactly ONE preload for the chosen derivative ── */
+  try {
+    var preload = document.createElement('link');
+    preload.rel = 'preload';
+    preload.as = 'image';
+    preload.href = src;
+    preload.setAttribute('fetchpriority', 'high');
+    document.head.appendChild(preload);
+  } catch (_) {}
+
+  /* ── Step 4: Inject startup background style on <html> ─────────────
+     Shows the dark shell immediately (background-color, no network cost).
+     The background-image starts decoding from the preloaded derivative.
+     snx-world-bg.css will later reinforce this on #snx-global-world-bg.
+  ───────────────────────────────────────────────────────────────── */
+  try {
+    var s = document.createElement('style');
+    s.id = '_snxBootstrapStyle';
+    var esc = src.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    s.textContent =
+      'html{background-color:#02040a!important;' +
+      'background-image:' + GRAD + ',url("' + esc + '")!important;' +
+      'background-size:cover!important;background-position:center center!important;' +
+      'background-repeat:no-repeat!important;background-attachment:scroll!important;' +
+      'margin:0}' +
+      'body{background:transparent!important;margin:0}' +
+      /* Also prime the auth gate with the same image (prevents its own PNG request) */
+      '#snx-auth-gate{background-image:' +
+      'linear-gradient(to bottom,rgba(2,4,14,0.45) 0%,rgba(2,4,14,0.40) 30%,rgba(2,4,14,0.43) 60%,rgba(2,4,14,0.50) 100%),' +
+      'url("' + esc + '")}';
+    document.head.appendChild(s);
+  } catch (_) {}
+
+  /* ── Step 5: Publish for performance controller handoff ── */
+  window._SNXBootstrap = { mode: mode, src: src };
+})();
+</script>
+
 <style>
-/* ── Prevent any white/bright flash before CSS loads ──
-   html gets the world background immediately so even if external
-   CSS hasn't loaded yet, the user sees the artwork not a black screen. */
+/* ── Shell fallback: dark background-color visible the instant the parser
+   reaches this <style> block — belt-and-suspenders in case the bootstrap
+   script above is blocked or deferred by a browser extension.
+   No background-image here; the bootstrap script handles that.          ── */
 html {
-    background-color: #02040a !important;
-    background-image:
-        linear-gradient(to bottom, rgba(2,4,14,0.38) 0%, rgba(2,4,14,0.35) 40%, rgba(2,4,14,0.42) 100%),
-        url('assets/images/shadow-nexus-global-bg.png') !important;
-    background-size: cover !important;
-    background-position: center center !important;
-    background-repeat: no-repeat !important;
-    background-attachment: scroll !important;
+    background-color: #02040a;
     margin: 0;
 }
 body { background: transparent !important; margin: 0; }
@@ -6342,19 +6462,12 @@ body.arcade-fs-ios body::after { display:none !important; }
        On reopen/refresh it keeps the world visible while auth resolves.
        No spinner or loading content — silent except for the background. */
     z-index: 9990;
-    /* World background as fallback — same image as #snx-global-world-bg.
-       This ensures the artwork is visible even before snx-world-bg.css renders
-       the fixed background div (which is at z-index:-1 and therefore BELOW this). */
+    /* Stage 2A.1: background-image is NOT set here.
+       The cold-start bootstrap script (_snxBootstrapStyle) sets it to the
+       same derivative already selected for html/snx-global-world-bg,
+       preventing a second independent request for shadow-nexus-global-bg.png.
+       background-color provides the dark shell while the image decodes. */
     background-color: #02040a;
-    background-image:
-        linear-gradient(
-            to bottom,
-            rgba(2, 4, 14, 0.45) 0%,
-            rgba(2, 4, 14, 0.40) 30%,
-            rgba(2, 4, 14, 0.43) 60%,
-            rgba(2, 4, 14, 0.50) 100%
-        ),
-        url('assets/images/shadow-nexus-global-bg.png');
     background-size: cover;
     background-position: center center;
     background-repeat: no-repeat;
@@ -11975,17 +12088,20 @@ body.arcade-fs-ios body::after { display:none !important; }
   <div id="snxRadioPageInner" style="padding:0 0 32px;"></div>
 </div><!-- end radioPage -->
 
-<!-- ── Shadow Nexus Live — CSS + Engine ── -->
-<link rel="stylesheet" href="live.css?v=SNS-2026-LIVE-003">
-<!-- SFU media layer — must load before live.js so window.snxSfu is ready -->
-<script type="module" src="snx-sfu.js"></script>
-<script type="module" src="live.js?v=SNS-2026-LIVE-010"></script>
+<!-- ── Shadow Nexus Live — CSS + Engine ──────────────────────────────────────────
+     Stage 2B DEFERRED: live.css, snx-sfu.js, live.js are NOT loaded at startup.
+     SNXFeatureLoader loads them when the user navigates to livePage.
+     live.css   ~60 KB  deferred
+     snx-sfu.js ~47 KB  deferred
+     live.js   ~182 KB  deferred
+     ─────────────────────────────────────────────────────────────────────────── -->
 
-<!-- ── Load 24-Hour TV adapter as ES module (no second Firebase init, no second login) ── -->
-<script type="module" src="snx-ch-adapter.js"></script>
-
-<!-- ── Load SNX TV Network (Creator Channels) for index.html tvPage ── -->
-<link rel="stylesheet" href="snx-tv-network.css?v=SHADOW-TV-2026-GLOBAL-UPDATE-01">
+<!-- ── 24-Hour TV adapter + TV Network ────────────────────────────────────────
+     Stage 2B DEFERRED: snx-ch-adapter.js and snx-tv-network.css are NOT loaded
+     at startup. SNXFeatureLoader loads them when the user navigates to tvPage.
+     snx-ch-adapter.js      ~83 KB  deferred
+     snx-tv-network.css     ~45 KB  deferred
+     ─────────────────────────────────────────────────────────────────────────── -->
 <!-- [PHASE-2-DISABLED] snx-creator-live.css removed — new creator-live UI not needed in Phase 1 -->
 <script type="module">
 /**
@@ -12655,7 +12771,18 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   let userData = null;
   let _authFirstResolved = false; // prevents login-flash on initial page load
   let activeProfileUid = null;
-  let scrollLimit = 8;
+  // Stage 2C: adaptive initial batch size based on performance mode.
+  // LITE = 4 (low-bandwidth / weak device), BALANCED = 6, FULL/default = 8.
+  // Only the initial page size changes; each "load more" always adds BATCH_SIZE.
+  // The authoritative data in Firebase is never affected.
+  let scrollLimit = (function() {
+      try {
+          var _perfKey = localStorage.getItem('snxAdaptiveMode') || localStorage.getItem('snxPerfMode') || '';
+          if (_perfKey === 'LITE' || _perfKey === 'MINIMAL') return 4;
+          if (_perfKey === 'BALANCED')                       return 6;
+          return 8; // FULL, HIGH, ULTRA, AUTO, or not set
+      } catch(_) { return 8; }
+  })();
   const BATCH_SIZE = 4;               // posts to add per "load more" trigger
   let totalUnread = 0;
   let feedUnsubscribe      = null;    // timeline feed
@@ -13357,6 +13484,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // ── [SNS-NOTIFY] Start dedicated notification listener ──
           _startNotifListener(user.uid);
 
+          // ── First-snapshot readiness (replaces 600ms settle timer) ──
+          // _profileReadyPromise resolves once — when the first authoritative profile
+          // snapshot (or a terminal state: missing doc, error) has been processed.
+          // It is scoped to this UID so account-switch can never bleed state.
+          const _profileReadyUid = user.uid;
+          let _profileReadyResolve;
+          const _profileReadyPromise = new Promise(resolve => { _profileReadyResolve = resolve; });
+
           // ── Single unified live listener for own user doc ──
           // Handles: settings sync, friend badges, and push-queue processing.
           const _seenPushIds = new Set();
@@ -13369,7 +13504,17 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               }
           }).catch(() => {});
 
+          let _profileFirstSnap = true;
           userDataUnsubscribe = onSnapshot(doc(db, "users", user.uid), async (docSnap) => {
+              // ── First-snapshot: resolve readiness regardless of doc existence ──
+              if (_profileFirstSnap) {
+                  _profileFirstSnap = false;
+                  // Only resolve if this snapshot still belongs to the current user
+                  // (guards against a stale closure firing after account switch).
+                  if (auth.currentUser && auth.currentUser.uid === _profileReadyUid) {
+                      _profileReadyResolve();
+                  }
+              }
               if (!docSnap.exists()) return;
               userData = docSnap.data();
               window._snxUserData = userData;
@@ -13480,6 +13625,17 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               // Clear processed entries from Firestore
               const _remaining = (userData.pushQueue || []).filter(n => !_queue.some(q => q.id === n.id));
               try { await updateDoc(doc(db, 'users', user.uid), { pushQueue: _remaining }); } catch(_) {}
+          }, (_profileSnapErr) => {
+              // ── First-snapshot error path ──
+              // Resolve readiness so startup is never permanently stuck.
+              // Never elevate privileges on error — role stays at its current value.
+              if (_profileFirstSnap) {
+                  _profileFirstSnap = false;
+                  if (window.__snxDebug) console.warn('[SNX PROFILE] first-snapshot error:', _profileSnapErr?.code || _profileSnapErr?.message || _profileSnapErr);
+                  if (auth.currentUser && auth.currentUser.uid === _profileReadyUid) {
+                      _profileReadyResolve();
+                  }
+              }
           });
 
           document.getElementById("menuButton").style.display = "flex";
@@ -13504,11 +13660,15 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // and redirect if needed, but never delay the feed from appearing.
           (async () => {
               try {
-                  // Sync nav admin button after login (non-founders only)
+                  // Stage 2C: Removed redundant getDoc(users/{uid}) for non-founders.
+                  // Stage 2C-Hotfix: Replace 600ms settle timer with deterministic
+                  // first-snapshot readiness. _profileReadyPromise resolves as soon
+                  // as the authoritative userDataUnsubscribe onSnapshot delivers its
+                  // first result (including missing-doc or error paths). No arbitrary
+                  // delay — resolves immediately on fast connections, waits as long
+                  // as needed on slow connections.
                   if (!_isFounder) {
-                      const snap2 = await getDoc(doc(db, 'users', user.uid));
-                      const r2 = snap2.exists() ? (snap2.data().role || 'member') : 'member';
-                      window._snxRole = r2;
+                      await _profileReadyPromise;
                   }
                   if (window.__snxT && !window.__snxT.ROLE_READY) { window.__snxT.ROLE_READY = performance.now(); console.log('[SNS-STARTUP] role-ready +' + Math.round(window.__snxT.ROLE_READY) + 'ms (role=' + (window._snxRole||'member') + ')'); }
                   console.log('[SNX ROLE] loaded role=' + (window._snxRole||'member'));
@@ -13552,6 +13712,15 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           // Check if user has earned the OG badge — deferred 5s so it doesn't compete
           // with the initial feed load (does a Firestore read + collection query)
           setTimeout(() => checkOGBadgeEligibility(user.uid), 5000);
+          // ── Stage 2B: Feed is now stable — trigger speculative prefetch ──
+          // This fires AFTER all critical Feed init is complete, so prefetch
+          // cannot compete with startup resources.  SNXFeatureLoader uses
+          // performance mode to decide what (if anything) to hint.
+          setTimeout(function () {
+              if (window.SNXFeatureLoader && typeof window.SNXFeatureLoader.feedReady === 'function') {
+                  window.SNXFeatureLoader.feedReady();
+              }
+          }, 3500);
           // ── Timing: app is now interactive (all critical init complete) ──
           if (window.__snxT) {
               window.__snxT.APP_INTERACTIVE = performance.now();
@@ -13994,10 +14163,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
      Queries only online users (where status == 'online') to avoid downloading
      the entire users collection on every presence change.
      Guard: tear down existing listener before re-creating so we never accumulate
-     duplicate presence snapshots. */
+     duplicate presence snapshots.
+     Stage 2C: limit(50) — the UI renders at most ~30 avatars; downloading the
+     full online set on every presence change is wasteful on 2G/3G. The limit
+     is safe because window._snxOnlineUids is only used to render story-bar rings,
+     not for authoritative presence logic (that lives in RTDB via snx-presence.js). */
   function initPresenceStrip() {
       if (presenceUnsubscribe) { presenceUnsubscribe(); presenceUnsubscribe = null; }
-      const q = query(collection(db, "users"), where("status", "==", "online"));
+      const q = query(collection(db, "users"), where("status", "==", "online"), limit(50));
       const unsub = onSnapshot(q, (snap) => {
           // Collect online users, deduplicate by uid, sort by lastSeen desc
           const seenUids = new Set();
@@ -14190,6 +14363,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           container.querySelectorAll('.postBox[id^="post-"]').forEach(el => {
               const id = el.id.replace('post-', '');
               if (!incomingIds.has(id)) {
+                  // Release media resources before removing from DOM
+                  if (window.SNXMediaController) window.SNXMediaController.cleanupPost(el);
                   el.remove();
                   _renderedPostIds.delete(id);
               }
@@ -14272,9 +14447,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                   } else if (_kind === 'video') {
                       mediaHTML = `
                         <div class="post-video-card">
-                            <video class="post-media-video" src="${_muSafe}" controls playsinline preload="metadata"
+                            <video class="post-media-video" data-snx-feed="1" src="${_muSafe}" controls playsinline preload="metadata"
                                 onclick="openMediaViewer('video','${_muSafe}')"
-                                onerror="this.parentElement.innerHTML='<div class=\\'video-placeholder\\'>🎬</div>'">
+                                onerror="if(window.SNXMediaController)window.SNXMediaController.unobserve(this);this.parentElement.innerHTML='<div class=\\'video-placeholder\\'>🎬</div>'">
                             </video>
                         </div>`;
                   } else {
@@ -14296,7 +14471,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                           return `<div class="post-music-card" style="min-width:100%;"><div class="post-music-icon">🎵</div><div class="post-music-info"><div class="post-music-title">${_fn}</div><audio class="post-music-audio" src="${_muSafe}" controls preload="metadata" onerror="console.error('[SNX Audio] Failed:','${_muSafe}',this.error);this.insertAdjacentHTML('afterend','<div style=\\'font-size:11px;color:#ff5577;margin-top:4px;\\'>⚠️ Audio failed to load</div>')"></audio><div class="post-music-actions"><a class="post-music-dl" href="${_muSafe}" download="${_fn}" title="Download audio">⬇ Download</a></div></div></div>`;
                       }
                       if (_kind === 'video') {
-                          return `<video src="${_muSafe}" controls playsinline preload="metadata" onclick="openMediaViewer('video','${_muSafe}')" style="max-height:240px;flex-shrink:0;scroll-snap-align:start;border-radius:10px;"></video>`;
+                          return `<video data-snx-feed="1" src="${_muSafe}" controls playsinline preload="metadata" onclick="openMediaViewer('video','${_muSafe}')" style="max-height:240px;flex-shrink:0;scroll-snap-align:start;border-radius:10px;"></video>`;
                       }
                       return `<img src="${_muSafe}" alt="media" loading="lazy" decoding="async" onclick="openMediaViewer('image','${_muSafe}')" style="max-height:240px;">`;
                   }).join('');
@@ -14474,6 +14649,8 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                   renderCommentsSubtree(pDoc.id, post.comments || []);
                   const cb = div.querySelector(`#comments-${pDoc.id}`);
                   if (cb) cb.dataset.count = (post.comments || []).length;
+                  // Register any Feed videos in this post with the media controller
+                  if (window.SNXMediaController) window.SNXMediaController.scanAndObserve(div);
               }
           });
           // Mark the feed as initialized so subsequent snapshots are treated as live updates
@@ -15648,11 +15825,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
           console.warn('[SNX Search] Firestore query failed, falling back to full scan:', searchErr.message);
       }
 
-      // Always run a full scan fallback for substring matching (catches
-      // mixed-case display names the prefix query misses).
+      // Fallback: limited scan for substring matching when prefix queries return nothing.
+      // Stage 2C: reduced from limit(300) → limit(50).  The prefix queries above handle
+      // the common cases (exact prefix, case variants).  The fallback exists only for
+      // mid-string matches which are rare; a 50-doc sample is sufficient to catch them
+      // without downloading hundreds of user records on every failed search.
       if (seen.size === 0) {
           try {
-              const snap = await getDocs(query(collection(db, 'users'), limit(300)));
+              const snap = await getDocs(query(collection(db, 'users'), limit(50)));
               snap.forEach(d => {
                   const u = d.data();
                   if (!u.uid || u.uid === currentUser.uid || seen.has(u.uid)) return;
@@ -18131,13 +18311,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                 } else if (m.type === 'image' && m.imageUrl) {
                     const img = document.createElement('img');
                     img.className = 'msg-media-img';
+                    img.loading = 'lazy'; img.decoding = 'async';
                     img.src = m.imageUrl; img.alt = 'Image';
                     img.onclick = () => { if (typeof openMediaViewer === 'function') openMediaViewer('image', m.imageUrl); };
                     bub.appendChild(img);
                     if (m.text) { const t = document.createElement('div'); t.style.fontSize='13px'; t.textContent = m.text; bub.appendChild(t); }
                 } else if (m.type === 'video' && m.imageUrl) {
                     const vid = document.createElement('video');
-                    vid.className = 'msg-media-vid'; vid.src = m.imageUrl; vid.controls = true; vid.setAttribute('playsinline','');
+                    vid.className = 'msg-media-vid'; vid.src = m.imageUrl; vid.controls = true; vid.setAttribute('playsinline',''); vid.preload = 'metadata';
                     bub.appendChild(vid);
                     if (m.text) { const t = document.createElement('div'); t.style.fontSize='13px'; t.textContent = m.text; bub.appendChild(t); }
                 } else if (m.type === 'audio' && m.imageUrl) {
@@ -18563,16 +18744,39 @@ window.addEventListener('snx:openCreatorChannel', async e => {
         _nmSearchTimer = setTimeout(async () => {
             try {
                 const ql = q.toLowerCase();
-                const snap = await getDocs(query(collection(db, 'users'), limit(200)));
+                const qTitle = ql.charAt(0).toUpperCase() + ql.slice(1);
+                // Stage 2C: replaced full limit(200) scan with targeted prefix queries +
+                // a small 30-doc fallback, matching the approach used by the global search.
+                const inboxSeen = new Set();
                 const results = [];
-                snap.forEach(d => {
-                    if (d.id === currentUser.uid) return;
-                    const u = d.data();
-                    const name = (u.displayName||'').toLowerCase();
-                    const username = (u.username||'').toLowerCase();
-                    const email = (u.email||'').toLowerCase();
-                    if (name.includes(ql) || username.includes(ql) || email.includes(ql)) results.push({ uid: d.id, ...u });
-                });
+                const _addInboxResults = (snap) => {
+                    snap.forEach(d => {
+                        if (d.id === currentUser.uid || inboxSeen.has(d.id)) return;
+                        inboxSeen.add(d.id);
+                        results.push({ uid: d.id, ...d.data() });
+                    });
+                };
+                const [_iSu, _iSd, _iSdl] = await Promise.all([
+                    getDocs(query(collection(db, 'users'), where('username', '>=', ql), where('username', '<', ql + '\uf8ff'), limit(15))),
+                    getDocs(query(collection(db, 'users'), where('displayName', '>=', qTitle), where('displayName', '<', qTitle + '\uf8ff'), limit(15))),
+                    getDocs(query(collection(db, 'users'), where('displayName', '>=', ql), where('displayName', '<', ql + '\uf8ff'), limit(15)))
+                ]);
+                _addInboxResults(_iSu); _addInboxResults(_iSd); _addInboxResults(_iSdl);
+                // Small fallback scan for substring / email matches not caught by prefix
+                if (results.length < 3) {
+                    const _isFb = await getDocs(query(collection(db, 'users'), limit(30)));
+                    _isFb.forEach(d => {
+                        if (d.id === currentUser.uid || inboxSeen.has(d.id)) return;
+                        const u = d.data();
+                        const name = (u.displayName||'').toLowerCase();
+                        const username = (u.username||'').toLowerCase();
+                        const email = (u.email||'').toLowerCase();
+                        if (name.includes(ql) || username.includes(ql) || email.includes(ql)) {
+                            inboxSeen.add(d.id);
+                            results.push({ uid: d.id, ...u });
+                        }
+                    });
+                }
                 if (!results.length) {
                     if (list) list.innerHTML = '<div class="inbox-nm-empty">No users found.</div>';
                     return;
@@ -19259,6 +19463,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               } else if (m.type === 'image' && m.imageUrl) {
                   const img = document.createElement('img');
                   img.className = 'msg-media-img';
+                  img.loading = 'lazy'; img.decoding = 'async';
                   img.src = m.imageUrl;
                   img.alt = 'Image';
                   img.onclick = () => openMediaViewer('image', m.imageUrl);
@@ -19270,6 +19475,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                   vid.src = m.imageUrl;
                   vid.controls = true;
                   vid.setAttribute('playsinline', '');
+                  vid.preload = 'metadata';
                   bub.appendChild(vid);
                   if (m.text) { const t = document.createElement('div'); t.style.fontSize = '13px'; t.textContent = m.text; bub.appendChild(t); }
               } else if (m.type === 'audio' && m.imageUrl) {
@@ -21516,6 +21722,9 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       document.getElementById('storyPanelMedia').style.display = type === 'media' ? '' : 'none';
   };
 
+  /** Holds the current story preview blob URL so it can be revoked when replaced or cleared */
+  var _storyPreviewBlobUrl = '';
+
   window.handleStoryMediaPick = function(input) {
       const file = input.files && input.files[0];
       if (!file) return;
@@ -21523,8 +21732,15 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       document.getElementById('storyMediaClear').style.display = 'inline-flex';
       const pImg = document.getElementById('storyMediaPreviewImg');
       const pVid = document.getElementById('storyMediaPreviewVid');
+      // Revoke previous blob URL before creating a new one
+      if (_storyPreviewBlobUrl) {
+          if (pVid) { pVid.pause(); pVid.src = ''; }
+          URL.revokeObjectURL(_storyPreviewBlobUrl);
+          _storyPreviewBlobUrl = '';
+      }
       pImg.style.display = 'none'; pVid.style.display = 'none';
       const url = URL.createObjectURL(file);
+      _storyPreviewBlobUrl = url;
       if (file.type.startsWith('image/')) { pImg.src = url; pImg.style.display = 'block'; }
       else if (file.type.startsWith('video/')) { pVid.src = url; pVid.style.display = 'block'; }
   };
@@ -21536,8 +21752,14 @@ window.addEventListener('snx:openCreatorChannel', async e => {
       document.getElementById('storyMediaUrl').value = '';
       const pImg = document.getElementById('storyMediaPreviewImg');
       const pVid = document.getElementById('storyMediaPreviewVid');
+      if (pVid) { pVid.pause(); pVid.src = ''; }
       pImg.style.display = 'none'; pImg.src = '';
-      pVid.style.display = 'none'; pVid.src = '';
+      pVid.style.display = 'none';
+      // Revoke any held blob URL
+      if (_storyPreviewBlobUrl) {
+          URL.revokeObjectURL(_storyPreviewBlobUrl);
+          _storyPreviewBlobUrl = '';
+      }
   };
 
   window.submitStory = async function() {
@@ -21895,16 +22117,39 @@ function navTo(pageId) {
         // Load blocked users (Security tab might be active)
         if (typeof window.snxLoadBlockedUsers === 'function') window.snxLoadBlockedUsers();
     }
-    // ── Shadow Nexus Live — open hub when page activates ──
+    // ── Shadow Nexus Live — lazy-load then open hub when page activates ──
+    // Stage 2B: live.css + snx-sfu.js + live.js are deferred until first use.
     if (pageId === 'livePage') {
-        if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
+        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('live')) {
+            window.SNXFeatureLoader.loadFeature('live')
+                .then(function () {
+                    if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
+                })
+                .catch(function (err) {
+                    console.warn('[navTo] Live feature load failed:', err && err.message);
+                });
+        } else {
+            if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
+        }
     }
     // ── Shadow Nexus Radio page lifecycle ──
+    // Stage 2B: all radio scripts are deferred until first use.
     if (pageId === 'radioPage') {
-        if (typeof window.snxRadioPageOpen === 'function') window.snxRadioPageOpen();
-        // Join Radio presence (Listening Now)
-        if (window.SNXRadioPresence && typeof window.SNXRadioPresence.join === 'function') {
-            window.SNXRadioPresence.join();
+        var _openRadioPage = function () {
+            if (typeof window.snxRadioPageOpen === 'function') window.snxRadioPageOpen();
+            // Join Radio presence (Listening Now)
+            if (window.SNXRadioPresence && typeof window.SNXRadioPresence.join === 'function') {
+                window.SNXRadioPresence.join();
+            }
+        };
+        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('radio')) {
+            window.SNXFeatureLoader.loadFeature('radio')
+                .then(function () { _openRadioPage(); })
+                .catch(function (err) {
+                    console.warn('[navTo] Radio feature load failed:', err && err.message);
+                });
+        } else {
+            _openRadioPage();
         }
     } else {
         // Leaving radio page — pause local audio immediately.
@@ -21931,20 +22176,42 @@ function navTo(pageId) {
     // a single sequential Promise — preventing the race between snxTvInit() and
     // snxTvNetworkInit() that caused the "must refresh 2-3 times" bug.
     //
+    // Stage 2B: snx-ch-adapter.js is lazy-loaded on first tvPage navigation.
+    // snxOpen24HourTV already handles the snxTvInit-not-yet-ready case via its
+    // fallback path — so lazy loading integrates naturally.
+    //
     // Portal transition timing: realmNavTo fires firePortalTransition(→ navTo after 250ms).
     // navTo calls show() synchronously, so tvPage is already in the DOM as active by the
     // time snxOpen24HourTV runs — no additional wait needed here.
     if (pageId === 'tvPage') {
-        // Delegate entirely to the canonical controller — do NOT call snxTvInit or
-        // snxTvNetworkInit directly from here.  snxOpen24HourTV handles music stop,
-        // auth wait, init lock, and sequencing.
-        if (typeof window.snxOpen24HourTV === 'function') {
-            window.snxOpen24HourTV();
+        // Stage 2B: ensure TV modules are loaded before delegating.
+        // SNXFeatureLoader.loadFeature('tv') loads snx-ch-adapter.js (ES module)
+        // and snx-tv-network.css, then snxOpen24HourTV() runs normally.
+        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('tv')) {
+            window.SNXFeatureLoader.loadFeature('tv')
+                .then(function () {
+                    // Delegate to canonical controller now that modules are loaded
+                    if (typeof window.snxOpen24HourTV === 'function') {
+                        window.snxOpen24HourTV();
+                    } else {
+                        // belt-and-suspenders fallback
+                        if (typeof window.snxTvInit === 'function') window.snxTvInit();
+                        if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
+                    }
+                })
+                .catch(function (err) {
+                    console.warn('[navTo] TV feature load failed:', err && err.message);
+                });
         } else {
-            // Fallback: module not yet loaded — use legacy path (rare, e.g. cold first paint)
-            if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
-            if (typeof window.snxTvInit === 'function') window.snxTvInit();
-            if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
+            // Modules already loaded — delegate to canonical controller directly.
+            if (typeof window.snxOpen24HourTV === 'function') {
+                window.snxOpen24HourTV();
+            } else {
+                // Fallback: module not yet loaded — use legacy path (rare, e.g. cold first paint)
+                if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
+                if (typeof window.snxTvInit === 'function') window.snxTvInit();
+                if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
+            }
         }
     } else {
         if (typeof window.snxTvTeardown === 'function') window.snxTvTeardown();
@@ -22200,9 +22467,9 @@ async function snxLoadProfileWall(uid) {
                         return `<div class="post-music-card" style="min-width:100%;"><div class="post-music-icon">🎵</div><div class="post-music-info"><div class="post-music-title">${_fn}</div><audio class="post-music-audio" src="${_esc(mu)}" controls preload="metadata" onerror="console.error('[SNX Wall Audio] Failed:','${_esc(mu)}',this.error)"></audio><div class="post-music-actions"><a class="post-music-dl" href="${_esc(mu)}" download="${_fn}" title="Download audio">⬇ Download</a></div></div></div>`;
                     }
                     if (_kind === 'video') {
-                        return `<video src="${_esc(mu)}" controls playsinline style="max-height:220px;border-radius:10px;flex-shrink:0;scroll-snap-align:start;"></video>`;
+                        return `<video src="${_esc(mu)}" controls playsinline preload="metadata" style="max-height:220px;border-radius:10px;flex-shrink:0;scroll-snap-align:start;"></video>`;
                     }
-                    return `<img src="${_esc(mu)}" alt="media" onclick="openMediaViewer('image','${_esc(mu)}')" style="max-height:220px;cursor:pointer;">`;
+                    return `<img src="${_esc(mu)}" alt="media" loading="lazy" decoding="async" onclick="openMediaViewer('image','${_esc(mu)}')" style="max-height:220px;cursor:pointer;">`;
                 }).join('');
                 const _allAudio = w.mediaUrls.every(u => _wallMediaKind(u, '') === 'audio');
                 mediaHTML = _allAudio
@@ -22217,7 +22484,7 @@ async function snxLoadProfileWall(uid) {
                 } else if (_kind === 'video') {
                     mediaHTML = `<div class="post-video-card"><video class="post-media-video" src="${_esc(mu)}" controls playsinline preload="metadata"></video></div>`;
                 } else {
-                    mediaHTML = `<img class="post-media-preview" src="${_esc(mu)}" alt="photo" onclick="openMediaViewer('image','${_esc(mu)}')" style="margin-top:8px;cursor:pointer;">`;
+                    mediaHTML = `<img class="post-media-preview" src="${_esc(mu)}" alt="photo" loading="lazy" decoding="async" onclick="openMediaViewer('image','${_esc(mu)}')" style="margin-top:8px;cursor:pointer;">`;
                 }
             }
 
@@ -30776,14 +31043,22 @@ window.switchAdminTab = function(tab) {
        6. snx-radio-requests.js     (Song Requests — window.SNXRadioRequests)
      The radio IIFE auto-hooks SNXAudioCoordinator on load.
      Radio is isolated: no Live/mediasoup/WebRTC paths are touched.
+
+     Stage 2B DEFERRED: all Radio scripts are loaded by SNXFeatureLoader
+     on first navigation to radioPage.  They are intentionally NOT loaded
+     at startup to reduce Feed startup cost.
+
+     Scripts deferred:
+       snx-radio.js           ~70 KB
+       snx-radio-player.js    ~27 KB
+       snx-radio-studio.js    ~94 KB  (Founder only — further deferred via radio-studio feature)
+       snx-radio-comments.js  ~22 KB
+       snx-radio-requests.js  ~21 KB
+       snx-radio-presence.js   ~8 KB
+       snx-radio-dj.js        ~37 KB  (DJ only — further deferred via dj feature)
+
+     Total deferred: ~279 KB of Radio JS + 56 KB of Radio CSS
      ──────────────────────────────────────────────────────────────────────── -->
-<script src="snx-radio.js?v=SNS-2026-RADIO-PAGE-001"></script>
-<script src="snx-radio-player.js?v=SNS-2026-RADIO-PAGE-001"></script>
-<script src="snx-radio-studio.js?v=SNS-2026-RADIO-PAGE-001"></script>
-<script src="snx-radio-comments.js?v=SNS-2026-RADIO-COMMENTS-001"></script>
-<script src="snx-radio-requests.js?v=SNS-2026-RADIO-REQUESTS-001"></script>
-<script src="snx-radio-presence.js?v=SNS-2026-RADIO-PRESENCE-001"></script>
-<script src="snx-radio-dj.js?v=SNS-2026-RADIO-DJ-001"></script>
 
 <!-- ── Shadow Nexus Radio — Standalone Radio Page integration ──────────────────
      Wires the standalone #radioPage to SNXRadioPlayer and SNXRadioStudio.
@@ -30921,8 +31196,22 @@ window.switchAdminTab = function(tab) {
     studioWrap.style.cssText = 'width:100%;box-sizing:border-box;';
     wrap.appendChild(studioWrap);
 
-    /* Mount Studio — guard against double-mount */
-    if (window.SNXRadioStudio && !document.getElementById('snxRadioStudio')) {
+    /* Stage 2B: load snx-broadcast-engine.js + snx-radio-studio.js on demand,
+       then mount.  loadFeature('radio-studio') is idempotent — safe to call
+       every time _ensureFounderArea() is entered; the loader returns the cached
+       Promise on subsequent calls so the engine initialises only once. */
+    if (window.SNXFeatureLoader) {
+      window.SNXFeatureLoader.loadFeature('radio-studio')
+        .then(function () {
+          if (window.SNXRadioStudio && !document.getElementById('snxRadioStudio')) {
+            window.SNXRadioStudio.mount(studioWrap);
+          }
+        })
+        .catch(function (err) {
+          console.warn('[SNX-RADIO-PAGE] radio-studio feature load failed:', err && err.message);
+        });
+    } else if (window.SNXRadioStudio && !document.getElementById('snxRadioStudio')) {
+      /* Fallback if loader is somehow unavailable */
       window.SNXRadioStudio.mount(studioWrap);
     }
 
@@ -30935,12 +31224,24 @@ window.switchAdminTab = function(tab) {
       btn.addEventListener('click', function() {
         var studio = document.getElementById('snxRadioStudio');
         if (!studio) {
-          /* Studio not yet mounted (lazy) — mount now */
-          if (window.SNXRadioStudio && !document.getElementById('snxRadioStudio')) {
-            window.SNXRadioStudio.mount(studioWrap);
-            studio = document.getElementById('snxRadioStudio');
+          /* Studio not yet mounted — loadFeature already in flight; retry shortly */
+          if (window.SNXFeatureLoader) {
+            window.SNXFeatureLoader.loadFeature('radio-studio')
+              .then(function () {
+                if (window.SNXRadioStudio && !document.getElementById('snxRadioStudio')) {
+                  window.SNXRadioStudio.mount(studioWrap);
+                }
+                var s = document.getElementById('snxRadioStudio');
+                if (s) {
+                  s.classList.add('snxrs-open');
+                  btn.textContent = '✕ CLOSE STUDIO';
+                }
+              })
+              .catch(function (err) {
+                console.warn('[SNX-RADIO-PAGE] studio open after load failed:', err && err.message);
+              });
           }
-          if (!studio) return;
+          return;
         }
         var isOpen = studio.classList.toggle('snxrs-open');
         btn.textContent = isOpen ? '✕ CLOSE STUDIO' : '🎙 RADIO STUDIO';
@@ -33218,8 +33519,8 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-DJ-MIC-001';
-  var SW_VER   = 'v94';
+  var BUILD_ID = 'SNS-2026-STAGE2G-FINAL';
+  var SW_VER   = 'v98';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
@@ -33497,10 +33798,10 @@ document.addEventListener('click', function(e) {
 
     /* ═══ BUILD ═══ */
     o += _h('BUILD');
-    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-DJ-MIC-001' ? 'ok' : 'err');
+    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-STAGE2G-FINAL' ? 'ok' : 'err');
     o += _r('BUILD_ID (deployed)',   remoteBuild);
     o += _r('BUILD MATCH',           buildMatch,  buildMatch === 'MATCH' ? 'ok' : 'err');
-    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v94' ? 'ok' : 'warn');
+    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v98' ? 'ok' : 'warn');
     /* SW registration note */
     o += _r('SW VERSION (active)',   _dbgSwVer   ? _dbgSwVer + ' (build=' + _dbgSwBuild + ')' : 'querying…');
     o += _r('DISPLAY MODE',          _dbgDisplayMode);
@@ -33615,9 +33916,9 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-DJ-MIC-001';
-  var _SNX_SW_VER   = 'v94';
-  var _SNX_DEPLOY   = '2026-10-02T00:00:00Z';
+  var _SNX_BUILD    = 'SNS-2026-STAGE2G-FINAL';
+  var _SNX_SW_VER   = 'v98';
+  var _SNX_DEPLOY   = '2026-10-03T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 
   function _dRow(label, val, ok) {
@@ -35253,6 +35554,30 @@ window.snxFounderPanelCleanup = (function() {
 <script src="snx-perf.js?v=SNS-2026-PERF-001"></script>
 
 <!-- ═══════════════════════════════════════════════════════════
+     STAGE 2A — AUTHORITATIVE ADAPTIVE PERFORMANCE CONTROLLER
+     Wraps SNXPerf with the 4-mode public API (AUTO/LITE/BALANCED/FULL)
+     and handles: background selection, page-visibility, SNX_NET hook.
+     Loaded AFTER snx-perf.js so integration is guaranteed.
+     ═══════════════════════════════════════════════════════════ -->
+<script src="snx-adaptive-performance.js?v=SNS-2026-STAGE2A-001"></script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     STAGE 2D — ADAPTIVE MEDIA CONTROLLER
+     ONE shared IntersectionObserver + active-video cap for Feed media.
+     Must load AFTER snx-adaptive-performance.js so SNXPerformance is available.
+     Build: SNS-2026-STAGE2D-001
+     ═══════════════════════════════════════════════════════════ -->
+<script src="snx-media-controller.js?v=SNS-2026-STAGE2D-001"></script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     STAGE 2B — FEATURE LAZY LOADER
+     Centralised controller that loads feature-specific JS/CSS on demand.
+     Must load AFTER snx-adaptive-performance.js so getPerfMode() works.
+     Build: SNS-2026-STAGE2B-001
+     ═══════════════════════════════════════════════════════════ -->
+<script src="snx-feature-loader.js?v=SNS-2026-STAGE2B-001"></script>
+
+<!-- ═══════════════════════════════════════════════════════════
      PERFORMANCE SETTINGS UI — Settings page + Founder dashboard
      ═══════════════════════════════════════════════════════════ -->
 <script>
@@ -35263,6 +35588,15 @@ window.snxFounderPanelCleanup = (function() {
   window.snxPerfSelectMode = function (modeStr) {
     if (!window.SNXPerf) return;
     SNXPerf.setMode(modeStr);
+    /* Also forward to SNXPerformance (Stage 2A controller) */
+    if (window.SNXPerformance) {
+      /* Map 6-level SNXPerf modes → SNXPerformance 4-mode */
+      var perfMap = { AUTO:'AUTO', MINIMAL:'LITE', LITE:'LITE', BALANCED:'BALANCED', HIGH:'FULL', ULTRA:'FULL' };
+      var mapped = perfMap[modeStr] || modeStr;
+      if (['AUTO','LITE','BALANCED','FULL'].indexOf(mapped) !== -1) {
+        SNXPerformance.setMode(mapped);
+      }
+    }
     _updatePerfSettingsUI();
     if (typeof toastNotification === 'function') {
       toastNotification('⚡ Nexus Performance: ' + modeStr);

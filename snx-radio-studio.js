@@ -945,12 +945,32 @@ function _loadTracks() {
   // Prevent duplicate subscriptions
   if (_unsubTracks) return;
 
+  const listEl = document.getElementById('snxrsTrackLibrary');
+  if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
+
+  // ── Prefer shared SNXRadioTrackStore ──────────────────────────────────────
+  if (window.SNXRadioTrackStore) {
+    _unsubTracks = window.SNXRadioTrackStore.subscribe(function (docs) {
+      // Studio needs ALL tracks (not just enabled); store supplies all docs.
+      // Sort by createdAt descending (mirrors the old onSnapshot query order).
+      const sorted = docs.slice().sort(function (a, b) {
+        const ta = a.createdAt ? (a.createdAt.seconds || a.createdAt / 1000 || 0) : 0;
+        const tb = b.createdAt ? (b.createdAt.seconds || b.createdAt / 1000 || 0) : 0;
+        return tb - ta;
+      });
+      _tracks = sorted;
+      const el = document.getElementById('snxrsTrackLibrary');
+      if (el) _renderTrackLibrary(el, sorted);
+      _populatePlaylistSelects();
+      _refreshDashboard();
+    });
+    return;
+  }
+
+  // ── Fallback: direct Firestore listener ───────────────────────────────────
   const db   = _getFirestore();
   const mods = _getFirestoreMods();
   if (!db || !mods) return;
-
-  const listEl = document.getElementById('snxrsTrackLibrary');
-  if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
 
   try {
     let q;

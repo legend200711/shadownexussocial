@@ -52,11 +52,33 @@ window.SNXRadioRequests = {
 };
 
 /* Start live track library subscription as soon as the module loads.
-   This keeps _tracks current so the modal always shows fresh data.
-   Subscribes once; safe to call again (idempotent). */
+   Uses SNXRadioTrackStore (shared listener) when available to avoid a
+   duplicate Firestore onSnapshot for /radioTracks.
+   Falls back to a direct Firestore query if the store is not loaded. */
 function _startTrackLibrarySubscription() {
   if (_tracksUnsub) return; // already subscribed
 
+  // ── Prefer shared store ───────────────────────────────────────────────────
+  if (window.SNXRadioTrackStore) {
+    _tracksUnsub = window.SNXRadioTrackStore.subscribe(function (docs) {
+      _tracks = docs
+        .filter(function (d) { return d.audioUrl || d.musicUrl || d.downloadURL || d.url; })
+        .filter(function (d) { return d.enabled !== false; })
+        .map(function (d) {
+          return {
+            id:     d.id,
+            title:  d.title  || d.name      || 'Unknown',
+            artist: d.artist || d.artistName || 'Unknown Artist',
+          };
+        })
+        .sort(function (a, b) { return a.title.localeCompare(b.title); });
+      if (_open) _renderList();
+      console.log('[SNX-RQ] library update (via store) —', _tracks.length, 'tracks');
+    });
+    return;
+  }
+
+  // ── Fallback: direct Firestore listener ────────────────────────────────────
   const mods = window._snxFirestore;
   if (!mods || !mods.db || !mods.collection || !mods.onSnapshot || !mods.query || !mods.where) {
     // Firebase not ready yet — retry
@@ -78,9 +100,8 @@ function _startTrackLibrarySubscription() {
           artist: d.artist || d.artistName || 'Unknown Artist',
         }))
         .sort((a, b) => a.title.localeCompare(b.title));
-      // If modal is open, re-render the list live
       if (_open) _renderList();
-      console.log('[SNX-RQ] library live update —', _tracks.length, 'tracks');
+      console.log('[SNX-RQ] library live update (direct) —', _tracks.length, 'tracks');
     }, (err) => {
       console.warn('[SNX-RQ] tracks snapshot error:', err.message);
       _tracksUnsub = null;
@@ -95,8 +116,8 @@ document.addEventListener('snxRadio:tracksChange', function() {
   if (_open) _renderList();
 });
 
-// Start subscription when Firebase is ready (defer slightly to let firebase-config.js run)
-setTimeout(_startTrackLibrarySubscription, 1500);
+// Start subscription when Firebase is ready — wait for store to initialise first
+setTimeout(_startTrackLibrarySubscription, 1800);
 
 /* ══════════════════════════════════════════════════════════════
    OPEN / CLOSE MODAL

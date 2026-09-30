@@ -54,16 +54,13 @@
   pointer-events: none !important;
   display: block !important;
 
-  /* Supplied artwork — lossless PNG, exact pixel copy of source */
-  background-image:
-    linear-gradient(
-      to bottom,
-      rgba(2, 4, 14, 0.30) 0%,
-      rgba(2, 4, 14, 0.25) 30%,
-      rgba(2, 4, 14, 0.28) 60%,
-      rgba(2, 4, 14, 0.35) 100%
-    ),
-    url('assets/images/shadow-nexus-global-bg.png') !important;
+  /* Stage 2A.1: No hardcoded image here — the cold-start bootstrap script
+     injects the correct derivative via JS before this CSS is painted,
+     and snx-adaptive-performance.js applies the definitive value shortly after.
+     background-color provides an immediate dark shell.
+     The inline _snxBootstrapStyle overrides html{} with the chosen derivative;
+     _setBgSrc() from snx-adaptive-performance.js overrides this div directly. */
+  background-image: none !important;
 
   background-color: #02040a;
   background-size: cover !important;
@@ -97,16 +94,9 @@ html::before {
   z-index: -2;                   /* below everything except #snx-global-world-bg */
   pointer-events: none;
 
-  /* SAME supplied artwork as the div above */
-  background-image:
-    linear-gradient(
-      to bottom,
-      rgba(2, 4, 14, 0.30) 0%,
-      rgba(2, 4, 14, 0.25) 30%,
-      rgba(2, 4, 14, 0.28) 60%,
-      rgba(2, 4, 14, 0.35) 100%
-    ),
-    url('assets/images/shadow-nexus-global-bg.png');
+  /* Stage 2A.1: No hardcoded image here — overridden by _snxBootstrapStyle and
+     snx-adaptive-performance.js _setBgSrc() before the frame is painted. */
+  background-image: none;
 
   background-color: #02040a;     /* fallback if image fails */
   background-size: cover;
@@ -337,4 +327,50 @@ video {
 html, body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+/* ═══════════════════════════════════════════════════════
+   STAGE 2A — ADAPTIVE BACKGROUND QUALITY
+   Background derivatives are selected by snx-adaptive-performance.js
+   via JS (swapping #snx-global-world-bg background-image) and via a
+   dynamic <style id="_snxAdaptiveBgStyle"> for html::before.
+
+   These CSS rules provide a consistent snx-quality-full alias and
+   reduce backdrop-filter cost on LITE mode for the page-hidden state.
+   ═══════════════════════════════════════════════════════ */
+
+/* snx-quality-full  — alias for when SNXPerformance mode is FULL  */
+/* (snx-perf.js applies snx-quality-high for FULL; we alias both)   */
+.snx-quality-full #snx-global-world-bg,
+[data-snx-mode="full"] #snx-global-world-bg {
+  /* Full quality — JS will have set background-image to the full PNG */
+}
+
+/* Page hidden: no visual updates needed for the background layer */
+.snx-page-hidden #snx-global-world-bg {
+  will-change: auto;
+}
+
+/* LITE: reduce decorative visual cost on content surfaces */
+.snx-quality-lite body::before {
+  /* Minimal vignette on LITE — reduce compositing work */
+  background:
+    radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.12) 100%) !important;
+}
+
+/* BALANCED: subtle vignette (already default, kept for explicitness) */
+.snx-quality-balanced body::before {
+  background:
+    radial-gradient(ellipse at 50% 50%,   transparent 40%, rgba(0,0,0,0.18) 100%),
+    radial-gradient(ellipse at 0%   50%,  rgba(0,0,0,0.10) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 50%, rgba(0,0,0,0.10) 0%, transparent 50%),
+    radial-gradient(ellipse at 50%  100%,rgba(0,0,0,0.12) 0%, transparent 50%) !important;
+}
+
+/* LITE + MINIMAL: disable fog animation entirely */
+.snx-quality-lite body::after,
+.snx-quality-minimal body::after {
+  animation: none !important;
+  background: none !important;
+  opacity: 0 !important;
 }

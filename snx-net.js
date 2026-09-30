@@ -36,13 +36,13 @@
   const TIERS = {
     excellent: {
       id: 'excellent', label: '5G / Fast Wi-Fi',  icon: '📶',
-      videoPreload: 'auto',   imageQuality: 'high',
+      videoPreload: 'metadata', imageQuality: 'high',  // Stage 2D: never 'auto' for Feed
       maxBitrate: 5_500_000,  scaleDown: 1,
       dataSaver: false,       retryDelay: 2000,
     },
     good: {
       id: 'good',      label: '4G LTE / Wi-Fi',   icon: '📶',
-      videoPreload: 'auto',   imageQuality: 'high',
+      videoPreload: 'metadata', imageQuality: 'high',  // Stage 2D: never 'auto' for Feed
       maxBitrate: 3_000_000,  scaleDown: 1,
       dataSaver: false,       retryDelay: 3000,
     },

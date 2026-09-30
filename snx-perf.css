@@ -113,6 +113,159 @@
 }
 
 /* ══════════════════════════════════════════════════
+   BACKDROP-FILTER — global quality-tier control
+   Locks down ALL backdrop-filter on lite/minimal.
+   Balanced gets a capped blur of 4px maximum.
+   Modal overlays: disable blur on lite/minimal.
+══════════════════════════════════════════════════ */
+
+/* LITE / MINIMAL — kill every backdrop-filter site-wide */
+.snx-quality-lite *,
+.snx-quality-minimal * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* BALANCED — cap blur on the expensive live/TV/channel overlays */
+.snx-quality-balanced .ax-modal-overlay,
+.snx-quality-balanced .snx-tn-modal-overlay,
+.snx-quality-balanced .snx-live-setup-overlay {
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+/* BALANCED — modal overlays (full-screen) get a lighter blur */
+.snx-quality-balanced #forgotPasswordModal,
+.snx-quality-balanced #reauthModal,
+.snx-quality-balanced #snxConfirmModal,
+.snx-quality-balanced #snxReportModal,
+.snx-quality-balanced #snxGuestRulesModal,
+.snx-quality-balanced #snxGuestNameModal,
+.snx-quality-balanced #snxJoinModal {
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
+/* ══════════════════════════════════════════════════
+   DECORATIVE CONTINUOUS ANIMATIONS — quality-tier
+   Disables heavy infinite decorative animations on
+   lite/minimal. Reduces intensity on balanced.
+   Does NOT touch: loading spinners, live-dot pulse,
+   ON AIR indicators, auth progress.
+══════════════════════════════════════════════════ */
+
+/* LITE / MINIMAL — stop heavy decorative infinite loops */
+.snx-quality-lite .eclipse-title,
+.snx-quality-minimal .eclipse-title,
+.snx-quality-lite .sidebar-brand-name,
+.snx-quality-minimal .sidebar-brand-name {
+  animation: none !important;
+  /* keep a static glow so it doesn't go completely flat */
+  text-shadow: 0 0 8px rgba(0,174,239,0.8) !important;
+}
+
+/* Logo icon pulse — lite/minimal stop, balanced slow down */
+.snx-quality-lite .sidebar-brand-icon,
+.snx-quality-minimal .sidebar-brand-icon {
+  animation: none !important;
+  box-shadow: 0 0 10px rgba(0,160,255,0.4) !important;
+}
+.snx-quality-balanced .sidebar-brand-icon {
+  animation-duration: 6s !important;
+}
+
+/* Body vignette lightning flash — stop on lite/minimal */
+.snx-quality-lite body::before,
+.snx-quality-minimal body::before {
+  animation: none !important;
+}
+
+/* Body atmospheric fog + lightning streak — stop on lite/minimal */
+.snx-quality-lite body::after,
+.snx-quality-minimal body::after {
+  animation: none !important;
+  background: none !important;
+  opacity: 0 !important;
+}
+
+/* Balanced: slow down the fog drift */
+.snx-quality-balanced body::after {
+  animation-duration: 36s !important;
+}
+
+/* Online dots — these are ESSENTIAL identity so keep on balanced/full,
+   but use a simpler pulse on lite/minimal */
+.snx-quality-lite .indicator-dot.online,
+.snx-quality-minimal .indicator-dot.online,
+.snx-quality-lite .ipc-modal-status-dot.online,
+.snx-quality-minimal .ipc-modal-status-dot.online,
+.snx-quality-lite .profile-online-dot,
+.snx-quality-minimal .profile-online-dot,
+.snx-quality-lite .online-pip.on,
+.snx-quality-minimal .online-pip.on {
+  animation: none !important;
+}
+
+/* Mood sticker double-animation — expensive (2 simultaneous) */
+.snx-quality-lite .snx-mood-sticker,
+.snx-quality-minimal .snx-mood-sticker,
+.snx-quality-balanced .snx-mood-sticker {
+  animation: none !important;
+}
+
+/* Badge rarity glow pulse — keep on full/ultra only */
+.snx-quality-lite .badge-rarity-epic,
+.snx-quality-lite .badge-rarity-legendary,
+.snx-quality-minimal .badge-rarity-epic,
+.snx-quality-minimal .badge-rarity-legendary,
+.snx-quality-balanced .badge-rarity-epic,
+.snx-quality-balanced .badge-rarity-legendary {
+  animation: none !important;
+}
+
+/* Bolt launcher icon — continuous filter+transform animation */
+.snx-quality-lite .bolt-icon,
+.snx-quality-minimal .bolt-icon {
+  animation: none !important;
+  filter: drop-shadow(0 0 5px rgba(0,174,239,0.6)) !important;
+}
+.snx-quality-balanced .bolt-icon {
+  animation-duration: 6s !important;
+}
+.snx-quality-lite .bolt-label,
+.snx-quality-minimal .bolt-label {
+  animation: none !important;
+}
+.snx-quality-balanced .bolt-label {
+  animation-duration: 6s !important;
+}
+
+/* ══════════════════════════════════════════════════
+   WILL-CHANGE — release on page-hidden and lite
+   Prevents browser holding unnecessary GPU layers.
+══════════════════════════════════════════════════ */
+.snx-quality-lite *,
+.snx-quality-minimal * {
+  will-change: auto !important;
+}
+/* Exception: keep sidebar transform hint — it still slides */
+.snx-quality-lite .sidebar,
+.snx-quality-minimal .sidebar {
+  will-change: transform !important;
+}
+/* Page hidden: release all GPU hints globally */
+.snx-page-hidden .bolt-icon,
+.snx-page-hidden body::before,
+.snx-page-hidden body::after,
+.snx-page-hidden .ash-particle,
+.snx-page-hidden .sidebar-brand-icon,
+.snx-page-hidden .eclipse-title,
+.snx-page-hidden .sidebar-brand-name {
+  animation-play-state: paused !important;
+  will-change: auto !important;
+}
+
+/* ══════════════════════════════════════════════════
    LIVE & CAMERA MODE — reduce decorative effects
 ══════════════════════════════════════════════════ */
 .snx-live-active body::after,
@@ -134,6 +287,10 @@
 
 /* ══════════════════════════════════════════════════
    REDUCED MOTION (system preference)
+   Stop all decorative motion. Preserve:
+   - loading spinners (.snx-nexus-ring, .snx-skeleton)
+   - feed-live-dot-pulse (LIVE status)
+   - any other functional state indicators
 ══════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
   body::after,
@@ -157,6 +314,50 @@
   /* Keep essential structural transitions very short */
   button, input, a {
     transition-duration: 0.05s !important;
+  }
+
+  /* Stop heavy decorative animations */
+  .eclipse-title,
+  .sidebar-brand-name,
+  .sidebar-brand-icon,
+  .bolt-icon,
+  .bolt-label,
+  .badge-rarity-epic,
+  .badge-rarity-legendary,
+  .snx-mood-sticker,
+  .onlineBreath,
+  .indicator-dot.online,
+  .ipc-modal-status-dot.online,
+  .profile-online-dot,
+  .online-pip.on,
+  .blueFlame,
+  .greenFlame {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Stop theme-engine particle canvas animations */
+  .snx-theme-canvas {
+    display: none !important;
+  }
+
+  /* Freeze all continuous glows */
+  .snx-live-dot-anim,
+  .feed-live-dot-pulse {
+    /* keep LIVE dot visible but static */
+    animation: none !important;
+    box-shadow: 0 0 0 2px rgba(255,51,68,0.7) !important;
+  }
+
+  /* All transitions ≤ 50ms */
+  * {
+    transition-duration: 0.05s !important;
+    animation-duration: 0.05s !important;
+  }
+  /* Re-allow functional animations */
+  .snx-nexus-ring,
+  .snx-skeleton {
+    animation-duration: revert !important;
   }
 }
 

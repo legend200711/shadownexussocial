@@ -1580,7 +1580,26 @@
   function init() {
     buildDOM();
     positionBubble();
-    window.addEventListener('resize', positionBubble);
+    var _bubResizeRaf = 0;
+    window.addEventListener('resize', function () {
+      if (_bubResizeRaf) return;
+      _bubResizeRaf = requestAnimationFrame(function () { _bubResizeRaf = 0; positionBubble(); });
+    });
+
+    /* Pause auto-message timer when tab is hidden; reset countdown on return
+       so GRIM doesn't immediately pop a message the moment the user comes back
+       after 15+ minutes away. */
+    document.addEventListener('visibilitychange', function () {
+      if (!CFG.autoOn) return;
+      if (document.hidden) {
+        if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+      } else {
+        /* Only reschedule if not already running and not in active chat */
+        if (!autoTimer && !chatMode) {
+          scheduleNextAuto(randomAutoDelay());
+        }
+      }
+    });
 
     /* Load founder custom messages into pool */
     getFounderMsgs().forEach(function (m) {

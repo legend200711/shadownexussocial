@@ -10,13 +10,26 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNS-2026-DJ-MIC-001
- * Changes: DJ mic status + level meter (v1.1.0), visibilitychange auth re-sync,
- *          snx-radio-dj.js added to network-first so v1.1.0 always served fresh.
+ * Build: SNS-2026-STAGE2G-FINAL
+ * Changes: Stage 2F Runtime/Listener/Timer/Subscription Cleanup.
+ *   - grim-reaper-character-widget.js: RAF loop now page-hidden-aware (pauses on
+ *     visibilitychange hidden, resumes on visible).
+ *   - grim-speech-bubble.js: auto-message timer pauses when page hidden, resets on return.
+ *   - album.js: removed 2s polling setInterval for currentUser sync (liveUser() reads live).
+ *   - profile-theme.js: canvas particle resize listener stored in _canvasResizeHandler and
+ *     removed in stopEffects() to prevent accumulation across profile re-entries.
+ *   - snx-radio.js: _initialized flag prevents duplicate Firebase subscriptions on repeated
+ *     init() calls; idempotent guards on _subscribeStation/_subscribeSchedule/
+ *     _subscribePrograms/_subscribeSettings; _initialized reset on destroy().
+ *   - (Previous) Stage 2E CSS + Rendering Performance Optimization.
+ *   - (Previous) Stage 2D: SNXMediaController shared IntersectionObserver.
+ *   - (Previous) Stage 2C Firebase + Network Efficiency.
+ *   - (Previous) Stage 2B feature lazy loading.
+ *   v98
  */
 
-const CACHE_VERSION = 'v94';
-const BUILD_ID      = 'SNS-2026-DJ-MIC-001';
+const CACHE_VERSION = 'v98';
+const BUILD_ID      = 'SNS-2026-STAGE2G-FINAL';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -25,7 +38,17 @@ const SW_URL  = new URL(self.location.href);
 const BASE    = SW_URL.pathname.replace(/sw\.js$/, ''); // e.g. '/ShadowNexusSocial/' or '/'
 const OFFLINE = BASE + 'offline.html';
 
-/** Files pre-cached on install — paths relative to BASE */
+/**
+ * Files pre-cached on install — paths relative to BASE.
+ *
+ * Stage 2B policy:
+ *   Only the true application shell is pre-cached.
+ *   Feature-specific resources (Radio, Live, TV) are NOT pre-cached here.
+ *   They are served via network-first on first use, then cached by the
+ *   standard same-origin cache-first strategy on subsequent visits.
+ *   This prevents the SW install from pre-fetching hundreds of KB of
+ *   resources that a Feed-only user will never need.
+ */
 const SHELL_FILES = [
   '',            // root / index
   'index.html',
@@ -56,11 +79,15 @@ const SHELL_FILES = [
   'nexus-intro.css',
   'snx-perf.js',
   'snx-perf.css',
+  'snx-feature-loader.js',  // Stage 2B: feature loader is shell
   'nexus-glass.css',
   'snx-stage11.css',
   'snx-world-bg.css',
   'assets/images/shadow-nexus-world.webp',
   'assets/images/shadow-nexus-global-bg.png',
+  // Stage 2B: live.css, snx-sfu.js, live.js, snx-ch-adapter.js,
+  // snx-tv-network.css, and all snx-radio.* files intentionally
+  // NOT pre-cached — they are lazy-loaded and cached after first use.
 ];
 
 /** Max entries for the media cache (CDN images / avatars). */
@@ -72,12 +99,14 @@ const MEDIA_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const NETWORK_FIRST_PATHS = [];
 
 /**
- * TV engine JS files — always network-first so a new deployment is served
- * immediately. The cached copy is only used as an offline fallback.
- * The browser must NEVER prefer a stale cached TV engine over the deployed version.
+ * Network-first files — always fetched from network; cache is offline fallback only.
+ * The browser must NEVER prefer a stale cached version of these over the deployed version.
+ *
+ * Stage 2B: deferred feature resources are added here so that when they ARE
+ * eventually loaded (on first feature open), the user always gets the freshest version.
  */
 const TV_NETWORK_FIRST_FILES = [
-  // 24-Hour TV engine files
+  // 24-Hour TV engine files (lazy-loaded by SNXFeatureLoader on first tvPage visit)
   'snx-ch-adapter.js',
   'snx-tv-network.js',
   'snx-tv-network.css',
@@ -90,17 +119,26 @@ const TV_NETWORK_FIRST_FILES = [
   'snx-ch-firebase.js',
   'snx-ch-engine.js',
   'channel.html',
-  // SNS Live engine files — always network-first so fixes are never stale
+  // SNS Live engine files (lazy-loaded by SNXFeatureLoader on first livePage visit)
   'live.js',
   'live.css',
-  // Radio engine files — network-first so listeners always get the latest version
+  'snx-sfu.js',
+  // Feature loader itself — network-first so a new build is always served
+  'snx-feature-loader.js',
+  // Radio engine files (lazy-loaded by SNXFeatureLoader on first radioPage visit)
+  'snx-radio-track-store.js',
   'snx-radio.js',
   'snx-radio-player.js',
   'snx-radio-studio.js',
+  'snx-radio-comments.js',
+  'snx-radio-requests.js',
+  'snx-radio-presence.js',
   'snx-radio.css',
   'snx-audio-coordinator.js',
   // DJ engine — network-first so mic v1.1.0 is never served from stale cache
   'snx-radio-dj.js',
+  // Broadcast Engine — lazy-loaded by radio-studio feature; must always be fresh
+  'snx-broadcast-engine.js',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

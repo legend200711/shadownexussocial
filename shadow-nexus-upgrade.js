@@ -566,10 +566,12 @@
     ]);
     addResults(su); addResults(sd); addResults(sdl);
 
-    // substring fallback if very few results
+    // Stage 2C: substring fallback reduced from limit(200) → limit(50).
+    // Prefix queries above handle exact/prefix matches.  The fallback only
+    // covers mid-string substrings; a 50-doc scan is enough for that.
     if (results.length < 3) {
       try {
-        const fb = await getDocs(fsq(collection(db,'users'), lim(200)));
+        const fb = await getDocs(fsq(collection(db,'users'), lim(50)));
         fb.forEach(d => {
           const u = d.data();
           if (!u.uid || seen.has(u.uid)) return;
