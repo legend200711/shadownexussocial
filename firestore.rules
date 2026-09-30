@@ -894,6 +894,29 @@ service cloud.firestore {
       allow create, update, delete: if isFounderEmail();
     }
 
+    // ── Radio Comments ────────────────────────────────────────────────────────
+    //
+    //   /radioComments/{commentId}
+    //     uid, username, displayName, photoURL,
+    //     message,
+    //     trackId, trackTitle, trackArtist,
+    //     createdAt
+    //
+    // READ:   public — the Radio is a public broadcast; comment thread is part
+    //         of the listener experience.  No private data is stored here.
+    // CREATE: signed-in users only; uid field must match the authenticated user.
+    // UPDATE: not permitted — no editing of radio comments.
+    // DELETE: comment owner (uid == auth.uid) or Founder may delete.
+
+    match /radioComments/{commentId} {
+      allow read:   if true;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+    }
+
     // ── Broadcast Destinations (Stage 4A) ─────────────────────────────────────
     //
     //   /broadcastDestinations/{destId}

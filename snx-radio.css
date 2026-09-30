@@ -1,6 +1,6 @@
 /*
  * Shadow Nexus Radio — snx-radio.css
- * Version: 2.0.0
+ * Version: 2.1.0
  *
  * Visual identity:
  *   Near-black / deep navy background
@@ -14,6 +14,7 @@
  *   .snxr-*            — player sub-elements
  *   #snxRadioStudio    — Founder studio panel
  *   .snxrs-*           — studio sub-elements
+ *   .snxrc-*           — On-Air Conversation (radio comments)
  */
 
 /* ═══════════════════════════════════════════════════════════
@@ -1439,4 +1440,307 @@
   .snxr-program-bar { display: none; }
   .snxrs-tab { font-size: 7px; padding: 6px 4px; }
   .snxrs-sched-time { font-size: 12px; min-width: 36px; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   ON-AIR CONVERSATION — Radio Comments (.snxrc-*)
+   Completely isolated from player styles. Zero audio interaction.
+═══════════════════════════════════════════════════════════ */
+
+.snxrc-panel {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  color: #d0d8e8;
+  padding: 0 0 40px;
+}
+
+/* ── Header ── */
+.snxrc-header {
+  padding: 28px 16px 12px;
+  border-top: 1px solid rgba(0,174,239,0.15);
+  margin-top: 8px;
+}
+
+.snxrc-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 0 0 16px rgba(0,174,239,0.55);
+  margin: 0 0 5px;
+}
+
+.snxrc-subtitle {
+  font-size: 12px;
+  color: #4a6075;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Composer ── */
+.snxrc-composer {
+  padding: 0 16px 4px;
+}
+
+.snxrc-composer-inner {
+  background: rgba(0,18,36,0.7);
+  border: 1px solid rgba(0,174,239,0.18);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.snxrc-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #d8e4f0;
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 12px 14px 8px;
+  resize: none;
+  font-family: inherit;
+  min-height: 62px;
+}
+
+.snxrc-textarea::placeholder {
+  color: #2e4560;
+}
+
+.snxrc-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid rgba(0,174,239,0.08);
+}
+
+.snxrc-charcount {
+  font-size: 11px;
+  color: #4a6075;
+  transition: color 0.2s;
+}
+
+.snxrc-charcount--warn {
+  color: #f59e0b;
+}
+
+.snxrc-post-btn {
+  background: rgba(0,174,239,0.12);
+  border: 1px solid rgba(0,174,239,0.35);
+  color: #00AEEF;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 6px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.snxrc-post-btn:hover:not(:disabled) {
+  background: rgba(0,174,239,0.22);
+  border-color: rgba(0,174,239,0.6);
+}
+
+.snxrc-post-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.snxrc-auth-notice {
+  font-size: 12px;
+  color: #3a5070;
+  padding: 10px 0 4px;
+  margin: 0;
+  text-align: center;
+}
+
+/* ── Load Earlier ── */
+.snxrc-earlier-wrap {
+  padding: 4px 16px 10px;
+  text-align: center;
+}
+
+.snxrc-earlier-btn {
+  background: transparent;
+  border: 1px solid rgba(0,174,239,0.2);
+  color: #4a7090;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 7px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.snxrc-earlier-btn:hover:not(:disabled) {
+  border-color: rgba(0,174,239,0.4);
+  color: #6090b0;
+}
+
+.snxrc-earlier-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Comment List ── */
+.snxrc-list {
+  padding: 4px 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snxrc-empty {
+  font-size: 12px;
+  color: #2e4560;
+  text-align: center;
+  padding: 24px 0 8px;
+}
+
+/* ── Individual Comment ── */
+.snxrc-comment {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(0,18,36,0.45);
+  border: 1px solid rgba(0,174,239,0.08);
+  align-items: flex-start;
+  transition: background 0.15s;
+  min-width: 0; /* allow children to shrink */
+}
+
+.snxrc-comment:hover {
+  background: rgba(0,24,44,0.65);
+}
+
+/* Avatar */
+.snxrc-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,174,239,0.18);
+}
+
+.snxrc-avatar--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,174,239,0.12);
+  color: #00AEEF;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Body */
+.snxrc-comment-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.snxrc-comment-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.snxrc-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #b8cee4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.snxrc-handle {
+  font-size: 11px;
+  color: #3a5870;
+  white-space: nowrap;
+}
+
+.snxrc-time {
+  font-size: 10px;
+  color: #2e4560;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Message */
+.snxrc-message {
+  font-size: 13px;
+  color: #c0d0e0;
+  line-height: 1.55;
+  margin: 0 0 4px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Track context */
+.snxrc-track-ctx {
+  font-size: 10px;
+  color: #2e5070;
+  letter-spacing: 0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Delete button */
+.snxrc-del-btn {
+  background: transparent;
+  border: none;
+  color: #2e4560;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.snxrc-del-btn:hover {
+  color: #ef4444;
+}
+
+/* ── Utility ── */
+.snxrc-hidden {
+  display: none !important;
+}
+
+/* ── Mobile refinements ── */
+@media (max-width: 390px) {
+  .snxrc-name { max-width: 100px; }
+  .snxrc-textarea { font-size: 13px; }
+}
+
+@media (max-width: 360px) {
+  .snxrc-comment { padding: 8px 10px; gap: 8px; }
+  .snxrc-avatar  { width: 30px; height: 30px; }
+  .snxrc-name    { max-width: 80px; }
+  .snxrc-message { font-size: 12px; }
+}
+
+@media (max-width: 320px) {
+  .snxrc-composer { padding: 0 10px 4px; }
+  .snxrc-list     { padding: 4px 10px 0; }
+  .snxrc-earlier-wrap { padding: 4px 10px 10px; }
+  .snxrc-avatar   { width: 28px; height: 28px; font-size: 12px; }
 }

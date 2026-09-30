@@ -12270,7 +12270,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
 <script type="module">
   import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail, reauthenticateWithCredential, EmailAuthProvider } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
-  import { getFirestore, doc, setDoc, getDoc, getDocFromCache, getDocFromServer, updateDoc, deleteDoc, collection, collectionGroup, addDoc, query, orderBy, limit, onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment, serverTimestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, getDoc, getDocFromCache, getDocFromServer, updateDoc, deleteDoc, collection, collectionGroup, addDoc, query, orderBy, limit, startAfter, onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment, serverTimestamp, enableNetwork, disableNetwork } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
   import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging.js";
   import { getDatabase as _getRtdb, ref as _rtdbRef, set as _rtdbSet, remove as _rtdbRemove, get as _rtdbGet, onDisconnect as _rtdbOnDisconnect, serverTimestamp as _rtdbServerTimestamp, onValue as _rtdbOnValue, off as _rtdbOff } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js";
   import { getStorage, ref as _storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
@@ -12323,7 +12323,7 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // ── Full Firestore namespace for feature scripts ──
   window._snxFirestore = {
       db, doc, getDoc, getDocFromCache, getDocFromServer, setDoc, updateDoc, deleteDoc,
-      collection, collectionGroup, addDoc, query, orderBy, limit,
+      collection, collectionGroup, addDoc, query, orderBy, limit, startAfter,
       onSnapshot, arrayUnion, arrayRemove, runTransaction, where, getDocs, writeBatch, increment,
       serverTimestamp, enableNetwork, disableNetwork,
   };
@@ -21687,6 +21687,10 @@ function navTo(pageId) {
         if (window.SNXRadio && typeof window.SNXRadio.pageLeave === 'function') {
             window.SNXRadio.pageLeave();
         }
+        // Disconnect comments Firestore listener to save reads while away.
+        if (window.SNXRadioComments && typeof window.SNXRadioComments.pageLeave === 'function') {
+            window.SNXRadioComments.pageLeave();
+        }
     }
     // ── 24-Hour TV lifecycle hooks ──
     // TV startup is handled exclusively by the canonical snxOpen24HourTV() controller.
@@ -30534,12 +30538,14 @@ window.switchAdminTab = function(tab) {
        2. snx-radio.js              (engine — window.SNXRadio)
        3. snx-radio-player.js       (UI    — window.SNXRadioPlayer)
        4. snx-radio-studio.js       (Studio — window.SNXRadioStudio, Founder only)
+       5. snx-radio-comments.js     (Comments — window.SNXRadioComments)
      The radio IIFE auto-hooks SNXAudioCoordinator on load.
      Radio is isolated: no Live/mediasoup/WebRTC paths are touched.
      ──────────────────────────────────────────────────────────────────────── -->
 <script src="snx-radio.js?v=SNS-2026-RADIO-PAGE-001"></script>
 <script src="snx-radio-player.js?v=SNS-2026-RADIO-PAGE-001"></script>
 <script src="snx-radio-studio.js?v=SNS-2026-RADIO-PAGE-001"></script>
+<script src="snx-radio-comments.js?v=SNS-2026-RADIO-COMMENTS-001"></script>
 
 <!-- ── Shadow Nexus Radio — Standalone Radio Page integration ──────────────────
      Wires the standalone #radioPage to SNXRadioPlayer and SNXRadioStudio.
@@ -30603,6 +30609,24 @@ window.switchAdminTab = function(tab) {
     /* ── 2. Founder area (founder only, idempotent) ── */
     if (window._snxRole === 'founder') {
       _ensureFounderArea(inner);
+    }
+
+    /* ── 3. On-Air Conversation (comments) ── */
+    var commentsWrap = document.getElementById('snxRadioCommentsWrap');
+    if (!commentsWrap) {
+      /* First visit — create wrap and mount comments panel */
+      commentsWrap = document.createElement('div');
+      commentsWrap.id = 'snxRadioCommentsWrap';
+      commentsWrap.style.cssText = 'width:100%;box-sizing:border-box;';
+      inner.appendChild(commentsWrap);
+      if (window.SNXRadioComments && !window.SNXRadioComments.isMounted) {
+        window.SNXRadioComments.mount(commentsWrap);
+      }
+    } else {
+      /* Returning to radio page — reconnect the Firestore listener */
+      if (window.SNXRadioComments && typeof window.SNXRadioComments.pageEnter === 'function') {
+        window.SNXRadioComments.pageEnter();
+      }
     }
 
     console.log('[SNX-RADIO-PAGE] radioPage opened');
