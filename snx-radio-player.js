@@ -74,6 +74,7 @@ function unmount() {
     window.SNXRadio.off('error');
     window.SNXRadio.off('programChange');
     window.SNXRadio.off('settingsChange');
+    window.SNXRadio.off('tracksChange');
     window.SNXRadio.destroy();
   }
   if (_el && _el.parentNode) _el.parentNode.removeChild(_el);
@@ -353,6 +354,7 @@ function _initRadio() {
     onError:           _onError,
     onProgramChange:   _onProgramChange,
     onSettingsChange:  _onSettingsChange,
+    onTracksChange:    _onTracksChange,
   });
 }
 
@@ -482,6 +484,11 @@ function _onAutoplayBlocked() {
 
 function _onError(msg) {
   _setStatus(msg || 'An error occurred');
+}
+
+function _onTracksChange(/* tracks */) {
+  // Track library changed — refresh recently played (metadata may have updated)
+  _renderRecentlyPlayed();
 }
 
 function _onProgramChange(program) {

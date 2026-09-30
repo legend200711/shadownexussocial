@@ -12317,6 +12317,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   // ── Expose RTDB helpers for presence (used by _attachFriendRtdbStatus) ──
   window._snxRtdbApi = { getDatabase: _getRtdb, ref: _rtdbRef, set: _rtdbSet, remove: _rtdbRemove, get: _rtdbGet, onValue: _rtdbOnValue, off: _rtdbOff };
 
+  // ── Expose RTDB extension helpers for Radio Presence + DJ Mode ──
+  // onDisconnect and serverTimestamp are not in _snxRtdbApi above; add them here.
+  window._snxRtdbExt = { onDisconnect: _rtdbOnDisconnect, serverTimestamp: _rtdbServerTimestamp };
+
   // ── Expose RTDB instance for Live system (live.js) ──
   window._snxLiveDB = _presenceRtdb;
 
@@ -21681,11 +21685,19 @@ function navTo(pageId) {
     // ── Shadow Nexus Radio page lifecycle ──
     if (pageId === 'radioPage') {
         if (typeof window.snxRadioPageOpen === 'function') window.snxRadioPageOpen();
+        // Join Radio presence (Listening Now)
+        if (window.SNXRadioPresence && typeof window.SNXRadioPresence.join === 'function') {
+            window.SNXRadioPresence.join();
+        }
     } else {
         // Leaving radio page — pause local audio immediately.
         // Does NOT stop the global station or touch Firebase.
         if (window.SNXRadio && typeof window.SNXRadio.pageLeave === 'function') {
             window.SNXRadio.pageLeave();
+        }
+        // Leave Radio presence (Listening Now)
+        if (window.SNXRadioPresence && typeof window.SNXRadioPresence.leave === 'function') {
+            window.SNXRadioPresence.leave();
         }
         // Disconnect comments Firestore listener to save reads while away.
         if (window.SNXRadioComments && typeof window.SNXRadioComments.pageLeave === 'function') {
@@ -30552,6 +30564,8 @@ window.switchAdminTab = function(tab) {
 <script src="snx-radio-studio.js?v=SNS-2026-RADIO-PAGE-001"></script>
 <script src="snx-radio-comments.js?v=SNS-2026-RADIO-COMMENTS-001"></script>
 <script src="snx-radio-requests.js?v=SNS-2026-RADIO-REQUESTS-001"></script>
+<script src="snx-radio-presence.js?v=SNS-2026-RADIO-PRESENCE-001"></script>
+<script src="snx-radio-dj.js?v=SNS-2026-RADIO-DJ-001"></script>
 
 <!-- ── Shadow Nexus Radio — Standalone Radio Page integration ──────────────────
      Wires the standalone #radioPage to SNXRadioPlayer and SNXRadioStudio.
@@ -30609,6 +30623,22 @@ window.switchAdminTab = function(tab) {
             window.SNXRadioPlayer.mount(playerWrap);
           }
         }, 1000);
+      }
+    }
+
+    /* ── Listening Now widget (all users) ── */
+    _ensureListeningNow(playerWrap);
+
+    /* ── DJ Live banner (all users, populated by DJ Mode state changes) ── */
+    _ensureDjBanner(inner);
+
+    /* ── Init DJ Mode engine (subscribes to Firestore DJ state) ── */
+    if (window.SNXRadioDJ && typeof window.SNXRadioDJ.init === 'function') {
+      /* Register UI callback BEFORE init() so the first snapshot fires correctly */
+      window.snxRadioDjStateChanged = _onDjStateChanged;
+      if (!window._snxDjInited) {
+        window._snxDjInited = true;
+        window.SNXRadioDJ.init();
       }
     }
 
@@ -30678,6 +30708,9 @@ window.switchAdminTab = function(tab) {
       window.SNXRadioStudio.mount(studioWrap);
     }
 
+    /* DJ Mode controls (Founder only) */
+    _ensureDjControls(wrap);
+
     /* RADIO STUDIO toggle */
     var btn = document.getElementById('snxrStudioToggleBtn');
     if (btn) {
@@ -30736,6 +30769,149 @@ window.switchAdminTab = function(tab) {
   ─────────────────────────────────────────────────────────────────────────── */
   window.snxMH2SwitchTab   = window.snxMH2SwitchTab   || function() {};
   window.snxMH2RadioToggle = window.snxMH2RadioToggle  || function() {};
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     LISTENING NOW WIDGET
+     Shows "👥 X LISTENING NOW" below the player.
+     Safe to call multiple times — idempotent.
+  ─────────────────────────────────────────────────────────────────────────── */
+  function _ensureListeningNow(playerWrap) {
+    if (!playerWrap) return;
+    var existing = document.getElementById('snxrListeningNow');
+    if (!existing) {
+      var lnEl = document.createElement('div');
+      lnEl.id = 'snxrListeningNow';
+      lnEl.className = 'snxr-listening-now';
+      lnEl.textContent = '👥 — LISTENING NOW';
+      playerWrap.appendChild(lnEl);
+    }
+    /* Hook up count changes */
+    if (window.SNXRadioPresence && typeof window.SNXRadioPresence.setOnCountChange === 'function') {
+      window.SNXRadioPresence.setOnCountChange(function(count) {
+        var el = document.getElementById('snxrListeningNow');
+        if (el) el.textContent = '👥 ' + count + ' LISTENING NOW';
+      });
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     DJ LIVE BANNER
+     Shows "🔴 DJ LIVE ON AIR / displayName" above the player for all users.
+     Safe to call multiple times — idempotent.
+  ─────────────────────────────────────────────────────────────────────────── */
+  function _ensureDjBanner(inner) {
+    if (!inner) return;
+    if (!document.getElementById('snxrDjBanner')) {
+      var banner = document.createElement('div');
+      banner.id = 'snxrDjBanner';
+      banner.className = 'snxr-dj-banner snxr-hidden';
+      banner.innerHTML =
+        '<span class="snxr-dj-dot"></span>' +
+        '<span class="snxr-dj-label" id="snxrDjLabel">🔴 DJ LIVE ON AIR</span>' +
+        '<span class="snxr-dj-name"  id="snxrDjName"></span>';
+      /* Insert before playerWrap so it appears at the top */
+      var pw = document.getElementById('snxRadioPlayerWrap');
+      if (pw && pw.parentNode) {
+        pw.parentNode.insertBefore(banner, pw);
+      } else {
+        inner.insertBefore(banner, inner.firstChild);
+      }
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     DJ STATE CHANGE HANDLER
+     Called by SNXRadioDJ when Firestore DJ state changes.
+  ─────────────────────────────────────────────────────────────────────────── */
+  function _onDjStateChanged(state) {
+    var banner  = document.getElementById('snxrDjBanner');
+    var nameEl  = document.getElementById('snxrDjName');
+    var labelEl = document.getElementById('snxrDjLabel');
+    var ctrlEl  = document.getElementById('snxrDjControls');
+
+    var isActive = !!(state && state.active);
+
+    if (banner) {
+      if (isActive) {
+        banner.classList.remove('snxr-hidden');
+        if (nameEl)  nameEl.textContent  = state.hostDisplayName || '';
+        if (labelEl) labelEl.textContent = '🔴 DJ LIVE ON AIR';
+      } else {
+        banner.classList.add('snxr-hidden');
+        if (nameEl)  nameEl.textContent  = '';
+        if (labelEl) labelEl.textContent = '🔴 DJ LIVE ON AIR';
+      }
+    }
+
+    /* Update Founder DJ controls if they exist */
+    if (ctrlEl) {
+      _refreshDjControls(isActive, state);
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     FOUNDER DJ CONTROLS
+     Rendered inside _ensureFounderArea → Founder bar, below studio toggle.
+  ─────────────────────────────────────────────────────────────────────────── */
+  function _ensureDjControls(wrap) {
+    if (!wrap) return;
+    if (document.getElementById('snxrDjControls')) return;
+
+    var ctrl = document.createElement('div');
+    ctrl.id = 'snxrDjControls';
+    ctrl.className = 'snxr-dj-ctrl';
+    ctrl.innerHTML =
+      '<div class="snxr-dj-status" id="snxrDjStatus">DJ STATUS: <span id="snxrDjStatusText">OFF AIR</span></div>' +
+      '<div class="snxr-dj-ctrl-btns">' +
+        '<button class="snxr-dj-go-btn" id="snxrDjGoBtn"  type="button">🎙 GO DJ LIVE</button>' +
+        '<button class="snxr-dj-end-btn snxr-hidden" id="snxrDjEndBtn" type="button">■ END DJ</button>' +
+      '</div>' +
+      '<p class="snxr-dj-msg" id="snxrDjMsg"></p>';
+    wrap.appendChild(ctrl);
+
+    document.getElementById('snxrDjGoBtn').addEventListener('click',  _onDjGoLive);
+    document.getElementById('snxrDjEndBtn').addEventListener('click', _onDjEnd);
+  }
+
+  function _refreshDjControls(isActive, state) {
+    var statusText = document.getElementById('snxrDjStatusText');
+    var goBtn      = document.getElementById('snxrDjGoBtn');
+    var endBtn     = document.getElementById('snxrDjEndBtn');
+    var djMsg      = document.getElementById('snxrDjMsg');
+
+    if (statusText) statusText.textContent = isActive ? 'ON AIR 🔴' : 'OFF AIR';
+    if (statusText) statusText.style.color = isActive ? '#ef4444' : '#888';
+    if (goBtn)  goBtn.classList.toggle('snxr-hidden',  isActive);
+    if (endBtn) endBtn.classList.toggle('snxr-hidden', !isActive);
+    if (djMsg && !isActive) djMsg.textContent = '';
+  }
+
+  function _onDjGoLive() {
+    var msg = document.getElementById('snxrDjMsg');
+    if (msg) msg.textContent = 'Requesting microphone…';
+    if (!window.SNXRadioDJ) { if (msg) msg.textContent = '✗ DJ module not loaded'; return; }
+    window.SNXRadioDJ.djStart(function(result) {
+      if (!msg) return;
+      if (result.error) {
+        msg.textContent = '✗ ' + result.error;
+        msg.style.color = '#ef4444';
+      } else {
+        msg.textContent = '✓ DJ Live — you are on air!';
+        msg.style.color = '#39FF14';
+      }
+    });
+  }
+
+  function _onDjEnd() {
+    var msg = document.getElementById('snxrDjMsg');
+    if (msg) { msg.textContent = 'Ending DJ session…'; msg.style.color = '#aaa'; }
+    if (!window.SNXRadioDJ) return;
+    window.SNXRadioDJ.djEnd().then(function() {
+      if (msg) { msg.textContent = '✓ DJ session ended.'; msg.style.color = '#aaa'; }
+    }).catch(function(e) {
+      if (msg) { msg.textContent = '✗ ' + e.message; msg.style.color = '#ef4444'; }
+    });
+  }
 
 })();
 </script>

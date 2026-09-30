@@ -2044,3 +2044,156 @@
   .snxrq-modal { max-height: 92vh; border-radius: 10px 10px 0 0; }
   .snxrq-overlay { align-items: flex-end; padding: 0; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   LISTENING NOW — 👥 X LISTENING NOW
+═══════════════════════════════════════════════════════════ */
+
+.snxr-listening-now {
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: #5a7a9a;
+  text-align: center;
+  padding: 6px 0 2px;
+  width: 100%;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DJ LIVE BANNER — 🔴 DJ LIVE ON AIR / Name
+   Shown at top of Radio page when DJ Mode is active.
+═══════════════════════════════════════════════════════════ */
+
+.snxr-dj-banner.snxr-hidden { display: none !important; }
+
+.snxr-dj-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto 12px;
+  padding: 9px 16px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+.snxr-dj-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  flex-shrink: 0;
+  animation: snxr-pulse 1.4s ease-in-out infinite;
+}
+
+.snxr-dj-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #ef4444;
+  text-transform: uppercase;
+}
+
+.snxr-dj-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a0b4cc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FOUNDER DJ CONTROLS
+   Compact panel shown in Founder bar area.
+═══════════════════════════════════════════════════════════ */
+
+.snxr-dj-ctrl {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 0 6px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: 10px;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+
+.snxr-dj-status {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #5a7a9a;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.snxr-dj-ctrl-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.snxr-dj-go-btn.snxr-hidden,
+.snxr-dj-end-btn.snxr-hidden { display: none !important; }
+
+.snxr-dj-go-btn,
+.snxr-dj-end-btn {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 8px 14px;
+  min-height: 36px;
+  transition: background 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.snxr-dj-go-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+
+.snxr-dj-go-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.snxr-dj-end-btn {
+  background: rgba(100, 100, 110, 0.12);
+  border: 1px solid rgba(100, 100, 110, 0.3);
+  color: #8a9ab0;
+}
+
+.snxr-dj-end-btn:hover {
+  background: rgba(100, 100, 110, 0.22);
+}
+
+.snxr-dj-msg {
+  font-size: 11px;
+  min-height: 14px;
+  margin: 6px 0 0;
+  color: #5a6a7a;
+}
+
+/* Mobile: stack buttons vertically on narrow screens */
+@media (max-width: 420px) {
+  .snxr-dj-ctrl-btns {
+    flex-direction: column;
+  }
+  .snxr-dj-go-btn,
+  .snxr-dj-end-btn {
+    width: 100%;
+  }
+}

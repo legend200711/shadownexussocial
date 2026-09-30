@@ -164,6 +164,36 @@
     },
 
 
+    // ── Radio Presence (Listening Now) ────────────────────────────────────────
+    //   /radioPresence/{sessionId}
+    //   - Any authenticated user may write their own session node.
+    //   - Any authenticated user (or unauthenticated visitor) may read the
+    //     aggregate count — the count query reads the parent path.
+    //   - Each session node is owned by the session that created it; the client
+    //     also registers an onDisconnect().remove() so the node is cleaned up
+    //     when the connection drops.
+    "radioPresence": {
+      ".read": true,
+      "$sessionId": {
+        ".write": "auth != null"
+      }
+    },
+
+    // ── Radio DJ Sessions (WebRTC signaling for DJ Mode) ──────────────────────
+    //   /radioDjSessions/{sessionId}/...
+    //   - Any authenticated user may read (listeners need offer/candidates).
+    //   - Any authenticated user may write (both DJ and listeners write here).
+    //     Founder-only enforcement for djStart/djEnd is done in Firestore
+    //     (/siteSettings/radioDj) where isFounderEmail() is enforced.
+    //     The RTDB signaling nodes themselves only need auth, not Founder,
+    //     because listeners must be able to write their answer/candidates.
+    "radioDjSessions": {
+      "$sessionId": {
+        ".read":  "auth != null",
+        ".write": "auth != null"
+      }
+    },
+
     "userLive": {
       "$uid": {
         ".read":  "auth != null",

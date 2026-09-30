@@ -118,6 +118,11 @@ let _scheduleUnsub    = null; // Firestore listener unsubscribe for schedule
 let _programsUnsub    = null; // Firestore listener unsubscribe for programs
 let _settingsUnsub    = null; // Firestore listener unsubscribe for settings
 
+// Live playlist / track subscriptions
+let _playlistUnsub    = null; // onSnapshot for active playlist doc
+let _tracksUnsub      = null; // onSnapshot for /radioTracks collection
+let _subscribedPlId   = null; // which playlistId is currently subscribed
+
 // Callbacks registered by the player UI
 const _cbs = {};
 
@@ -188,6 +193,8 @@ async function init(opts = {}) {
   if (opts.onScheduleChange)  on('scheduleChange',   opts.onScheduleChange);
   if (opts.onSettingsChange)  on('settingsChange',   opts.onSettingsChange);
   if (opts.onRecentlyPlayed)  on('recentlyPlayed',   opts.onRecentlyPlayed);
+  // Live data callbacks
+  if (opts.onTracksChange)    on('tracksChange',     opts.onTracksChange);
 
   _emit('stateChange', 'loading');
 
@@ -295,6 +302,9 @@ function destroy() {
   if (_scheduleUnsub) { try { _scheduleUnsub(); } catch (_) {} _scheduleUnsub = null; }
   if (_programsUnsub) { try { _programsUnsub(); } catch (_) {} _programsUnsub = null; }
   if (_settingsUnsub) { try { _settingsUnsub(); } catch (_) {} _settingsUnsub = null; }
+  if (_playlistUnsub) { try { _playlistUnsub(); } catch (_) {} _playlistUnsub = null; }
+  if (_tracksUnsub)   { try { _tracksUnsub(); }   catch (_) {} _tracksUnsub   = null; }
+  _subscribedPlId = null;
   _station  = null;
   _playlist = [];
   _trackIdx = -1;
@@ -456,13 +466,17 @@ async function _onStationSnapshot(data) {
     return;
   }
 
-  // RADIO mode — load playlist if changed or not loaded
+  // RADIO mode — live-subscribe to playlist + tracks if not already
   const playlistChanged = !prev || prev.playlistId !== _station.playlistId;
   const epochChanged    = prev && prev.epochMs !== _station.epochMs;
 
+  // Ensure /radioTracks collection is subscribed (metadata live updates)
+  if (!_tracksUnsub) _subscribeRadioTracks();
+
   if (playlistChanged) {
     _emit('stateChange', 'loading');
-    await _loadPlaylist(_station.playlistId);
+    // Subscribe to playlist doc for live updates (replaces one-time load)
+    await _subscribePlaylistLive(_station.playlistId);
   }
 
   if (_playlist.length === 0) {
@@ -564,6 +578,234 @@ async function _fetchAllRadioTracks() {
     console.error('[SNX-RADIO] fetchAllRadioTracks:', e.message);
     return [];
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LIVE PLAYLIST SUBSCRIPTION
+   Watches /radioPlaylists/{playlistId} for changes to trackIds.
+   Updates _playlist WITHOUT restarting the current song.
+   Called from _onStationSnapshot when playlistId is set/changed.
+══════════════════════════════════════════════════════════════ */
+
+async function _subscribePlaylistLive(playlistId) {
+  // Tear down any existing playlist subscription
+  if (_playlistUnsub) {
+    try { _playlistUnsub(); } catch (_) {}
+    _playlistUnsub   = null;
+    _subscribedPlId  = null;
+  }
+
+  if (!playlistId) {
+    // No playlist doc — subscribe to all enabled radioTracks directly
+    _subscribeAllTracksFallback();
+    return;
+  }
+
+  if (!_firestore) return;
+  const mods = window._snxFirestore || window._snxFirestoreModules;
+  if (!mods || !mods.doc || !mods.onSnapshot) {
+    // Fall back to one-time load
+    await _loadPlaylist(playlistId);
+    return;
+  }
+
+  _subscribedPlId = playlistId;
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const plRef = mods.doc(_firestore, COL_PLAYLISTS, playlistId);
+    const unsub = mods.onSnapshot(plRef, async (snap) => {
+      if (_destroyed) return;
+
+      const data = snap.exists() ? snap.data() : null;
+      if (!data || !data.enabled) {
+        _playlist = [];
+        if (!resolved) { resolved = true; resolve(); }
+        if (_playing) {
+          _emit('stateChange', 'off-air');
+          _emit('nowPlaying', null);
+          _emit('upNext', null);
+        }
+        return;
+      }
+
+      const newTrackIds = data.trackIds || data.tracks || [];
+
+      // Identify which track IDs are new / changed vs already in _playlist
+      const existingIds  = new Set(_playlist.map(t => t.id));
+      const newIds       = new Set(newTrackIds);
+
+      // Fetch only tracks not already in memory
+      const toFetch = newTrackIds.filter(id => !existingIds.has(id));
+      let   fetched = [];
+      if (toFetch.length > 0) {
+        fetched = await _fetchTracks(toFetch);
+      }
+
+      // Build merged map: existing tracks + newly fetched
+      const trackMap = {};
+      _playlist.forEach(t => { trackMap[t.id] = t; });
+      fetched.forEach(t => { if (t) trackMap[t.id] = t; });
+
+      // Rebuild playlist in the order Founder specified
+      const newPlaylist = newTrackIds
+        .map(id => trackMap[id])
+        .filter(t => _isValidTrack(t));
+
+      // --- PLAYBACK PROTECTION ---
+      // Find whether the currently playing track is still in the new playlist
+      const currentTrack = _playlist[_trackIdx] || null;
+      const currentStillPresent = currentTrack
+        ? newPlaylist.some(t => t.id === currentTrack.id)
+        : false;
+
+      // Update playlist in-place
+      _playlist = newPlaylist;
+
+      if (!resolved) {
+        resolved = true;
+        resolve();
+        return; // First snapshot handled by _onStationSnapshot → _joinTimeline
+      }
+
+      // Subsequent snapshots = Founder changed playlist while station is running
+      if (_playlist.length === 0) {
+        _stopAudio();
+        _playing = false;
+        _emit('stateChange', 'off-air');
+        _emit('nowPlaying', null);
+        _emit('upNext', null);
+        return;
+      }
+
+      // Update track index to match current track in new order
+      if (currentStillPresent && currentTrack) {
+        const newIdx = _playlist.findIndex(t => t.id === currentTrack.id);
+        if (newIdx !== -1) _trackIdx = newIdx;
+      } else if (_trackIdx >= _playlist.length) {
+        // Current index out of bounds — resync gently
+        _trackIdx = Math.max(0, _playlist.length - 1);
+      }
+
+      // Always re-emit upNext (it may have changed)
+      _notifyUpNext();
+      // Re-emit nowPlaying metadata if current track's metadata changed
+      _notifyNowPlaying();
+
+      console.log('[SNX-RADIO] Playlist live update — tracks:', _playlist.length,
+        currentStillPresent ? '(current song preserved)' : '(current song removed — resyncing)');
+
+      // If current song was removed, resync to timeline
+      if (!currentStillPresent && _playing) {
+        await _joinTimeline();
+      }
+    }, (err) => {
+      console.warn('[SNX-RADIO] playlist snapshot error:', err.message);
+      if (!resolved) { resolved = true; resolve(); }
+    });
+
+    _playlistUnsub = unsub;
+  });
+}
+
+/**
+ * Fallback when no playlistId is configured.
+ * Subscribes to all enabled /radioTracks documents.
+ */
+function _subscribeAllTracksFallback() {
+  if (_playlistUnsub) { try { _playlistUnsub(); } catch (_) {} _playlistUnsub = null; }
+  if (!_firestore) return;
+  const mods = window._snxFirestore || window._snxFirestoreModules;
+  if (!mods || !mods.collection || !mods.onSnapshot || !mods.query || !mods.where) {
+    _fetchAllRadioTracks().then(tracks => { _playlist = tracks; }).catch(() => {});
+    return;
+  }
+
+  const { collection, query, where, onSnapshot } = mods;
+  const q = query(collection(_firestore, COL_TRACKS), where('enabled', '==', true));
+
+  const unsub = onSnapshot(q, (snap) => {
+    if (_destroyed) return;
+    let docs = [];
+    snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    docs.sort((a, b) => {
+      const ta = a.createdAt ? (a.createdAt.seconds || a.createdAt / 1000 || 0) : 0;
+      const tb = b.createdAt ? (b.createdAt.seconds || b.createdAt / 1000 || 0) : 0;
+      return ta - tb;
+    });
+    const newPlaylist = docs.map(d => _normaliseTrack(d.id, d)).filter(_isValidTrack);
+
+    const currentTrack = _playlist[_trackIdx] || null;
+    _playlist = newPlaylist;
+
+    if (currentTrack) {
+      const newIdx = _playlist.findIndex(t => t.id === currentTrack.id);
+      if (newIdx !== -1) _trackIdx = newIdx;
+    }
+    _notifyNowPlaying();
+    _notifyUpNext();
+    _emit('tracksChange', null);
+  }, (err) => {
+    console.warn('[SNX-RADIO] all-tracks snapshot error:', err.message);
+  });
+
+  _playlistUnsub = unsub;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LIVE RADIOTRACK COLLECTION SUBSCRIPTION
+   Watches /radioTracks for metadata changes (title, artist,
+   artwork, enabled status). Updates _playlist entries in-place.
+   Never restarts audio — only refreshes display metadata.
+   Also emits 'tracksChange' for Track Library / Request modal.
+══════════════════════════════════════════════════════════════ */
+
+function _subscribeRadioTracks() {
+  if (_tracksUnsub) return; // already subscribed
+  if (!_firestore) return;
+
+  const mods = window._snxFirestore || window._snxFirestoreModules;
+  if (!mods || !mods.collection || !mods.onSnapshot) return;
+
+  const { collection, onSnapshot } = mods;
+  const colRef = collection(_firestore, COL_TRACKS);
+
+  const unsub = onSnapshot(colRef, (snap) => {
+    if (_destroyed) return;
+
+    // Build a map of all current radioTracks
+    const trackMap = {};
+    snap.forEach(d => { trackMap[d.id] = { id: d.id, ...d.data() }; });
+
+    // Update any matching entries in _playlist (metadata only)
+    let metaChanged = false;
+    _playlist.forEach((t, i) => {
+      const fresh = trackMap[t.id];
+      if (!fresh) return;
+      const norm = _normaliseTrack(fresh.id, fresh);
+      // Detect actual metadata changes before overwriting
+      if (norm.title !== t.title || norm.artist !== t.artist ||
+          norm.artworkUrl !== t.artworkUrl || norm.enabled !== t.enabled) {
+        _playlist[i] = norm;
+        metaChanged = true;
+      }
+    });
+
+    if (metaChanged) {
+      _notifyNowPlaying();
+      _notifyUpNext();
+    }
+
+    // Always notify track library / request modal listeners
+    _emit('tracksChange', Object.values(trackMap));
+
+    console.log('[SNX-RADIO] /radioTracks live update —', snap.size, 'tracks');
+  }, (err) => {
+    console.warn('[SNX-RADIO] radioTracks snapshot error:', err.message);
+    _tracksUnsub = null; // allow re-subscription on next attempt
+  });
+
+  _tracksUnsub = unsub;
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -35,11 +35,12 @@ const COL_REQUESTS = 'radioRequests';
 
 let _modalEl      = null;   // root modal overlay element
 let _open         = false;
-let _tracks       = [];     // cached enabled tracks from Firestore
+let _tracks       = [];     // cached enabled tracks from Firestore (kept live)
 let _filtered     = [];     // search-filtered view
 let _selected     = null;   // { id, title, artist }
 let _submitting   = false;
 let _searchVal    = '';
+let _tracksUnsub  = null;   // onSnapshot unsubscribe for /radioTracks
 
 /* ══════════════════════════════════════════════════════════════
    PUBLIC API
@@ -49,6 +50,53 @@ window.SNXRadioRequests = {
   openModal,
   closeModal,
 };
+
+/* Start live track library subscription as soon as the module loads.
+   This keeps _tracks current so the modal always shows fresh data.
+   Subscribes once; safe to call again (idempotent). */
+function _startTrackLibrarySubscription() {
+  if (_tracksUnsub) return; // already subscribed
+
+  const mods = window._snxFirestore;
+  if (!mods || !mods.db || !mods.collection || !mods.onSnapshot || !mods.query || !mods.where) {
+    // Firebase not ready yet — retry
+    setTimeout(_startTrackLibrarySubscription, 1000);
+    return;
+  }
+
+  try {
+    const { db, collection, query, where, onSnapshot } = mods;
+    const q = query(collection(db, COL_TRACKS), where('enabled', '==', true));
+    _tracksUnsub = onSnapshot(q, (snap) => {
+      let docs = [];
+      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+      _tracks = docs
+        .filter(d => d.audioUrl || d.musicUrl || d.downloadURL || d.url)
+        .map(d => ({
+          id:     d.id,
+          title:  d.title  || d.name      || 'Unknown',
+          artist: d.artist || d.artistName || 'Unknown Artist',
+        }))
+        .sort((a, b) => a.title.localeCompare(b.title));
+      // If modal is open, re-render the list live
+      if (_open) _renderList();
+      console.log('[SNX-RQ] library live update —', _tracks.length, 'tracks');
+    }, (err) => {
+      console.warn('[SNX-RQ] tracks snapshot error:', err.message);
+      _tracksUnsub = null;
+    });
+  } catch (e) {
+    console.warn('[SNX-RQ] _startTrackLibrarySubscription error:', e.message);
+  }
+}
+
+// Also listen for tracksChange events from SNXRadio engine (belt-and-suspenders)
+document.addEventListener('snxRadio:tracksChange', function() {
+  if (_open) _renderList();
+});
+
+// Start subscription when Firebase is ready (defer slightly to let firebase-config.js run)
+setTimeout(_startTrackLibrarySubscription, 1500);
 
 /* ══════════════════════════════════════════════════════════════
    OPEN / CLOSE MODAL
@@ -68,11 +116,18 @@ function openModal() {
   document.body.appendChild(_modalEl);
   _open = true;
 
-  // Load tracks (uses cached list if already loaded)
-  _loadTracks().then(() => {
+  // If live subscription hasn't loaded yet, fall back to one-time load
+  if (_tracks.length > 0) {
     _renderList();
     _focusSearch();
-  });
+  } else {
+    _loadTracks().then(() => {
+      _renderList();
+      _focusSearch();
+    });
+  }
+  // Ensure subscription is running (idempotent)
+  _startTrackLibrarySubscription();
 
   // Trap ESC key
   document.addEventListener('keydown', _onKeyDown);

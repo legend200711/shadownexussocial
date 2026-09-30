@@ -60,6 +60,13 @@ let _schedule     = [];     // [{slotId,hour,minute,programId,label,enabled,orde
 let _uploading    = false;
 let _activeTab    = 'dashboard';
 
+// Live subscription unsubscribers (onSnapshot)
+let _unsubTracks    = null;
+let _unsubPlaylists = null;
+let _unsubPrograms  = null;
+let _unsubSchedule  = null;
+let _unsubRequests  = null;
+
 /* ══════════════════════════════════════════════════════════════
    MOUNT / UNMOUNT
 ══════════════════════════════════════════════════════════════ */
@@ -91,6 +98,12 @@ function mount(parentEl) {
 
 function unmount() {
   if (!_mounted) return;
+  // Tear down live subscriptions
+  if (_unsubTracks)    { try { _unsubTracks(); }    catch(_){} _unsubTracks    = null; }
+  if (_unsubPlaylists) { try { _unsubPlaylists(); } catch(_){} _unsubPlaylists = null; }
+  if (_unsubPrograms)  { try { _unsubPrograms(); }  catch(_){} _unsubPrograms  = null; }
+  if (_unsubSchedule)  { try { _unsubSchedule(); }  catch(_){} _unsubSchedule  = null; }
+  if (_unsubRequests)  { try { _unsubRequests(); }  catch(_){} _unsubRequests  = null; }
   if (_container && _container.parentNode) _container.parentNode.removeChild(_container);
   _container = null;
   _tracks    = [];
@@ -536,11 +549,18 @@ function _bindEvents() {
   $('snxrsUploadBtn').addEventListener('click',       _onUpload);
   $('snxrsAudioFile').addEventListener('change',      _onAudioFileChange);
   $('snxrsArtworkFile').addEventListener('change',    _onArtworkFileChange);
-  $('snxrsRefreshLibBtn').addEventListener('click',   () => _loadTracks());
+  // Refresh buttons: tear down existing subscription so the guard re-arms.
+  $('snxrsRefreshLibBtn').addEventListener('click', () => {
+    if (_unsubTracks) { try { _unsubTracks(); } catch(_){} _unsubTracks = null; }
+    _loadTracks();
+  });
 
   // ── PLAYLISTS ──
   $('snxrsCreatePlBtn').addEventListener('click',     _onCreatePlaylist);
-  $('snxrsRefreshPlsBtn').addEventListener('click',   () => _loadPlaylists());
+  $('snxrsRefreshPlsBtn').addEventListener('click',   () => {
+    if (_unsubPlaylists) { try { _unsubPlaylists(); } catch(_){} _unsubPlaylists = null; }
+    _loadPlaylists();
+  });
   $('snxrsPlEditorCloseBtn').addEventListener('click',() => {
     const sec = $('snxrsPlEditorSection');
     if (sec) sec.classList.add('snxrs-hidden');
@@ -549,17 +569,26 @@ function _bindEvents() {
 
   // ── PROGRAMS ──
   $('snxrsCreateProgBtn').addEventListener('click',   _onCreateProgram);
-  $('snxrsRefreshProgsBtn').addEventListener('click', () => _loadPrograms());
+  $('snxrsRefreshProgsBtn').addEventListener('click', () => {
+    if (_unsubPrograms) { try { _unsubPrograms(); } catch(_){} _unsubPrograms = null; }
+    _loadPrograms();
+  });
 
   // ── SCHEDULE ──
   $('snxrsAddSlotBtn').addEventListener('click',      _onAddSlot);
-  $('snxrsRefreshSchedBtn').addEventListener('click', () => _loadSchedule());
+  $('snxrsRefreshSchedBtn').addEventListener('click', () => {
+    if (_unsubSchedule) { try { _unsubSchedule(); } catch(_){} _unsubSchedule = null; }
+    _loadSchedule();
+  });
 
   // ── SETTINGS ──
   $('snxrsSaveSettingsBtn').addEventListener('click', _onSaveSettings);
 
   // ── SONG REQUESTS ──
-  $('snxrsRefreshRequestsBtn').addEventListener('click', () => _loadRequests());
+  $('snxrsRefreshRequestsBtn').addEventListener('click', () => {
+    if (_unsubRequests) { try { _unsubRequests(); } catch(_){} _unsubRequests = null; }
+    _loadRequests();
+  });
   // Filter buttons
   const filterBtns = _container.querySelectorAll('.snxrs-rq-filter');
   filterBtns.forEach(btn => {
@@ -912,27 +941,46 @@ async function _writeTrackDoc({ title, artist, audioUrl, artworkUrl, duration, u
    TRACK LIBRARY — load + render
 ══════════════════════════════════════════════════════════════ */
 
-async function _loadTracks() {
+function _loadTracks() {
+  // Prevent duplicate subscriptions
+  if (_unsubTracks) return;
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
   const listEl = document.getElementById('snxrsTrackLibrary');
   if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
 
   try {
-    const db   = _getFirestore();
-    const mods = _getFirestoreMods();
-    let   docs = [];
-
-    if (mods && mods.collection && mods.getDocs && mods.query && mods.orderBy) {
-      const q    = mods.query(mods.collection(db, COL_TRACKS), mods.orderBy('createdAt', 'desc'));
-      const snap = await mods.getDocs(q);
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-    } else if (db && db.collection) {
-      const snap = await db.collection(COL_TRACKS).orderBy('createdAt', 'desc').get();
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    let q;
+    if (mods.collection && mods.onSnapshot && mods.query && mods.orderBy) {
+      q = mods.query(mods.collection(db, COL_TRACKS), mods.orderBy('createdAt', 'desc'));
+      _unsubTracks = mods.onSnapshot(q, (snap) => {
+        let docs = [];
+        snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+        _tracks = docs;
+        const el = document.getElementById('snxrsTrackLibrary');
+        if (el) _renderTrackLibrary(el, docs);
+        _populatePlaylistSelects(); // keep selects current
+        _refreshDashboard();
+      }, (err) => {
+        console.error('[SNX-STUDIO] tracks snapshot error:', err.message);
+        _unsubTracks = null;
+      });
+    } else if (db.collection) {
+      // Compat SDK fallback — one-time read
+      db.collection(COL_TRACKS).orderBy('createdAt', 'desc').get()
+        .then(snap => {
+          let docs = [];
+          snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+          _tracks = docs;
+          const el = document.getElementById('snxrsTrackLibrary');
+          if (el) _renderTrackLibrary(el, docs);
+          _refreshDashboard();
+        })
+        .catch(e => { if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`; });
     }
-
-    _tracks = docs;
-    if (listEl) _renderTrackLibrary(listEl, docs);
-    _refreshDashboard();
   } catch (e) {
     if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
   }
@@ -1028,29 +1076,47 @@ window.SNXRadioStudio._deleteTrack = async function(trackId, title) {
    PLAYLISTS — load + render
 ══════════════════════════════════════════════════════════════ */
 
-async function _loadPlaylists() {
+function _loadPlaylists() {
+  if (_unsubPlaylists) return; // already subscribed
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
   const listEl = document.getElementById('snxrsPlaylistsList');
   if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
 
   try {
-    const db   = _getFirestore();
-    const mods = _getFirestoreMods();
-    let   docs = [];
-
-    if (mods && mods.collection && mods.getDocs) {
-      const snap = await mods.getDocs(mods.collection(db, COL_PLAYLISTS));
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-    } else if (db && db.collection) {
-      const snap = await db.collection(COL_PLAYLISTS).get();
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    if (mods.collection && mods.onSnapshot) {
+      const colRef = mods.collection(db, COL_PLAYLISTS);
+      _unsubPlaylists = mods.onSnapshot(colRef, (snap) => {
+        let docs = [];
+        snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+        _playlists = {};
+        docs.forEach(d => { _playlists[d.id] = d; });
+        const el = document.getElementById('snxrsPlaylistsList');
+        if (el) _renderPlaylistsList(el, docs);
+        _populatePlaylistSelects();
+        _populateProgramSelects();
+        _refreshDashboard();
+      }, (err) => {
+        console.error('[SNX-STUDIO] playlists snapshot error:', err.message);
+        _unsubPlaylists = null;
+      });
+    } else if (db.collection) {
+      db.collection(COL_PLAYLISTS).get()
+        .then(snap => {
+          let docs = [];
+          snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+          _playlists = {};
+          docs.forEach(d => { _playlists[d.id] = d; });
+          const el = document.getElementById('snxrsPlaylistsList');
+          if (el) _renderPlaylistsList(el, docs);
+          _populatePlaylistSelects();
+          _refreshDashboard();
+        })
+        .catch(e => { if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`; });
     }
-
-    _playlists = {};
-    docs.forEach(d => { _playlists[d.id] = d; });
-
-    if (listEl) _renderPlaylistsList(listEl, docs);
-    _populatePlaylistSelects();
-    _refreshDashboard();
   } catch (e) {
     if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
   }
@@ -1324,29 +1390,46 @@ async function _updatePlaylistDoc(plId, fields) {
    PROGRAMS — load + render
 ══════════════════════════════════════════════════════════════ */
 
-async function _loadPrograms() {
+function _loadPrograms() {
+  if (_unsubPrograms) return;
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
   const listEl = document.getElementById('snxrsProgramsList');
   if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
 
   try {
-    const db   = _getFirestore();
-    const mods = _getFirestoreMods();
-    let   docs = [];
-
-    if (mods && mods.collection && mods.getDocs) {
-      const snap = await mods.getDocs(mods.collection(db, COL_PROGRAMS));
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-    } else if (db && db.collection) {
-      const snap = await db.collection(COL_PROGRAMS).get();
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    if (mods.collection && mods.onSnapshot) {
+      const colRef = mods.collection(db, COL_PROGRAMS);
+      _unsubPrograms = mods.onSnapshot(colRef, (snap) => {
+        let docs = [];
+        snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+        _programs = {};
+        docs.forEach(d => { _programs[d.id] = d; });
+        const el = document.getElementById('snxrsProgramsList');
+        if (el) _renderProgramsList(el, docs);
+        _populatePlaylistSelects();
+        _populateProgramSelects();
+      }, (err) => {
+        console.error('[SNX-STUDIO] programs snapshot error:', err.message);
+        _unsubPrograms = null;
+      });
+    } else if (db.collection) {
+      db.collection(COL_PROGRAMS).get()
+        .then(snap => {
+          let docs = [];
+          snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+          _programs = {};
+          docs.forEach(d => { _programs[d.id] = d; });
+          const el = document.getElementById('snxrsProgramsList');
+          if (el) _renderProgramsList(el, docs);
+          _populatePlaylistSelects();
+          _populateProgramSelects();
+        })
+        .catch(e => { if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`; });
     }
-
-    _programs = {};
-    docs.forEach(d => { _programs[d.id] = d; });
-
-    if (listEl) _renderProgramsList(listEl, docs);
-    _populatePlaylistSelects();
-    _populateProgramSelects();
   } catch (e) {
     if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
   }
@@ -1444,26 +1527,40 @@ window.SNXRadioStudio._deleteProgram = async function(progId, name) {
    SCHEDULE — load + render
 ══════════════════════════════════════════════════════════════ */
 
-async function _loadSchedule() {
+function _loadSchedule() {
+  if (_unsubSchedule) return;
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
   const listEl = document.getElementById('snxrsScheduleList');
   if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
 
   try {
-    const db   = _getFirestore();
-    const mods = _getFirestoreMods();
-    let   docs = [];
-
-    if (mods && mods.collection && mods.getDocs && mods.query && mods.orderBy) {
-      const q    = mods.query(mods.collection(db, COL_SCHEDULE), mods.orderBy('order', 'asc'));
-      const snap = await mods.getDocs(q);
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-    } else if (db && db.collection) {
-      const snap = await db.collection(COL_SCHEDULE).orderBy('order', 'asc').get();
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    if (mods.collection && mods.onSnapshot && mods.query && mods.orderBy) {
+      const q = mods.query(mods.collection(db, COL_SCHEDULE), mods.orderBy('order', 'asc'));
+      _unsubSchedule = mods.onSnapshot(q, (snap) => {
+        let docs = [];
+        snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+        _schedule = docs.map(d => ({ slotId: d.id, ...d }));
+        const el = document.getElementById('snxrsScheduleList');
+        if (el) _renderScheduleList(el, docs);
+      }, (err) => {
+        console.error('[SNX-STUDIO] schedule snapshot error:', err.message);
+        _unsubSchedule = null;
+      });
+    } else if (db.collection) {
+      db.collection(COL_SCHEDULE).orderBy('order', 'asc').get()
+        .then(snap => {
+          let docs = [];
+          snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+          _schedule = docs.map(d => ({ slotId: d.id, ...d }));
+          const el = document.getElementById('snxrsScheduleList');
+          if (el) _renderScheduleList(el, docs);
+        })
+        .catch(e => { if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`; });
     }
-
-    _schedule = docs.map(d => ({ slotId: d.id, ...d }));
-    if (listEl) _renderScheduleList(listEl, docs);
   } catch (e) {
     if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
   }
@@ -1586,29 +1683,44 @@ window.SNXRadioStudio._deleteSlot = async function(slotId) {
 let _requests        = [];   // cached request docs
 let _requestsFilter  = 'pending';  // pending | approved | rejected | all
 
-async function _loadRequests() {
+function _loadRequests() {
+  if (_unsubRequests) return;
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
   const listEl = document.getElementById('snxrsRequestsList');
   if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
 
   try {
-    const db   = _getFirestore();
-    const mods = _getFirestoreMods();
-    let   docs = [];
-
-    if (mods && mods.collection && mods.getDocs && mods.query && mods.orderBy) {
+    if (mods.collection && mods.onSnapshot && mods.query && mods.orderBy) {
       const q = mods.query(
         mods.collection(db, COL_REQUESTS),
         mods.orderBy('requestedAt', 'desc')
       );
-      const snap = await mods.getDocs(q);
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
-    } else if (db && db.collection) {
-      const snap = await db.collection(COL_REQUESTS).orderBy('requestedAt', 'desc').get();
-      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+      _unsubRequests = mods.onSnapshot(q, (snap) => {
+        let docs = [];
+        snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+        _requests = docs;
+        _renderRequests();
+      }, (err) => {
+        console.error('[SNX-STUDIO] requests snapshot error:', err.message);
+        _unsubRequests = null;
+      });
+    } else if (db.collection) {
+      db.collection(COL_REQUESTS).orderBy('requestedAt', 'desc').get()
+        .then(snap => {
+          let docs = [];
+          snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+          _requests = docs;
+          _renderRequests();
+        })
+        .catch(e => {
+          console.error('[SNX-STUDIO] loadRequests error:', e.message);
+          if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
+        });
     }
-
-    _requests = docs;
-    _renderRequests();
   } catch (e) {
     if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
     console.error('[SNX-STUDIO] loadRequests error:', e.message);
