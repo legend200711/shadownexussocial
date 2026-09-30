@@ -134,6 +134,8 @@ window.SNXRadio = {
   destroy,
   tapToListen,
   stop,
+  pageLeave,
+  pageEnter,
   setVolume,
   on,
   off,
@@ -229,6 +231,49 @@ function stop() {
   _stopAudio();
   _playing = false;
   _emit('stateChange', 'paused');
+}
+
+/**
+ * pageLeave() — called when the listener navigates AWAY from the Radio page.
+ *
+ * Pauses local browser audio immediately.
+ * Does NOT touch global station state, epochMs, playlist, or Firestore.
+ * The deterministic timeline continues running globally.
+ */
+function pageLeave() {
+  if (_audioEl && !_audioEl.paused) {
+    _audioEl.pause();
+  }
+  _playing = false;
+  // Release coordinator ownership so other audio sources are not blocked
+  if (window.SNXAudioCoordinator) {
+    window.SNXAudioCoordinator.release('radio');
+  }
+  _stopTick();
+  console.log('[SNX-RADIO] pageLeave — local audio paused, global station unchanged');
+}
+
+/**
+ * pageEnter() — called when the listener returns to the Radio page.
+ *
+ * Re-joins the live deterministic timeline from the current on-air position.
+ * Does NOT resume from the position where the user left — always syncs to
+ * the authoritative server-time-based position.
+ *
+ * If the engine has not been initialised yet, this is a no-op (init() handles it).
+ */
+async function pageEnter() {
+  if (_destroyed) return;
+  // Engine not ready yet — init() will handle the first join
+  if (!_station || !_playlist.length) return;
+  // Station is off-air — nothing to resume
+  if (!_station.enabled || _station.mode === MODE_OFF_AIR) return;
+  // Re-register with coordinator (ensures other audio is ducked)
+  if (window.SNXAudioCoordinator) {
+    window.SNXAudioCoordinator.request('radio');
+  }
+  console.log('[SNX-RADIO] pageEnter — resyncing to live timeline');
+  await _joinTimeline();
 }
 
 /**

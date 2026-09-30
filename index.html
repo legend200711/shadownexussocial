@@ -21682,8 +21682,11 @@ function navTo(pageId) {
     if (pageId === 'radioPage') {
         if (typeof window.snxRadioPageOpen === 'function') window.snxRadioPageOpen();
     } else {
-        // Leaving radio page — keep audio playing but teardown is optional
-        // (radio engine keeps streaming in background like Live)
+        // Leaving radio page — pause local audio immediately.
+        // Does NOT stop the global station or touch Firebase.
+        if (window.SNXRadio && typeof window.SNXRadio.pageLeave === 'function') {
+            window.SNXRadio.pageLeave();
+        }
     }
     // ── 24-Hour TV lifecycle hooks ──
     // TV startup is handled exclusively by the canonical snxOpen24HourTV() controller.
@@ -30574,7 +30577,13 @@ window.switchAdminTab = function(tab) {
 
     /* Mount player exactly once */
     if (window.SNXRadioPlayer && !window.SNXRadioPlayer.isMounted) {
+      /* First mount — SNXRadioPlayer.mount() calls SNXRadio.init() internally */
       window.SNXRadioPlayer.mount(playerWrap);
+    } else if (window.SNXRadioPlayer && window.SNXRadioPlayer.isMounted) {
+      /* Returning to an already-mounted player — resync to live timeline */
+      if (window.SNXRadio && typeof window.SNXRadio.pageEnter === 'function') {
+        window.SNXRadio.pageEnter();
+      }
     } else if (!window.SNXRadioPlayer) {
       /* Engine still loading — retry once */
       if (!playerWrap._retrying) {
