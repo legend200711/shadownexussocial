@@ -1,11 +1,11 @@
 {
-  "buildId": "SNS-2026-STAGE2G-FINAL",
-  "swVersion": "v98",
+  "buildId": "SNS-2026-LIVE-ANDROID-FIX-001",
+  "swVersion": "v100",
   "deployedAt": "2026-10-03T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
-  "liveVersion": "SNS-2026-LIVE-003",
+  "liveVersion": "SNS-2026-LIVE-ANDROID-FIX-001",
   "guestModeVersion": "SNS-2026-GUEST-MODE-001",
   "djVersion": "1.1.0",
   "stage2aVersion": "1.1.0",
@@ -15,5 +15,5 @@
   "stage2eVersion": "1.0.0",
   "stage2fVersion": "1.0.0",
   "stage2gVersion": "1.0.0",
-  "note": "SNS-2026-STAGE2G-FINAL: Whole-site audit, regression test, and performance architecture lock. Corrective fixes: (1) sw.js BUILD_ID updated from SNS-2026-STAGE2E-001 to SNS-2026-STAGE2F-001 — diagnostic GET_VERSION message now reports the correct build. (2) index.html debug panel BUILD_ID/SW_VER updated from stale SNS-2026-DJ-MIC-001/v94 to SNS-2026-STAGE2F-001/v98 — window.SHADOW_NEXUS_BUILD_VERSION and window.SHADOW_NEXUS_SW_VERSION now match the deployed build. SW CACHE_VERSION unchanged (v98) — no cached asset changes required. Performance architecture: LOCKED. No Firebase schema changes. No backend changes. No auth changes. No Radio/Live/TV/Broadcast/mediasoup architecture changes. No new features. No Shadow Reaper AI."
+  "note": "SNS-2026-LIVE-ANDROID-FIX-001: Android-specific Live initialization repair. Root cause: numeric separator literals (15_000, 90_000, etc.) in live.js and snx-sfu.js cause a SyntaxError on Android Chrome/WebView versions that do not support ES2021 numeric separators. This prevented live.js from parsing, so snxLivePageOpen was never defined — resulting in stuck 'Loading live streams...' and the initialization failure toast. _loadESModule was also silently swallowing the parse error, masking the failure. Fixes: (1) All numeric separator literals in live.js replaced with plain integers. (2) All numeric separator literals in snx-sfu.js replaced with plain integers. (3) _loadESModule now re-throws parse/import errors with full diagnostic metadata. (4) loadFeature catch now logs full [LIVE INIT ERROR] object. (5) [LIVE] 1-9 diagnostic checkpoints added to snx-feature-loader.js and live.js. (6) index.html live navTo block: loading UI replaced with unavailable message + RETRY LIVE button on failure (no page reload, no duplicate listeners). (7) index.html BUILD_ID/SW_VER updated to SNS-2026-LIVE-ANDROID-FIX-001/v100. SW CACHE_VERSION unchanged (v100) — cached files already at v100 from previous repair build; no new SW bump required. iPhone Live path unchanged. Firebase rules unchanged. WebRTC unchanged."
 }

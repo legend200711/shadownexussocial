@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="snx-commit" content="SNS-2026-STAGE2G-FINAL">
+<meta name="snx-commit" content="SNS-2026-LIVE-ANDROID-FIX-001">
 <title>Shadow Nexus Social — Stay Legendary 🌑🔥</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 
@@ -22120,22 +22120,67 @@ function navTo(pageId) {
     // ── Shadow Nexus Live — lazy-load then open hub when page activates ──
     // Stage 2B: live.css + snx-sfu.js + live.js are deferred until first use.
     // live.js is an ES module — SNXFeatureLoader uses esModules[] for it.
+    // SNS-2026-LIVE-ANDROID-FIX-001: full diagnostic catch + loading UI repair.
     if (pageId === 'livePage') {
         console.log('[LIVE] feature requested');
+
+        // Helper: replace loading placeholder with an unavailable message
+        // and show a Retry button that re-enters the live init path cleanly.
+        // Must NOT reload the page and must NOT create duplicate Firebase listeners.
+        function _liveShowUnavailable(msg) {
+            var hub = document.getElementById('snxLiveHubCards');
+            if (hub) {
+                hub.innerHTML =
+                    '<div class="live-hub-empty">' +
+                      '<span class="live-hub-empty-icon">📡</span>' +
+                      '<div style="margin:8px 0 12px">' + (msg || 'Live is temporarily unavailable.') + '</div>' +
+                      '<button id="snxLiveRetryBtn" style="padding:8px 20px;border-radius:6px;' +
+                        'background:#ff3355;color:#fff;border:none;cursor:pointer;font-weight:700;' +
+                        'font-size:13px;letter-spacing:1px;">RETRY LIVE</button>' +
+                    '</div>';
+                var retryBtn = document.getElementById('snxLiveRetryBtn');
+                if (retryBtn) {
+                    retryBtn.addEventListener('click', function () {
+                        // Reset loader state so loadFeature() will retry
+                        if (window.SNXFeatureLoader) {
+                            // Only reset if in error state — prevents double-init
+                            if (window.SNXFeatureLoader.getState('live') === 'loaded') {
+                                if (typeof window.snxLivePageOpen === 'function') window.snxLivePageOpen();
+                                return;
+                            }
+                        }
+                        // Re-trigger the same navTo block via realmNavTo
+                        if (typeof realmNavTo === 'function') realmNavTo('livePage');
+                    });
+                }
+            }
+            if (typeof toastNotification === 'function') {
+                toastNotification('⚠ Live failed to initialize. Tap RETRY LIVE.');
+            }
+        }
+
         if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('live')) {
             window.SNXFeatureLoader.loadFeature('live')
                 .then(function () {
                     console.log('[LIVE] live.js loaded — calling snxLivePageOpen');
                     if (typeof window.snxLivePageOpen === 'function') {
+                        console.log('[LIVE] 7 snxLivePageOpen called');
                         window.snxLivePageOpen();
                     } else {
-                        console.error('[LIVE ERROR] snxLivePageOpen undefined after feature load — live.js may have failed to execute');
-                        if (typeof toastNotification === 'function') toastNotification('⚠ Live failed to initialize. Please refresh.');
+                        console.error('[LIVE ERROR] snxLivePageOpen undefined after feature load — live.js failed to execute');
+                        _liveShowUnavailable('Live failed to initialize.');
                     }
                 })
                 .catch(function (err) {
-                    console.error('[LIVE ERROR] Live feature load failed:', err && err.message);
-                    if (typeof toastNotification === 'function') toastNotification('⚠ Live failed to load. Tap to retry.');
+                    // Full diagnostic — no tokens logged
+                    console.error('[LIVE INIT ERROR]', {
+                        name: err && err.name,
+                        message: err && err.message,
+                        stack: err && err.stack,
+                        src: err && err._snxSrc,
+                        error: err
+                    });
+                    _liveShowUnavailable('Live is temporarily unavailable.');
                 });
         } else {
             console.log('[LIVE] feature already loaded — calling snxLivePageOpen');
@@ -33551,8 +33596,8 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-STAGE2G-FINAL';
-  var SW_VER   = 'v98';
+  var BUILD_ID = 'SNS-2026-LIVE-ANDROID-FIX-001';
+  var SW_VER   = 'v100';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
@@ -33830,10 +33875,10 @@ document.addEventListener('click', function(e) {
 
     /* ═══ BUILD ═══ */
     o += _h('BUILD');
-    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-STAGE2G-FINAL' ? 'ok' : 'err');
+    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-LIVE-ANDROID-FIX-001' ? 'ok' : 'err');
     o += _r('BUILD_ID (deployed)',   remoteBuild);
     o += _r('BUILD MATCH',           buildMatch,  buildMatch === 'MATCH' ? 'ok' : 'err');
-    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v98' ? 'ok' : 'warn');
+    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v100' ? 'ok' : 'warn');
     /* SW registration note */
     o += _r('SW VERSION (active)',   _dbgSwVer   ? _dbgSwVer + ' (build=' + _dbgSwBuild + ')' : 'querying…');
     o += _r('DISPLAY MODE',          _dbgDisplayMode);
@@ -33948,8 +33993,8 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-STAGE2G-FINAL';
-  var _SNX_SW_VER   = 'v98';
+  var _SNX_BUILD    = 'SNS-2026-LIVE-ANDROID-FIX-001';
+  var _SNX_SW_VER   = 'v100';
   var _SNX_DEPLOY   = '2026-10-03T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 

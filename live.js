@@ -196,8 +196,8 @@ async function _fetchTurnConfig() {
 /* ══════════════════════════════════════════════════════════
    STALE SESSION DETECTION
 ════════════════════════════════════════════════════════════ */
-const HB_INTERVAL_MS    = 15_000;
-const STALE_THRESHOLD_MS = 90_000;
+const HB_INTERVAL_MS    = 15000;
+const STALE_THRESHOLD_MS = 90000;
 
 /* ══════════════════════════════════════════════════════════
    HELPERS
@@ -655,6 +655,7 @@ window.snxLiveOpenViewer = function(roomId) {
 };
 
 window.snxLivePageOpen = function() {
+  console.log('[LIVE] 7 snxLivePageOpen called');
   _log('[LIVE] init started — snxLivePageOpen');
   _log('[LIVE] auth ready — user=' + (_user() ? _user().uid.slice(0,8) + '…' : 'null'));
   _log('[LIVE] db ready — _db()=' + (!!_db()));
@@ -1345,6 +1346,7 @@ async function _endLive(user, roomId, db, presRef, presCb) {
    STAGE 4 — LIVE HUB
 ════════════════════════════════════════════════════════════ */
 function _renderHub() {
+  console.log('[LIVE] 8 Live RTDB listener attaching');
   _log('[LIVE] list subscription attaching');
   const container = _el('snxLiveHubCards');
   if (!container) {
@@ -1365,6 +1367,7 @@ function _renderHub() {
   const roomsRef = ref(db, 'liveRooms');
   _log('[LIVE] list subscription ready — listening to liveRooms');
   const hubCb = onValue(roomsRef, (snap) => {
+    console.log('[LIVE] 9 Live RTDB first callback');
     container.innerHTML = '';
     if (!snap.exists()) {
       _log('[LIVE] list subscription ready — 0 rooms (snap does not exist)');
@@ -1561,7 +1564,7 @@ async function _openViewerScreen(roomId) {
     _vLog('connection-state', 'TIMEOUT — no connection after 30s roomId=' + roomId);
     _setViewerStatus('timeout');
     _showViewerTimeoutUI(roomId, sessId, db, room);
-  }, 30_000);
+  }, 30000);
 
   // ── Offer listener ──
   const offerRef = ref(db, sigPath + '/offer');
@@ -1928,7 +1931,7 @@ function _buildViewerHTML(room) {
 /* Max visible comment nodes in the overlay */
 const _CHAT_MAX_VISIBLE = 12;
 /* After this many ms a comment starts fading */
-const _CHAT_MSG_TTL_MS  = 15_000;
+const _CHAT_MSG_TTL_MS  = 15000;
 
 function _initChat(user, roomId, db, isHost, storeUnsub) {
   const msgsEl  = _el('snxLiveChatMessages');
@@ -2002,7 +2005,7 @@ function _initChat(user, roomId, db, isHost, storeUnsub) {
 ════════════════════════════════════════════════════════════ */
 /* ── Like count display helper ── */
 function _fmtLikes(n) {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000)      return (n / 1000).toFixed(1) + 'k';
   return String(n);
 }
@@ -2846,7 +2849,7 @@ window.snxBoxManager = {
         card.remove();
         if (typeof onDecline === 'function') onDecline(uid);
       }
-    }, 30_000);
+    }, 30000);
   },
 
   /** Remove a request card by uid. */
@@ -4174,7 +4177,7 @@ function _guestViewerCleanup() {
 let _liveModPanelEl     = null;   // DOM element
 let _liveModPollTimer   = null;   // setInterval for log refresh
 let _liveModPanelOpen   = false;  // toggle state
-const _LIVE_MOD_POLL_MS = 20_000; // refresh every 20 s
+const _LIVE_MOD_POLL_MS = 20000; // refresh every 20 s
 
 /** Inject the panel into the host stage and start polling. */
 function _initLiveModerationPanel(roomId) {
@@ -4332,9 +4335,9 @@ async function _refreshModPanelLog(panel, roomId) {
 function _fmtModAge(tsMs) {
   if (!tsMs) return '';
   const diff = Date.now() - tsMs;
-  if (diff < 60_000)   return 'just now';
-  if (diff < 3_600_000) return Math.floor(diff / 60_000) + 'm ago';
-  return Math.floor(diff / 3_600_000) + 'h ago';
+  if (diff < 60000)    return 'just now';
+  if (diff < 3600000)  return Math.floor(diff / 60000) + 'm ago';
+  return Math.floor(diff / 3600000) + 'h ago';
 }
 
 _log('live.js loaded — SNS-2026-LIVE-008');

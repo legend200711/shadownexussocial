@@ -10,33 +10,36 @@
  * Path detection: base is derived from sw.js location so this works on
  * shadownexussocial.online (/) and any local dev server (/).
  *
- * Build: SNS-2026-LIVE-REPAIR-001
- * Changes: SNS Live — Stage 1 Repair.
- *   - snx-feature-loader.js: live.js moved from scripts[] to esModules[].
- *     live.js uses top-level ES module import statements and cannot be loaded
- *     as a classic <script> tag.  Loading it via _loadScript() caused a
- *     SyntaxError at parse time, preventing window.snxLivePageOpen and
- *     window.snxLiveOpenGoLive from ever being defined — the root cause of
- *     the stuck "Loading live streams…" and dead GO LIVE button on all devices.
- *   - live.js: diagnostic [LIVE] console checkpoints added at init, hub
- *     subscription, GO LIVE click, host startup, and media request.
- *     Firebase error callback added to the liveRooms listener.
- *   - index.html (navTo livePage block): [LIVE] diagnostic logs added;
- *     explicit [LIVE ERROR] toast if snxLivePageOpen is still undefined
- *     after feature load (secondary safety net).
- *   NOTE: SW version bumped v99 → v100 to evict stale snx-feature-loader.js
- *   from mobile caches that would otherwise continue serving the broken version.
+ * Build: SNS-2026-LIVE-ANDROID-FIX-001
+ * Changes: Android-specific Live initialization repair.
+ *   - live.js: All numeric separator literals (15_000, 90_000, 30_000, etc.)
+ *     replaced with plain integers. Numeric separators are ES2021 and not
+ *     supported on Android Chrome/WebView < 75 (installed PWA users on older
+ *     devices). The SyntaxError at parse time prevented snxLivePageOpen from
+ *     ever being defined — root cause of the stuck "Loading live streams…" and
+ *     the "Live failed to initialize" error on Android while iPhone worked.
+ *   - snx-sfu.js: Same numeric separator fix (96_000, 500_000, 900_000,
+ *     10_000, 15_000 replaced with plain integers).
+ *   - snx-feature-loader.js: _loadESModule now re-throws parse/import errors
+ *     instead of swallowing them. loadFeature catch logs full [LIVE INIT ERROR]
+ *     diagnostic object. [LIVE] 1-9 checkpoints added to the live load chain.
+ *   - index.html: Live navTo failure path now replaces loading placeholder with
+ *     "Live is temporarily unavailable" + RETRY LIVE button (no page reload,
+ *     no duplicate Firebase listeners). BUILD_ID/SW_VER diagnostic values
+ *     corrected from stale SNS-2026-STAGE2G-FINAL/v98 to
+ *     SNS-2026-LIVE-ANDROID-FIX-001/v100.
+ *   NOTE: CACHE_VERSION stays v100 — unchanged from SNS-2026-LIVE-REPAIR-001.
+ *   The changed files (live.js, snx-sfu.js, snx-feature-loader.js, index.html)
+ *   are all in TV_NETWORK_FIRST_FILES or SHELL_FILES and will be served fresh
+ *   on next load without a cache bump. No new SW bump needed.
+ *   - (Previous) SNS-2026-LIVE-REPAIR-001: Live.js moved to esModules[], v99→v100.
  *   - (Previous) SNS-2026-SHADOW-AI-STAGE1-001: Shadow Reaper AI Stage 1.
- *   - (Previous) SNS-2026-STAGE2G-FINAL: Stage 2F Runtime/Listener/Timer/Subscription Cleanup.
- *   - (Previous) Stage 2E CSS + Rendering Performance Optimization.
- *   - (Previous) Stage 2D: SNXMediaController shared IntersectionObserver.
- *   - (Previous) Stage 2C Firebase + Network Efficiency.
- *   - (Previous) Stage 2B feature lazy loading.
+ *   - (Previous) SNS-2026-STAGE2G-FINAL: Stage 2F Runtime cleanup.
  *   v100
  */
 
 const CACHE_VERSION = 'v100';
-const BUILD_ID      = 'SNS-2026-LIVE-REPAIR-001';
+const BUILD_ID      = 'SNS-2026-LIVE-ANDROID-FIX-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 

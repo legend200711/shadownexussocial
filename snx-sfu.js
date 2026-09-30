@@ -433,9 +433,9 @@ class _SnxMediasoupProvider {
         track,
         encodings: track.kind === 'video'
           ? [
-              { maxBitrate:  96_000, scaleResolutionDownBy: 4 },   // low (thumbnail)
-              { maxBitrate: 500_000, scaleResolutionDownBy: 2 },   // medium
-              { maxBitrate: 900_000, scaleResolutionDownBy: 1 },   // full
+              { maxBitrate:  96000, scaleResolutionDownBy: 4 },   // low (thumbnail)
+              { maxBitrate: 500000, scaleResolutionDownBy: 2 },   // medium
+              { maxBitrate: 900000, scaleResolutionDownBy: 1 },   // full
             ]
           : undefined,
         codecOptions: track.kind === 'audio'
@@ -524,7 +524,7 @@ class _SnxMediasoupProvider {
       const timeout = setTimeout(() => {
         reject(new Error('[SNX-MS] WebSocket connection timeout'));
         ws.close();
-      }, 10_000);
+      }, 10000);
 
       ws.onopen = () => {
         clearTimeout(timeout);
@@ -801,7 +801,7 @@ class _SnxMediasoupProvider {
           this._pending.delete(requestId);
           reject(new Error('[SNX-MS] Request timeout: ' + type));
         }
-      }, 15_000);
+      }, 15000);
 
       // Wrap resolve/reject to also clear the timeout
       const origResolve = resolve;

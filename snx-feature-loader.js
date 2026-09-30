@@ -257,8 +257,20 @@
       return Promise.resolve();
     }
     return import('./' + src).then(function () {}).catch(function (err) {
-      console.warn('[SNXFeatureLoader] ES module import failed:', src, err.message);
-      // Non-fatal: resolve so the chain continues
+      // Re-throw with full diagnostic metadata so the loadFeature() catch
+      // receives the original exception (name, message, stack) and can log
+      // it properly. Swallowing the error here caused "snxLivePageOpen
+      // undefined after feature load" on Android — the module had failed
+      // to parse but the loader reported success.
+      console.error('[SNXFeatureLoader] ES module import FAILED:', {
+        src: src,
+        name: err && err.name,
+        message: err && err.message,
+        stack: err && err.stack
+      });
+      // Attach src to the error so the loadFeature catch can surface the URL.
+      if (err) { err._snxSrc = src; }
+      throw err;
     });
   }
 
@@ -305,6 +317,9 @@
     _state[featureId] = 'loading';
     _showLoading(def.label);
 
+    var isLive = (featureId === 'live');
+    if (isLive) console.log('[LIVE] 1 feature requested');
+
     var work = Promise.resolve();
 
     // 1. Resolve dependencies first
@@ -326,13 +341,35 @@
     // 3. Load classic scripts sequentially (order matters for globals)
     var scripts = def.scripts || [];
     scripts.forEach(function (src) {
-      work = work.then(function () { return _loadScript(src); });
+      var isSfu = (src.split('?')[0] === 'snx-sfu.js');
+      if (isSfu) work = work.then(function () {
+        console.log('[LIVE] 2 snx-sfu requested');
+        return _loadScript(src).then(function () {
+          console.log('[LIVE] 3 snx-sfu loaded');
+        });
+      });
+      else work = work.then(function () { return _loadScript(src); });
     });
 
     // 4. Load ES modules
     var esModules = def.esModules || [];
     esModules.forEach(function (src) {
-      work = work.then(function () { return _loadESModule(src); });
+      var isLiveJs = (src.split('?')[0] === 'live.js');
+      if (isLiveJs) {
+        work = work.then(function () {
+          console.log('[LIVE] 4 live.js import starting');
+          return _loadESModule(src).then(function () {
+            console.log('[LIVE] 5 live.js import resolved');
+            if (typeof global.snxLivePageOpen === 'function') {
+              console.log('[LIVE] 6 snxLivePageOpen exists');
+            } else {
+              console.warn('[LIVE] 6 snxLivePageOpen NOT defined after live.js resolved');
+            }
+          });
+        });
+      } else {
+        work = work.then(function () { return _loadESModule(src); });
+      }
     });
 
     // 5. Run feature init callback if provided
@@ -354,6 +391,14 @@
       .catch(function (err) {
         _state[featureId] = 'error';
         _promise[featureId] = null;   // allow retry next call
+        // Full diagnostic for Android troubleshooting — never log tokens.
+        console.error('[LIVE INIT ERROR]', {
+          name: err && err.name,
+          message: err && err.message,
+          stack: err && err.stack,
+          src: err && err._snxSrc,
+          error: err
+        });
         _showError(def.label, err && err.message);
         throw err;
       });
