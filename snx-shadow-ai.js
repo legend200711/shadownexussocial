@@ -2,7 +2,7 @@
  * snx-shadow-ai.js
  * Shadow Nexus Social — Shadow Reaper AI Core
  *
- * Build: SNS-2026-SHADOW-VOICE-4A-001
+ * Build: SNS-2026-SHADOW-VOICE-4A-001 / E1-RC1
  *
  * Exposes: window.SNXShadowAI
  *
@@ -68,6 +68,8 @@
   ───────────────────────────────────────────────────────────────*/
   var MAX_HISTORY = 20; // max conversation turns (user+grim pairs) — bounded for server
   var BUILD_ID    = 'SNS-2026-SHADOW-VOICE-4A-001';
+  var E1_BUILD_ID = 'SNS-2026-SHADOW-EMOTION-E1-RC1';
+  var E2_BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC1';
 
   /* Cloudflare Worker AI endpoint — never put an API key here */
   var AI_ENDPOINT = 'https://yellow-term-11e6.nthntjrn.workers.dev/shadow-ai/chat';
@@ -245,7 +247,9 @@
     { intent: 'CREATOR',     pattern: /\b(who (is|was|created|built|made|founded|owns?)|chris|legend of shadows|the creator|the founder|stay legendary|why (he|chris)|his (music|story|sister|values|symbols))\b/i },
     { intent: 'STATUS',      pattern: /\b(what can you do|what do you know|can you help|what can i ask|what are you|who are you|your capabilities|what is shadow reaper)\b/i },
     { intent: 'FEATURE',     pattern: /\b(what is|how does|tell me about|explain)\s+(radio|live|tv|feed|inbox|notifications|search|friends|community|arcade|storm rooms|support rooms|profile|settings|uploads|pwa|dj|cohost|pwas|channel)\b/i },
-    { intent: 'QUESTION',    pattern: /\b(what|where|when|who|why|which|does|is|are|can)\b/i }
+    { intent: 'QUESTION',    pattern: /\b(what|where|when|who|why|which|does|is|are|can)\b/i },
+    { intent: 'GENERAL_CONVERSATION', pattern: /^(hey|hi|hello|howdy|what.s up|sup|yo|good (morning|afternoon|evening|night)|morning|night|bye|goodbye|later|see ya|see you|talk later|take care)\s*[.!?]*$/i },
+    { intent: 'GENERAL_CONVERSATION', pattern: /\b(talk to me|let.s talk|tell me something|i.m (bored|tired|sad|excited|frustrated)|my day|had a (rough|long|crazy|good|bad|great|weird|busy) day|i feel|feeling|lol|lmao|haha|thank you|thanks|ok|okay|cool|nice|help me think|help me brainstorm|working on (a )?song|i.ve got an idea)\b/i }
   ];
 
   function _detectIntent(text) {
@@ -724,7 +728,17 @@
       featureRelationships:    true,    // "difference between X and Y" local
       capabilitiesHandler:     true,    // "what can you do" answered locally
       permanentStorage:        false,   // session context NEVER stored persistently
-      build:                   BUILD_ID
+      build:                   BUILD_ID,
+      /* E1 additions */
+      generalConversation:     !!(global.SNXShadowE1),
+      emotionalContext:        !!(global.SNXShadowE1),
+      localCasualResponses:    !!(global.SNXShadowE1),
+      convContextWindow:       !!(global.SNXShadowE1),
+      e1Build:                 E1_BUILD_ID,
+      /* E2 additions */
+      personalMemory:          !!(global.SNXShadowMemory),
+      memoryEnabled:           !!(global.SNXShadowMemory && global.SNXShadowMemory.isEnabled()),
+      e2Build:                 E2_BUILD_ID
     };
   }
 
@@ -943,16 +957,200 @@
   }
 
   /* ─────────────────────────────────────────────────────────────
+     E2: MEMORY CONVERSATION HANDLER
+     Handles all memory intents with natural conversational responses.
+     Called BEFORE general intent routing.
+     Returns a response string, or null if memory could not handle it.
+  ───────────────────────────────────────────────────────────────*/
+  function _handleMemoryIntent(intent, originalText, callback) {
+    var M = global.SNXShadowMemory;
+    if (!M) return false;
+
+    if (intent === 'MEMORY_SAVE') {
+      M.save(originalText, function (result) {
+        callback({
+          text:       result.message,
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'HIGH'
+        });
+      });
+      return true;
+    }
+
+    if (intent === 'MEMORY_RECALL') {
+      M.recall(originalText, function (result) {
+        var text;
+        if (!result.success) {
+          text = result.message || "I couldn't retrieve your memories right now.";
+        } else if (!result.memories || !result.memories.length) {
+          text = result.message || "I don't have any saved memories matching that.";
+        } else {
+          var formatted = M.formatMemoriesForResponse(result.memories);
+          /* Build a natural response */
+          if (result.memories.length === 1) {
+            text = 'You told me: ' + result.memories[0].content;
+          } else {
+            text = 'Here is what I have saved:\n' + formatted;
+          }
+        }
+        callback({
+          text:       text,
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'HIGH'
+        });
+      });
+      return true;
+    }
+
+    if (intent === 'MEMORY_LIST') {
+      M.list(function (result) {
+        var text;
+        if (!result.success) {
+          text = result.message || "Couldn't retrieve your memories right now.";
+        } else if (!result.memories || !result.memories.length) {
+          text = "I don't have any saved memories for you yet. Tell me something to remember and I'll hold onto it.";
+        } else {
+          var grouped = {};
+          result.memories.forEach(function (m) {
+            var cat = m.category || 'GENERAL';
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(m.content);
+          });
+          var lines = ['Here is what I remember about you:'];
+          Object.keys(grouped).forEach(function (cat) {
+            lines.push('\n' + cat + ':');
+            grouped[cat].forEach(function (c) { lines.push('  • ' + c); });
+          });
+          text = lines.join('\n');
+        }
+        callback({
+          text:       text,
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'HIGH'
+        });
+      });
+      return true;
+    }
+
+    if (intent === 'MEMORY_FORGET') {
+      M.forget(originalText, function (result) {
+        var text;
+        if (result.reason === 'AMBIGUOUS') {
+          text = result.message;
+        } else if (result.reason === 'NOT_FOUND') {
+          text = result.message || "I don't have a memory matching that.";
+        } else if (!result.success) {
+          text = result.message || "I couldn't process that right now.";
+        } else {
+          text = result.message || "Done. Forgotten.";
+        }
+        callback({
+          text:       text,
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'HIGH'
+        });
+      });
+      return true;
+    }
+
+    if (intent === 'MEMORY_FORGET_ALL') {
+      /* Check if this is a confirmation of a pending forget-all */
+      var pending = M.getPendingForgetAll();
+      if (pending) {
+        /* Already pending — treat the MEMORY_FORGET_ALL re-detection as confirmation */
+        M.clearAll(true, function (result) {
+          callback({
+            text:       result.message || "All memories cleared.",
+            page:       null,
+            handled:    true,
+            fromServer: false,
+            confidence: 'HIGH'
+          });
+        });
+      } else {
+        /* First mention — request confirmation */
+        M.clearAll(false, function (result) {
+          callback({
+            text:       result.message,
+            page:       null,
+            handled:    true,
+            fromServer: false,
+            confidence: 'HIGH'
+          });
+        });
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     E2: YES/NO CONFIRMATION HANDLER
+     Detects confirmation/cancellation responses for pending forget-all.
+     Returns true if handled.
+  ───────────────────────────────────────────────────────────────*/
+  var _CONFIRM_YES = /^\s*(yes|yeah|yep|yup|confirm|go ahead|do it|proceed|continue|sure|ok|okay)\s*[.!?]*$/i;
+  var _CONFIRM_NO  = /^\s*(no|nope|nah|cancel|stop|never mind|nevermind|don'?t|abort)\s*[.!?]*$/i;
+
+  function _handleMemoryConfirmation(text, callback) {
+    var M = global.SNXShadowMemory;
+    if (!M) return false;
+
+    var pending = M.getPendingForgetAll();
+    if (!pending) return false;
+
+    if (_CONFIRM_YES.test(text)) {
+      M.clearAll(true, function (result) {
+        callback({
+          text:       result.message || "All memories cleared.",
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'HIGH'
+        });
+      });
+      return true;
+    }
+
+    if (_CONFIRM_NO.test(text)) {
+      M.cancelForgetAll();
+      callback({
+        text:       "Understood. No memories were removed.",
+        page:       null,
+        handled:    true,
+        fromServer: false,
+        confidence: 'HIGH'
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
      PROVIDER ABSTRACTION  — Stage 3C Deep Intelligence Pipeline
      Routing order:
+       0. E2 MEMORY CONFIRMATION (pending forget-all yes/no)
+       0a. E2 MEMORY INTENT (SAVE/RECALL/FORGET/LIST — before all else)
        1. TYPO CORRECTION
-       2. CONTEXT RESOLUTION (pronoun/follow-up)
-       3. INTENT DETECTION
+       2. CONTEXT RESOLUTION (pronoun/follow-up + E1 conv context)
+       3. INTENT DETECTION (incl. GENERAL_CONVERSATION)
        4. CLARIFICATION CHECK (ambiguous → ask one question)
        5. LOCAL KNOWLEDGE — HIGH/MEDIUM confidence → answer immediately
-       6. AI-LIMIT MODE   → local only (Workers AI skipped)
+          (E1 step 5a: GENERAL_CONVERSATION intent → E1 local casual layer first)
+       6. AI-LIMIT MODE   → local only (Workers AI skipped; E1 local casual still active)
        7. OFFLINE         → local only
        8. Workers AI      → LOW/NONE confidence questions, with snippets + intent
+          (E1 step 8a: GENERAL_CONVERSATION → enhanced conv context sent to Worker)
        9. Workers AI unavailable → local fallback
   ───────────────────────────────────────────────────────────────*/
   var SNXShadowAIProvider = {
@@ -965,6 +1163,26 @@
       var context   = params.context;
       var history   = params.history || [];
 
+      /* ── E2 STEP 0: MEMORY CONFIRMATION (pending forget-all) ─────
+         Must run first — before typo correction — so that a clean
+         "yes" or "no" always resolves the pending confirmation even
+         if typo correction would mangle it.
+      ──────────────────────────────────────────────────────────── */
+      if (global.SNXShadowMemory && global.SNXShadowMemory.getPendingForgetAll()) {
+        if (_handleMemoryConfirmation(message, callback)) return;
+      }
+
+      /* ── E2 STEP 0a: MEMORY INTENT (deterministic) ───────────────
+         Detect MEMORY_SAVE / MEMORY_RECALL / MEMORY_FORGET /
+         MEMORY_FORGET_ALL / MEMORY_LIST before anything else.
+         No typo correction needed — patterns are robust.
+         Do NOT depend on Workers AI for these operations.
+      ──────────────────────────────────────────────────────────── */
+      if (global.SNXShadowMemory) {
+        var memIntent = global.SNXShadowMemory.detectIntent(message);
+        if (memIntent && _handleMemoryIntent(memIntent, message, callback)) return;
+      }
+
       /* ── STAGE 3C STEP 1: TYPO CORRECTION ───────────────────────
          Correct common misspellings before any processing.
       ──────────────────────────────────────────────────────────── */
@@ -972,8 +1190,13 @@
 
       /* ── STAGE 3C STEP 2: CONTEXT RESOLUTION ────────────────────
          Resolve pronouns ("it", "he", "this") using session context.
+         E1: also resolve general conversation pronoun context.
       ──────────────────────────────────────────────────────────── */
       var resolvedMsg = _resolveContext(correctedMsg);
+      /* E1: resolve pronouns in general conversation context (e.g. "I finished it" → song) */
+      if (global.SNXShadowE1 && typeof global.SNXShadowE1.resolveConvContext === 'function') {
+        try { resolvedMsg = global.SNXShadowE1.resolveConvContext(resolvedMsg); } catch (_) {}
+      }
 
       /* ── STAGE 3C STEP 3: INTENT DETECTION ──────────────────────
          Classify intent before routing.
@@ -1009,6 +1232,10 @@
       if (localResult && (localConf === 'HIGH' || localConf === 'MEDIUM')) {
         /* Update session context before replying */
         _updateSessionCtx(resolvedMsg, intent, localResult);
+        /* E1: mark website turn so conv context is preserved but not corrupted */
+        if (global.SNXShadowE1 && intent !== 'GENERAL_CONVERSATION') {
+          try { global.SNXShadowE1.markWebsiteTurn(); } catch (_) {}
+        }
         /* Local brain answered confidently — skip AI entirely */
         callback({
           text:       localResult.text,
@@ -1020,12 +1247,49 @@
         return;
       }
 
+      /* ── E1 STEP 5a: GENERAL CONVERSATION LOCAL CASUAL LAYER ─────
+         When intent is GENERAL_CONVERSATION and local knowledge did
+         not confidently answer, try the E1 local casual response layer.
+         Very common exchanges (greetings, thanks, lol, bye) answered
+         immediately — no Workers AI call needed.
+      ──────────────────────────────────────────────────────────── */
+      if (intent === 'GENERAL_CONVERSATION' && global.SNXShadowE1) {
+        try {
+          var casualReply = global.SNXShadowE1.localCasualAnswer(correctedMsg);
+          if (casualReply) {
+            var convTone  = global.SNXShadowE1.detectEmotion(correctedMsg);
+            var convTopic = global.SNXShadowE1.extractConvTopic(correctedMsg);
+            global.SNXShadowE1.updateConvContext(correctedMsg, convTone, convTopic);
+            _updateSessionCtx(resolvedMsg, intent, { id: null, page: null });
+            callback({
+              text:       casualReply,
+              page:       null,
+              handled:    true,
+              fromServer: false,
+              confidence: 'LOCAL_CASUAL'
+            });
+            return;
+          }
+        } catch (_) {}
+      }
+
       /* ── STAGE 3C STEP 6: AI-LIMIT MODE ─────────────────────────
          Workers AI daily allocation exhausted this session.
-         Continue using local knowledge only.
+         E1: for general conversation, produce a warm local fallback.
       ──────────────────────────────────────────────────────────── */
       if (_aiLimitMode) {
         _updateSessionCtx(resolvedMsg, intent, localResult);
+        if (intent === 'GENERAL_CONVERSATION') {
+          /* Provide a warm conversational fallback locally */
+          callback({
+            text:       "I'm running in local mode right now, but I'm still here. If you have a Shadow Nexus question I can help — or just keep talking.",
+            page:       null,
+            handled:    true,
+            fromServer: false,
+            confidence: 'LOCAL_CASUAL'
+          });
+          return;
+        }
         return _fallbackToLocal(resolvedMsg, callback, true);
       }
 
@@ -1093,6 +1357,34 @@
           snxGrounding:     'Answer only from supplied Shadow Nexus Social knowledge. Do not invent features, buttons, menus, or creator biography not present in the supplied knowledge snippets.',
           answerDepth:      _detectAnswerDepth(resolvedMsg)
         });
+
+        /* ── E1 STEP 8a: GENERAL CONVERSATION CONTEXT ────────────────
+           For general conversation turns, attach E1 conversational context
+           so the Worker can build an appropriate persona response.
+           Do NOT send website internals to general conversation turns.
+        ──────────────────────────────────────────────────────────── */
+        if (intent === 'GENERAL_CONVERSATION' && global.SNXShadowE1) {
+          try {
+            var e1Ctx = global.SNXShadowE1.getConvContext();
+            var convSystemCtx = global.SNXShadowE1.buildConvSystemContext(
+              e1Ctx.currentTone,
+              e1Ctx.lastConvTopics
+            );
+            sendContext = Object.assign({}, sendContext, {
+              conversationalMode: true,
+              e1Tone:             e1Ctx.currentTone,
+              e1StyleHint:        convSystemCtx.styleHint,
+              e1ConvTopics:       convSystemCtx.recentConvTopics,
+              e1PersonaNote:      convSystemCtx.personaNote,
+              /* For general conversation, do not send SNX grounding — wrong context */
+              snxGrounding:       convSystemCtx.personaNote
+            });
+            /* Update E1 conv context now that we're routing to Workers AI */
+            var convTone2  = global.SNXShadowE1.detectEmotion(correctedMsg);
+            var convTopic2 = global.SNXShadowE1.extractConvTopic(correctedMsg);
+            global.SNXShadowE1.updateConvContext(correctedMsg, convTone2, convTopic2);
+          } catch (_) {}
+        }
 
         var body = JSON.stringify({
           message:           resolvedMsg,
@@ -1468,7 +1760,7 @@
     inputEl.type = 'text';
     inputEl.id = 'snx-ai-input';
     inputEl.maxLength = 400;
-    inputEl.placeholder = 'Ask anything about Shadow Nexus…';
+    inputEl.placeholder = 'Ask anything — or just talk…';
     inputEl.setAttribute('autocomplete', 'off');
     inputEl.setAttribute('aria-label', 'Message Shadow Reaper');
     inputEl.setAttribute('inputmode', 'text');
@@ -1609,6 +1901,16 @@
       turnCount:        0,
       pendingClarify:   null
     };
+
+    /* E1: reset conversation context — never persisted anyway */
+    if (global.SNXShadowE1 && typeof global.SNXShadowE1.destroy === 'function') {
+      try { global.SNXShadowE1.destroy(); } catch (_) {}
+    }
+
+    /* E2: reset memory session state — persistent data NOT affected */
+    if (global.SNXShadowMemory && typeof global.SNXShadowMemory.destroy === 'function') {
+      try { global.SNXShadowMemory.destroy(); } catch (_) {}
+    }
 
     /* Re-show old GP elements */
     ['gp-messages','gp-typing','gp-input-row','gp-nav-chips','gp-fullpage-link','gp-status']

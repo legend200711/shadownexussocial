@@ -153,6 +153,12 @@
     // Loaded on demand when user clicks the existing "Click Here" entry point.
     // Optional idle prefetch of CSS only in FULL mode + good/excellent connection
     // is handled in prefetchAfterFeed() below.
+    'shadow-ai-e1': {
+      /* E1: loaded as part of shadow-ai feature */
+      css:     [],
+      scripts: ['snx-shadow-ai-e1.js?v=SNS-2026-SHADOW-EMOTION-E1-RC1'],
+      init:    null
+    },
     'shadow-ai': {
       label: 'SHADOW REAPER AI',
       css:  [
@@ -162,6 +168,8 @@
       ],
       scripts: [
         'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
+        'snx-shadow-ai-e1.js?v=SNS-2026-SHADOW-EMOTION-E1-RC1',
+        'snx-shadow-memory.js?v=SNS-2026-SHADOW-MEMORY-E2-RC1',
         'snx-shadow-ai.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
         'snx-shadow-voice.js?v=SNS-2026-SHADOW-VOICE-4A-001',
         'snx-shadow-character.js?v=SNS-2026-SHADOW-CHARACTER-4B-001'

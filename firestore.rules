@@ -164,6 +164,21 @@ service cloud.firestore {
           || (isSignedIn() && request.resource.data.diff(resource.data)
                 .affectedKeys().hasOnly(['likeCount', 'likedBy', 'commentCount']));
       }
+
+      // ── Shadow Reaper Personal Memories (E2) ──────────────────────────────
+      //
+      //   /users/{uid}/shadowReaperMemories/{memoryId}
+      //     id, category, content, normalizedContent,
+      //     createdAt, updatedAt, source, active
+      //
+      // E2 personal memory — stored ONLY by the owning user.
+      // No cross-user access. Founder has no special read access to another
+      // user's personal AI memories.
+      //
+      // READ / WRITE: owner only (request.auth.uid == uid).
+      match /shadowReaperMemories/{memoryId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     // ── Messages (NEW — top-level per-conversation collection) ────────────────
