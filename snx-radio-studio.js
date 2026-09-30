@@ -32,6 +32,7 @@ const COL_PROGRAMS  = 'radioPrograms';
 const COL_SCHEDULE  = 'radioSchedule';
 const COL_SITE      = 'siteSettings';
 const DOC_SETTINGS  = 'radioSettings';
+const COL_REQUESTS  = 'radioRequests';   // Song Requests (Stage 5)
 
 const MAX_AUDIO_MB  = 200;
 const MAX_IMAGE_MB  = 10;
@@ -122,6 +123,7 @@ function _buildDOM() {
     <button class="snxrs-tab" data-tab="programs">PROGRAMS</button>
     <button class="snxrs-tab" data-tab="schedule">SCHEDULE</button>
     <button class="snxrs-tab" data-tab="settings">SETTINGS</button>
+    <button class="snxrs-tab" data-tab="requests">REQUESTS</button>
     <button class="snxrs-tab" data-tab="broadcast">BROADCAST</button>
   </nav>
 
@@ -369,6 +371,32 @@ function _buildDOM() {
     </div>
   </div>
 
+  <!-- ══ SONG REQUESTS ════════════════════════════════════ -->
+  <div class="snxrs-panel snxrs-hidden" id="snxrsPanelRequests">
+
+    <div class="snxrs-section">
+      <div class="snxrs-row snxrs-row--between">
+        <div class="snxrs-section-title">SONG REQUESTS</div>
+        <button class="snxrs-btn snxrs-btn--ghost snxrs-btn--sm" id="snxrsRefreshRequestsBtn">↻ REFRESH</button>
+      </div>
+      <p class="snxrs-hint" style="margin:0 0 8px;">
+        Listener requests below. APPROVE places it in the workflow queue for future playback.
+        REJECT removes it from the queue. Neither action interrupts the current broadcast.
+      </p>
+      <div class="snxrs-row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="snxrs-btn snxrs-btn--ghost snxrs-btn--sm snxrs-rq-filter snxrs-rq-filter--active" data-filter="pending">PENDING</button>
+        <button class="snxrs-btn snxrs-btn--ghost snxrs-btn--sm snxrs-rq-filter" data-filter="approved">APPROVED</button>
+        <button class="snxrs-btn snxrs-btn--ghost snxrs-btn--sm snxrs-rq-filter" data-filter="rejected">REJECTED</button>
+        <button class="snxrs-btn snxrs-btn--ghost snxrs-btn--sm snxrs-rq-filter" data-filter="all">ALL</button>
+      </div>
+      <div id="snxrsRequestsList" class="snxrs-library-list">
+        <p class="snxrs-empty">Loading requests…</p>
+      </div>
+      <p class="snxrs-msg" id="snxrsRequestsMsg"></p>
+    </div>
+
+  </div>
+
   <!-- ══ BROADCAST ════════════════════════════════════════ -->
   <div class="snxrs-panel snxrs-hidden" id="snxrsPanelBroadcast">
 
@@ -461,7 +489,7 @@ function _switchTab(tab) {
   });
 
   // Show/hide panels
-  const panels = ['dashboard', 'tracks', 'playlists', 'programs', 'schedule', 'settings', 'broadcast'];
+  const panels = ['dashboard', 'tracks', 'playlists', 'programs', 'schedule', 'settings', 'requests', 'broadcast'];
   panels.forEach(p => {
     const el = document.getElementById(`snxrsPanelPanel${_cap(p)}`) ||
                document.getElementById(`snxrsPanel${_cap(p)}`);
@@ -476,6 +504,7 @@ function _switchTab(tab) {
   if (tab === 'programs')   _loadPrograms();
   if (tab === 'schedule')   _loadSchedule();
   if (tab === 'settings')   _loadSettings();
+  if (tab === 'requests')   _loadRequests();
   if (tab === 'broadcast')  _loadBroadcastDestinations();
 }
 
@@ -529,6 +558,18 @@ function _bindEvents() {
   // ── SETTINGS ──
   $('snxrsSaveSettingsBtn').addEventListener('click', _onSaveSettings);
 
+  // ── SONG REQUESTS ──
+  $('snxrsRefreshRequestsBtn').addEventListener('click', () => _loadRequests());
+  // Filter buttons
+  const filterBtns = _container.querySelectorAll('.snxrs-rq-filter');
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach(b => b.classList.remove('snxrs-rq-filter--active'));
+      btn.classList.add('snxrs-rq-filter--active');
+      _renderRequests();
+    });
+  });
+
   // ── BROADCAST ──
   $('snxrsBcSaveBtn').addEventListener('click',      _onBroadcastSave);
   $('snxrsBcCancelEditBtn').addEventListener('click', _onBroadcastCancelEdit);
@@ -548,6 +589,7 @@ async function _loadAll() {
     _loadPrograms(),
     _loadSchedule(),
     _loadSettings(),
+    _loadRequests(),
   ]);
   _refreshDashboard();
 }
@@ -1529,6 +1571,145 @@ window.SNXRadioStudio._deleteSlot = async function(slotId) {
     }
     _loadSchedule();
   } catch (e) { alert('Delete failed: ' + e.message); }
+};
+
+/* ══════════════════════════════════════════════════════════════
+   SONG REQUESTS — load, render, approve, reject
+   /radioRequests/{requestId}
+     trackId, trackTitle, trackArtist,
+     requestedByUid, requestedByUsername,
+     requestCount, requesterUids,
+     lastRequestedByUsername, lastRequestedByUid, lastRequestedAt,
+     requestedAt, status
+══════════════════════════════════════════════════════════════ */
+
+let _requests        = [];   // cached request docs
+let _requestsFilter  = 'pending';  // pending | approved | rejected | all
+
+async function _loadRequests() {
+  const listEl = document.getElementById('snxrsRequestsList');
+  if (listEl) listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
+
+  try {
+    const db   = _getFirestore();
+    const mods = _getFirestoreMods();
+    let   docs = [];
+
+    if (mods && mods.collection && mods.getDocs && mods.query && mods.orderBy) {
+      const q = mods.query(
+        mods.collection(db, COL_REQUESTS),
+        mods.orderBy('requestedAt', 'desc')
+      );
+      const snap = await mods.getDocs(q);
+      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    } else if (db && db.collection) {
+      const snap = await db.collection(COL_REQUESTS).orderBy('requestedAt', 'desc').get();
+      snap.forEach(d => docs.push({ id: d.id, ...d.data() }));
+    }
+
+    _requests = docs;
+    _renderRequests();
+  } catch (e) {
+    if (listEl) listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error: ${_esc(e.message)}</p>`;
+    console.error('[SNX-STUDIO] loadRequests error:', e.message);
+  }
+}
+
+function _renderRequests() {
+  const listEl = document.getElementById('snxrsRequestsList');
+  if (!listEl) return;
+
+  // Read active filter from the filter buttons
+  const activeBtn = _container
+    ? _container.querySelector('.snxrs-rq-filter--active')
+    : null;
+  _requestsFilter = activeBtn ? (activeBtn.dataset.filter || 'pending') : _requestsFilter;
+
+  const filtered = _requestsFilter === 'all'
+    ? _requests.slice()
+    : _requests.filter(r => r.status === _requestsFilter);
+
+  if (!_requests.length) {
+    listEl.innerHTML = '<p class="snxrs-empty">No song requests yet.</p>';
+    return;
+  }
+  if (!filtered.length) {
+    listEl.innerHTML = `<p class="snxrs-empty">No ${_requestsFilter} requests.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered.map(r => {
+    const count    = r.requestCount || 1;
+    const username = r.requestedByUsername || r.lastRequestedByUsername || 'Listener';
+    const when     = r.requestedAt
+      ? new Date(r.requestedAt.seconds ? r.requestedAt.seconds * 1000 : r.requestedAt).toLocaleString()
+      : '—';
+    const statusBadgeMap = {
+      pending:  'snxrs-badge--yellow',
+      approved: 'snxrs-badge--green',
+      rejected: 'snxrs-badge--grey',
+    };
+    const badgeCls  = statusBadgeMap[r.status] || 'snxrs-badge--grey';
+    const statusLbl = (r.status || 'pending').toUpperCase();
+    const isPending = r.status === 'pending' || !r.status;
+
+    return `
+<div class="snxrs-track-row" data-id="${_esc(r.id)}" style="flex-wrap:wrap;gap:6px;">
+  <div class="snxrs-track-info" style="min-width:0;flex:1;">
+    <div class="snxrs-track-title">
+      ${count > 1 ? `<span style="color:#f59e0b;font-size:12px;margin-right:4px;">🔥 ${count} REQUESTS</span>` : ''}
+      ${_esc(r.trackTitle || 'Unknown')}
+    </div>
+    <div class="snxrs-track-artist">${_esc(r.trackArtist || '')}</div>
+    <div class="snxrs-track-meta">Requested by ${_esc(username)} · ${_esc(when)}</div>
+  </div>
+  <div class="snxrs-track-actions" style="align-items:center;">
+    <span class="snxrs-badge ${badgeCls}">${statusLbl}</span>
+    ${isPending ? `
+      <button class="snxrs-btn snxrs-btn--green snxrs-btn--sm"
+              onclick="SNXRadioStudio._approveRequest('${_esc(r.id)}')">APPROVE</button>
+      <button class="snxrs-btn snxrs-btn--red snxrs-btn--sm"
+              onclick="SNXRadioStudio._rejectRequest('${_esc(r.id)}')">REJECT</button>
+    ` : ''}
+  </div>
+</div>`;
+  }).join('');
+}
+
+window.SNXRadioStudio._approveRequest = async function(requestId) {
+  const msgEl = document.getElementById('snxrsRequestsMsg');
+  try {
+    const db = _getFirestore(), mods = _getFirestoreMods();
+    const fields = { status: 'approved' };
+    if (mods && mods.doc && mods.updateDoc)
+      await mods.updateDoc(mods.doc(db, COL_REQUESTS, requestId), fields);
+    else if (db && db.collection)
+      await db.collection(COL_REQUESTS).doc(requestId).update(fields);
+
+    _setMsg(msgEl, '✓ Request approved — queued for future playback', 'ok');
+    await _loadRequests();
+  } catch (e) {
+    _setMsg(document.getElementById('snxrsRequestsMsg'), '✗ ' + e.message, 'error');
+    console.error('[SNX-STUDIO] approveRequest error:', e.message);
+  }
+};
+
+window.SNXRadioStudio._rejectRequest = async function(requestId) {
+  const msgEl = document.getElementById('snxrsRequestsMsg');
+  try {
+    const db = _getFirestore(), mods = _getFirestoreMods();
+    const fields = { status: 'rejected' };
+    if (mods && mods.doc && mods.updateDoc)
+      await mods.updateDoc(mods.doc(db, COL_REQUESTS, requestId), fields);
+    else if (db && db.collection)
+      await db.collection(COL_REQUESTS).doc(requestId).update(fields);
+
+    _setMsg(msgEl, '✓ Request rejected', 'ok');
+    await _loadRequests();
+  } catch (e) {
+    _setMsg(document.getElementById('snxrsRequestsMsg'), '✗ ' + e.message, 'error');
+    console.error('[SNX-STUDIO] rejectRequest error:', e.message);
+  }
 };
 
 /* ══════════════════════════════════════════════════════════════

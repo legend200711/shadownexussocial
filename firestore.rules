@@ -14,6 +14,7 @@ rules_version = '2';
 //   /siteSettings/{doc}         — site config (maintenance mode, feature flags)
 //   /radioTracks/{trackId}      — radio-specific tracks (Founder write, listener read)
 //   /radioPlaylists/{playlistId}— radio playlists (Founder write, listener read)
+//   /radioRequests/{requestId}  — song requests (signed-in write, Founder approve/reject)
 //   /aiModerationLog/{docId}    — AI moderation events
 //   /reports/{docId}            — user reports
 //   /auditLog/{docId}           — admin audit trail
@@ -892,6 +893,68 @@ service cloud.firestore {
     match /radioSchedule/{slotId} {
       allow read:                   if true;
       allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Song Requests ───────────────────────────────────────────────────
+    //
+    //   /radioRequests/{requestId}
+    //     trackId, trackTitle, trackArtist,
+    //     requestedByUid, requestedByUsername,
+    //     requestCount, requesterUids[],
+    //     lastRequestedByUid, lastRequestedByUsername, lastRequestedAt,
+    //     requestedAt, status  ('pending' | 'approved' | 'rejected')
+    //
+    // READ:
+    //   Signed-in users may read all requests so the modal can display the
+    //   current queue status.  requesterUids is an array of UIDs — normal
+    //   listeners only need to know whether *they* have already requested a
+    //   track (checked client-side by uid lookup), and the Founder needs to
+    //   see the full list.  No private data beyond UIDs is stored here.
+    //
+    // CREATE:
+    //   Any signed-in user may create a request.
+    //   requestedByUid must match their own Firebase UID.
+    //   requesterUids must be [request.auth.uid] on creation.
+    //
+    // UPDATE:
+    //   A signed-in user may update only requestCount, requesterUids,
+    //   lastRequestedByUid, lastRequestedByUsername, lastRequestedAt
+    //   (the merge / dedup fields) — and only when the request is pending.
+    //   The Founder (isFounderEmail) may update any field (approve/reject).
+    //
+    // DELETE:
+    //   Founder only.  Listeners cannot delete requests.
+
+    match /radioRequests/{requestId} {
+
+      // Any signed-in user can read (no private data beyond UIDs, no secrets)
+      allow read: if isSignedIn();
+
+      // Signed-in user can create their own request
+      allow create: if isSignedIn()
+        && request.resource.data.requestedByUid == request.auth.uid
+        && request.resource.data.requesterUids is list
+        && request.resource.data.requesterUids.hasOnly([request.auth.uid])
+        && request.resource.data.status == 'pending';
+
+      // Merge / dedup update: listener may only increment count and add their UID
+      // The status field must not change via this path.
+      // Founder may update anything (approve / reject).
+      allow update: if isFounderEmail()
+        || (isSignedIn()
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly([
+                   'requestCount',
+                   'requesterUids',
+                   'lastRequestedByUid',
+                   'lastRequestedByUsername',
+                   'lastRequestedAt'
+                 ]));
+
+      // Only Founder may delete requests
+      allow delete: if isFounderEmail();
     }
 
     // ── Radio Comments ────────────────────────────────────────────────────────

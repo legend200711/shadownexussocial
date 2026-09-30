@@ -216,6 +216,13 @@ function _buildDOM() {
       <div class="snxr-recent-list" id="snxrRecentList"></div>
     </div>
 
+    <!-- ─── Request a Song button ────────────────────────── -->
+    <div class="snxr-request-wrap" id="snxrRequestWrap">
+      <button class="snxr-request-btn" id="snxrRequestBtn" type="button">
+        🎵 REQUEST A SONG
+      </button>
+    </div>
+
     <!-- ─── Info strip ───────────────────────────────────── -->
     <div class="snxr-info-strip">
       <span class="snxr-info-strip-text" id="snxrInfoStrip">Shadow Nexus Radio · 24/7 Music · Live Events · Shadow Nexus</span>
@@ -247,6 +254,7 @@ function _buildDOM() {
     'snxrNextTitle', 'snxrNextArtist', 'snxrNextDur',
     'snxrRecentSection', 'snxrRecentList',
     'snxrInfoStrip',
+    'snxrRequestWrap', 'snxrRequestBtn',
   ];
   ids.forEach(id => { E[id] = document.getElementById(id); });
 }
@@ -310,6 +318,15 @@ function _bindEvents() {
       const v = parseFloat(E.snxrVol.value);
       _lastVol = v;
       if (window.SNXRadio) window.SNXRadio.setVolume(v);
+    });
+  }
+
+  // REQUEST A SONG button — opens SNXRadioRequests modal
+  if (E.snxrRequestBtn) {
+    E.snxrRequestBtn.addEventListener('click', () => {
+      if (window.SNXRadioRequests) {
+        window.SNXRadioRequests.openModal();
+      }
     });
   }
 

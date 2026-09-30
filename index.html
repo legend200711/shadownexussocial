@@ -21691,6 +21691,10 @@ function navTo(pageId) {
         if (window.SNXRadioComments && typeof window.SNXRadioComments.pageLeave === 'function') {
             window.SNXRadioComments.pageLeave();
         }
+        // Close the song request modal if open (it lives on document.body).
+        if (window.SNXRadioRequests && typeof window.SNXRadioRequests.closeModal === 'function') {
+            window.SNXRadioRequests.closeModal();
+        }
     }
     // ── 24-Hour TV lifecycle hooks ──
     // TV startup is handled exclusively by the canonical snxOpen24HourTV() controller.
@@ -30539,6 +30543,7 @@ window.switchAdminTab = function(tab) {
        3. snx-radio-player.js       (UI    — window.SNXRadioPlayer)
        4. snx-radio-studio.js       (Studio — window.SNXRadioStudio, Founder only)
        5. snx-radio-comments.js     (Comments — window.SNXRadioComments)
+       6. snx-radio-requests.js     (Song Requests — window.SNXRadioRequests)
      The radio IIFE auto-hooks SNXAudioCoordinator on load.
      Radio is isolated: no Live/mediasoup/WebRTC paths are touched.
      ──────────────────────────────────────────────────────────────────────── -->
@@ -30546,6 +30551,7 @@ window.switchAdminTab = function(tab) {
 <script src="snx-radio-player.js?v=SNS-2026-RADIO-PAGE-001"></script>
 <script src="snx-radio-studio.js?v=SNS-2026-RADIO-PAGE-001"></script>
 <script src="snx-radio-comments.js?v=SNS-2026-RADIO-COMMENTS-001"></script>
+<script src="snx-radio-requests.js?v=SNS-2026-RADIO-REQUESTS-001"></script>
 
 <!-- ── Shadow Nexus Radio — Standalone Radio Page integration ──────────────────
      Wires the standalone #radioPage to SNXRadioPlayer and SNXRadioStudio.

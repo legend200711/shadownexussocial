@@ -533,26 +533,32 @@ async function _fetchTracks(trackIds) {
 }
 
 async function _fetchAllRadioTracks() {
-  // Fallback: load all enabled radioTracks, ordered by createdAt
+  // Fallback: load all enabled radioTracks.
+  // No orderBy in the Firestore query — single-field equality needs no composite index.
+  // Sort by createdAt client-side after fetch.
   try {
     const mods = window._snxFirestore || window._snxFirestoreModules;
     let docs = [];
-    if (mods && mods.collection && mods.query && mods.where && mods.getDocs && mods.orderBy) {
-      const { collection, query, where, getDocs, orderBy } = mods;
+    if (mods && mods.collection && mods.query && mods.where && mods.getDocs) {
+      const { collection, query, where, getDocs } = mods;
       const q = query(
         collection(_firestore, COL_TRACKS),
-        where('enabled', '==', true),
-        orderBy('createdAt', 'asc')
+        where('enabled', '==', true)
       );
       const snap = await getDocs(q);
       snap.forEach(d => { docs.push({ id: d.id, ...d.data() }); });
     } else if (_firestore.collection) {
       const snap = await _firestore.collection(COL_TRACKS)
         .where('enabled', '==', true)
-        .orderBy('createdAt', 'asc')
         .get();
       snap.forEach(d => { docs.push({ id: d.id, ...d.data() }); });
     }
+    // Sort by createdAt ascending (matches original intent) — client-side, no index needed
+    docs.sort((a, b) => {
+      const ta = a.createdAt ? (a.createdAt.seconds || a.createdAt / 1000 || 0) : 0;
+      const tb = b.createdAt ? (b.createdAt.seconds || b.createdAt / 1000 || 0) : 0;
+      return ta - tb;
+    });
     return docs.map(d => _normaliseTrack(d.id, d)).filter(_isValidTrack);
   } catch (e) {
     console.error('[SNX-RADIO] fetchAllRadioTracks:', e.message);
@@ -728,25 +734,33 @@ async function _tryPlay(idx, positionSec) {
   const track = _playlist[idx];
   if (!track || !track.audioUrl) return false;
 
-  _audioEl.src         = track.audioUrl;
-  _audioEl.currentTime = 0;
+  _audioEl.src = track.audioUrl;
+  // Do NOT set currentTime before load() — browser resets it automatically on src change.
   _audioEl.load();
 
   return new Promise((resolve) => {
-    const onCanPlay = () => {
-      _audioEl.removeEventListener('canplay', onCanPlay);
+    let _resolved = false;  // guard: only resolve once
+
+    const doPlay = () => {
       if (positionSec > 1) {
         try { _audioEl.currentTime = Math.min(positionSec, (_audioEl.duration || positionSec) - 0.1); } catch (_) {}
       }
       _audioEl.play()
-        .then(() => { resolve(false); })           // false = NOT blocked
-        .catch(() => { resolve(true); });          // true  = blocked
+        .then(() => { if (!_resolved) { _resolved = true; resolve(false); } })  // false = NOT blocked
+        .catch(() => { if (!_resolved) { _resolved = true; resolve(true);  } }); // true  = blocked
     };
+
+    const onCanPlay = () => {
+      clearTimeout(fallbackTimer);
+      doPlay();
+    };
+
     _audioEl.addEventListener('canplay', onCanPlay, { once: true });
-    // Timeout in case canplay never fires (e.g. bad URL)
-    setTimeout(() => {
+
+    // Timeout in case canplay never fires (e.g. slow network or bad URL)
+    const fallbackTimer = setTimeout(() => {
       _audioEl.removeEventListener('canplay', onCanPlay);
-      _audioEl.play().then(() => resolve(false)).catch(() => resolve(true));
+      if (!_resolved) doPlay();
     }, 3000);
   });
 }
@@ -757,8 +771,8 @@ async function _loadAndPlay(idx, positionSec) {
   if (!track || !track.audioUrl) return;
 
   _transitioning = true;
-  _audioEl.src         = track.audioUrl;
-  _audioEl.currentTime = 0;
+  _audioEl.src = track.audioUrl;
+  // Do NOT set currentTime before load() — browser resets it automatically on src change.
   _audioEl.load();
 
   await new Promise((resolve) => {
@@ -767,7 +781,7 @@ async function _loadAndPlay(idx, positionSec) {
       resolve();
     };
     _audioEl.addEventListener('canplay', onReady, { once: true });
-    setTimeout(resolve, 5000); // fallback
+    setTimeout(resolve, 5000); // fallback if canplay never fires
   });
 
   if (positionSec > 1) {
@@ -775,7 +789,19 @@ async function _loadAndPlay(idx, positionSec) {
   }
 
   _transitioning = false;
-  _audioEl.play().catch(e => console.warn('[SNX-RADIO] play failed:', e.message));
+
+  try {
+    await _audioEl.play();
+    // play() resolved → 'play' event fired or is about to fire → _playing set to true
+  } catch (e) {
+    // play() was rejected — most commonly NotAllowedError (autoplay blocked) on
+    // page return or mobile browsers.  Reset _userInteracted so the next call to
+    // _joinTimeline() will go through _tryPlay and show TAP TO LISTEN properly.
+    console.warn('[SNX-RADIO] _loadAndPlay: play() rejected:', e.name, e.message);
+    _userInteracted = false;
+    _emit('autoplayBlocked', null);
+    _emit('stateChange', 'tap-to-listen');
+  }
 }
 
 function _stopAudio() {
