@@ -1,5 +1,5 @@
 {
-  "buildId": "SNS-2026-LIVE-ANDROID-FIX-001",
+  "buildId": "SNS-2026-SHADOW-AI-STAGE2B-CF-AI-001",
   "swVersion": "v100",
   "deployedAt": "2026-10-03T00:00:00Z",
   "project": "horr-a08f4",
@@ -9,11 +9,14 @@
   "guestModeVersion": "SNS-2026-GUEST-MODE-001",
   "djVersion": "1.1.0",
   "stage2aVersion": "1.1.0",
-  "stage2bVersion": "1.0.1",
+  "stage2bVersion": "1.1.0",
   "stage2cVersion": "1.0.1",
   "stage2dVersion": "1.0.0",
   "stage2eVersion": "1.0.0",
   "stage2fVersion": "1.0.0",
   "stage2gVersion": "1.0.0",
-  "note": "SNS-2026-LIVE-ANDROID-FIX-001: Android-specific Live initialization repair. Root cause: numeric separator literals (15_000, 90_000, etc.) in live.js and snx-sfu.js cause a SyntaxError on Android Chrome/WebView versions that do not support ES2021 numeric separators. This prevented live.js from parsing, so snxLivePageOpen was never defined — resulting in stuck 'Loading live streams...' and the initialization failure toast. _loadESModule was also silently swallowing the parse error, masking the failure. Fixes: (1) All numeric separator literals in live.js replaced with plain integers. (2) All numeric separator literals in snx-sfu.js replaced with plain integers. (3) _loadESModule now re-throws parse/import errors with full diagnostic metadata. (4) loadFeature catch now logs full [LIVE INIT ERROR] object. (5) [LIVE] 1-9 diagnostic checkpoints added to snx-feature-loader.js and live.js. (6) index.html live navTo block: loading UI replaced with unavailable message + RETRY LIVE button on failure (no page reload, no duplicate listeners). (7) index.html BUILD_ID/SW_VER updated to SNS-2026-LIVE-ANDROID-FIX-001/v100. SW CACHE_VERSION unchanged (v100) — cached files already at v100 from previous repair build; no new SW bump required. iPhone Live path unchanged. Firebase rules unchanged. WebRTC unchanged."
+  "shadowAIStage2Version": "1.0.0",
+  "shadowAIStage2AVersion": "1.0.0",
+  "shadowAIStage2BVersion": "1.0.0",
+  "note": "SNS-2026-SHADOW-AI-STAGE2B-CF-AI-001: Workers AI binding replaces external model server. Shadow Reaper now calls @cf/meta/llama-3.2-3b-instruct via env.AI.run(). No OpenAI API. No SHADOW_MODEL_ENDPOINT. No SHADOW_MODEL_AUTH. No external GPU server. wrangler.jsonc gains 'ai' binding. New error handling: FREE_ALLOCATION_EXHAUSTED (3036) and CF_CAPACITY (3040) fall back immediately to local knowledge. Rate limiting: KV-backed primary + in-process fallback. All Stage 2A/2 capabilities preserved. SW unchanged (v100). No Live/Radio/TV/WebRTC changes."
 }

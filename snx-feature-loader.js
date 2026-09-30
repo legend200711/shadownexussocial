@@ -148,17 +148,17 @@
       _alreadyInPage: true   // all code already parsed at startup (inline)
     },
 
-    // ── Shadow Reaper AI — Stage 1: local knowledge foundation
+    // ── Shadow Reaper AI — Stage 2: real AI connection
     // NOT loaded at startup. NOT preloaded on 2G/save-data/LITE.
     // Loaded on demand when user clicks the existing "Click Here" entry point.
     // Optional idle prefetch of CSS only in FULL mode + good/excellent connection
     // is handled in prefetchAfterFeed() below.
     'shadow-ai': {
       label: 'SHADOW REAPER AI',
-      css:  ['snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE1-001'],
+      css:  ['snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE2-001'],
       scripts: [
-        'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE1-001',
-        'snx-shadow-ai.js?v=SNS-2026-SHADOW-AI-STAGE1-001'
+        'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
+        'snx-shadow-ai.js?v=SNS-2026-SHADOW-AI-STAGE2-001'
       ],
       esModules: [],
       init: null   // SNXShadowAI.init() is called by toggleGrimPanel after load
@@ -442,7 +442,7 @@
         var tier = global.SNX_NET ? global.SNX_NET.tierId : 'unknown';
         if (_getState('shadow-ai') === 'idle' &&
             (tier === 'good' || tier === 'excellent' || tier === 'unknown')) {
-          _loadCSS('snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE1-001').catch(function () {});
+          _loadCSS('snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE2-001').catch(function () {});
         }
       });
     }

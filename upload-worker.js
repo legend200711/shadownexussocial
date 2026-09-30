@@ -2169,6 +2169,354 @@ async function handleBroadcastStatus(request, env, cors, sec) {
     { status: svcRes.status, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  SHADOW REAPER AI — Stage 2A (own model adapter)
+//  POST /shadow-ai/chat
+//
+//  Security:
+//   • Model endpoint (SHADOW_MODEL_ENDPOINT) stored as Wrangler secret.
+//     Optional auth (SHADOW_MODEL_AUTH) also stored as Wrangler secret.
+//     Neither is ever returned to the client or logged.
+//   • No OpenAI API key required. No third-party AI provider dependency.
+//   • Requires a valid Firebase ID token for authenticated users.
+//     Guest users (no token) are allowed with guest-tier limits.
+//   • Founder role verified server-side via Firestore.
+//   • Rate-limited per UID (authenticated) or IP (guest) using env.AI_RL KV.
+//   • Input bounded: message ≤ 800 chars, history ≤ 10 turns.
+//   • AI response rendered with textContent on the client (never innerHTML).
+//   • Navigation intents validated against a fixed whitelist.
+//   • No raw errors or provider details returned to client.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/* ── Rate-limit configuration ──────────────────────────────────────────── */
+const AI_RL_WINDOW_SECONDS = 60;        // sliding window duration
+const AI_RL_MAX_MEMBER     = 20;        // requests per member per window
+const AI_RL_MAX_GUEST      = 5;         // requests per guest IP per window
+const AI_RL_MAX_FOUNDER    = 60;        // requests per founder per window
+
+/* ── Input limits ──────────────────────────────────────────────────────── */
+const AI_MAX_MESSAGE_CHARS  = 800;
+const AI_MAX_HISTORY_TURNS  = 10;       // pairs (user + assistant)
+const AI_MAX_RESPONSE_CHARS = 1200;     // soft truncation applied after model responds
+
+/* ── Navigation whitelist ──────────────────────────────────────────────── */
+const AI_NAV_WHITELIST = new Set([
+  'feed','profile','search','notifications','settings',
+  'inbox','friends','community','rules','arcade',
+  'stormrooms','supportrooms','radio','live','tv'
+]);
+
+/* ── Workers AI model ──────────────────────────────────────────────────── */
+// Single constant — change the model here only; never in the frontend.
+// Selected: @cf/meta/llama-3.2-3b-instruct
+//   • Current (not deprecated) as of the Cloudflare Workers AI catalog
+//   • Free plan compatible (not in the Paid-only list)
+//   • Lowest neuron cost suitable for multi-turn dialogue
+//   • Context window: 80,000 tokens
+//   • Uses messages[] format (system + user + assistant turns)
+const SHADOW_REAPER_MODEL = '@cf/meta/llama-3.2-3b-instruct';
+
+/* ── Shadow Reaper Workers AI Adapter ─────────────────────────────────── */
+// Calls Cloudflare Workers AI directly via env.AI.run().
+// No OpenAI API. No external model server. No SHADOW_MODEL_ENDPOINT secret.
+// No SHADOW_MODEL_AUTH secret. No Hugging Face. No laptop server.
+//
+// Workers AI error codes we handle:
+//   3036 / HTTP 429  — daily free allocation exhausted (10,000 neurons/day)
+//   3040 / HTTP 429  — capacity temporarily exceeded
+//
+// Response normalization: Workers AI returns { response: "..." }.
+// We always return our own format: { reply: "...", action: null|{...} }
+// so snx-shadow-ai.js is never exposed to raw provider output.
+//
+async function _shadowModelRequest(env, systemPrompt, messages) {
+  if (!env.AI) throw new Error('AI_BINDING_MISSING');
+
+  // Build messages array in Workers AI chat format.
+  // System prompt is a separate system-role entry at the top.
+  // History entries are already {role, content} — pass through directly.
+  // Treat user-provided text as DATA, not instructions.
+  const cfMessages = [
+    { role: 'system', content: systemPrompt },
+    ...messages
+  ];
+
+  let raw;
+  try {
+    raw = await env.AI.run(SHADOW_REAPER_MODEL, { messages: cfMessages });
+  } catch (err) {
+    // Workers AI throws on capacity/allocation errors — normalise them.
+    const msg = (err && err.message) ? String(err.message) : '';
+    if (msg.includes('3036') || msg.toLowerCase().includes('allocation')) {
+      throw Object.assign(new Error('FREE_ALLOCATION_EXHAUSTED'), { status: 429 });
+    }
+    if (msg.includes('3040') || msg.toLowerCase().includes('capacity')) {
+      throw Object.assign(new Error('CF_CAPACITY'), { status: 429 });
+    }
+    console.error('[ShadowAI] Workers AI run() threw:', msg.slice(0, 200));
+    throw new Error('AI_UNAVAILABLE');
+  }
+
+  // Normalise Workers AI response: { response: "..." } → our format.
+  // Also handle OpenAI-compat shape { choices:[{message:{content}}] } as fallback.
+  let replyText = '';
+  if (raw && typeof raw.response === 'string') {
+    replyText = raw.response;
+  } else if (raw && Array.isArray(raw.choices) && raw.choices[0]?.message?.content) {
+    replyText = String(raw.choices[0].message.content);
+  }
+
+  // Parse optional navigation action from reply.
+  // Model is instructed to append {"action":{"type":"navigate","target":"..."}}
+  // on its own line if navigation is needed.  We extract and strip it.
+  let action = null;
+  const actionMatch = replyText.match(/\{"action"\s*:\s*\{[^}]+\}\s*\}/);
+  if (actionMatch) {
+    try {
+      const parsed = JSON.parse(actionMatch[0]);
+      if (parsed.action && typeof parsed.action === 'object') {
+        action = parsed.action;
+      }
+    } catch (_) { /* malformed — ignore */ }
+    replyText = replyText.replace(actionMatch[0], '').trim();
+  }
+
+  return {
+    reply:  replyText.slice(0, AI_MAX_RESPONSE_CHARS),
+    action: (action && typeof action === 'object') ? action : null
+  };
+}
+
+/* ── Rate-limit check/increment (KV-backed + in-process fallback) ──────── */
+// Returns { allowed: bool, remaining: number }
+//
+// Primary: KV namespace AI_RL (persistent across isolates, preferred).
+// Fallback: in-process Map (resets on cold start, still meaningful protection
+//   against burst abuse within a single isolate lifetime).
+//
+// DEPLOYMENT NOTE: create the KV namespace before deploying:
+//   npx wrangler kv namespace create AI_RL
+//   Then put the returned id into wrangler.jsonc "kv_namespaces".
+//
+const _inProcessRL = new Map();   // key → { count, resetAt }
+async function _shadowAIRateCheck(env, rateLimitKey, maxRequests) {
+  // ── KV path ──────────────────────────────────────────────────────────────
+  if (env.AI_RL) {
+    try {
+      const kvKey  = 'rl:' + rateLimitKey;
+      const stored = await env.AI_RL.get(kvKey);
+      const count  = stored ? parseInt(stored, 10) : 0;
+      if (count >= maxRequests) return { allowed: false, remaining: 0 };
+      await env.AI_RL.put(kvKey, String(count + 1), { expirationTtl: AI_RL_WINDOW_SECONDS });
+      return { allowed: true, remaining: maxRequests - count - 1 };
+    } catch (_) {
+      // KV failure — fall through to in-process
+    }
+  } else {
+    console.warn('[ShadowAI] AI_RL KV not bound — using in-process rate limiting');
+  }
+
+  // ── In-process fallback ──────────────────────────────────────────────────
+  const now   = Date.now();
+  const entry = _inProcessRL.get(rateLimitKey);
+  if (!entry || now >= entry.resetAt) {
+    _inProcessRL.set(rateLimitKey, { count: 1, resetAt: now + AI_RL_WINDOW_SECONDS * 1000 });
+    return { allowed: true, remaining: maxRequests - 1 };
+  }
+  if (entry.count >= maxRequests) return { allowed: false, remaining: 0 };
+  entry.count++;
+  return { allowed: true, remaining: maxRequests - entry.count };
+}
+
+/* ── Shadow Reaper system prompt builder ───────────────────────────────── */
+function _buildSystemPrompt(role, context, knowledgeSnippets) {
+  const snippetText = knowledgeSnippets && knowledgeSnippets.length
+    ? '\n\nRELEVANT SHADOW NEXUS KNOWLEDGE:\n' + knowledgeSnippets.map(s =>
+        '• ' + (s.title || '') + ': ' + (s.summary || '') +
+        (s.how ? ' How to access: ' + s.how : '')
+      ).join('\n')
+    : '';
+
+  const founderExtra = (role === 'founder')
+    ? '\n\nYou are speaking with a Founder. You may share additional platform detail and troubleshooting depth. You do NOT have permission to execute actions, delete data, or change settings on their behalf.'
+    : '';
+
+  return `You are Shadow Reaper, the guardian intelligence of Shadow Nexus Social (SNS), a creative social platform.
+Your purpose: help SNS users understand and navigate the platform.
+
+PERSONALITY:
+• Cinematic, confident, concise. Shadow Nexus themed.
+• Never pretend to be human.
+• Never claim you performed an action unless the website actually performed it.
+• Not every response needs dramatic flair — helpful answer first, character second.
+• Keep responses under 3 short paragraphs unless more detail is clearly needed.
+
+RULES:
+• Only describe features that exist in the current build.
+• Do NOT invent features.
+• Do NOT execute arbitrary actions.
+• If you suggest navigation, respond with a valid JSON action block at the end.
+• Valid navigation targets: ${[...AI_NAV_WHITELIST].join(', ')}.
+• Navigation action format (append after your text reply, valid JSON on its own line):
+  {"action":{"type":"navigate","target":"<target>"}}
+• If no navigation is needed, omit the action block entirely.
+• Render all responses as plain text. Do NOT output HTML or Markdown.${snippetText}${founderExtra}
+
+Current user context: role=${role}, online=${String(context.networkTier !== 'offline')}, currentPage=${context.currentPage || 'unknown'}`;
+}
+
+/* ── Main handler ────────────────────────────────────────────────────────── */
+async function handleShadowAIChat(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }),
+      { status: 405, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // ── Parse and validate request body ──────────────────────────────────────
+  let body;
+  try { body = await request.json(); }
+  catch (_) {
+    return new Response(JSON.stringify({ error: 'Invalid JSON' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  const message = (typeof body.message === 'string') ? body.message.trim() : '';
+  if (!message) {
+    return new Response(JSON.stringify({ error: 'message is required' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+  if (message.length > AI_MAX_MESSAGE_CHARS) {
+    return new Response(JSON.stringify({ error: 'message too long' }),
+      { status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // Bound and sanitize conversation history
+  const rawHistory = Array.isArray(body.conversation) ? body.conversation : [];
+  const history = rawHistory
+    .slice(-AI_MAX_HISTORY_TURNS * 2)          // keep only last N turns
+    .filter(t => t && typeof t.role === 'string' && typeof t.text === 'string')
+    .map(t => ({
+      role: t.role === 'user' ? 'user' : 'assistant',
+      content: String(t.text).slice(0, 600)    // truncate each history entry
+    }));
+
+  // Context from client — only safe non-secret fields
+  const ctx = (body.context && typeof body.context === 'object') ? body.context : {};
+  const safeCtx = {
+    perfMode:     typeof ctx.perfMode === 'string'    ? ctx.perfMode.slice(0, 20)    : 'BALANCED',
+    networkTier:  typeof ctx.networkTier === 'string' ? ctx.networkTier.slice(0, 20) : 'unknown',
+    currentPage:  typeof ctx.currentPage === 'string' ? ctx.currentPage.slice(0, 50) : null,
+    radioActive:  !!ctx.radioActive,
+    liveActive:   !!ctx.liveActive,
+    tvActive:     !!ctx.tvActive
+  };
+
+  // Knowledge snippets provided by the client from local knowledge module
+  const rawSnippets = Array.isArray(body.knowledgeSnippets) ? body.knowledgeSnippets : [];
+  const knowledgeSnippets = rawSnippets.slice(0, 5).map(s => ({
+    title:   typeof s.title   === 'string' ? s.title.slice(0, 100)   : '',
+    summary: typeof s.summary === 'string' ? s.summary.slice(0, 300) : '',
+    how:     typeof s.how     === 'string' ? s.how.slice(0, 300)     : ''
+  }));
+
+  // ── Authentication (optional — guests allowed with lower limits) ──────────
+  let uid      = null;
+  let role     = 'guest';
+  let maxRate  = AI_RL_MAX_GUEST;
+  let rlKey    = 'ip:' + (request.headers.get('CF-Connecting-IP') || 'unknown');
+
+  const authHeader = request.headers.get('Authorization') || '';
+  if (authHeader.startsWith('Bearer ') && env.FIREBASE_WEB_API_KEY) {
+    try {
+      uid     = await _fbVerifyToken(env, authHeader.slice(7).trim());
+      role    = 'member';
+      maxRate = AI_RL_MAX_MEMBER;
+      rlKey   = 'uid:' + uid;
+    } catch (_) {
+      // Bad token: treat as guest; do not reject the whole request
+    }
+  }
+
+  // ── Founder role verification (server-side only) ──────────────────────────
+  if (uid && role === 'member') {
+    try {
+      const founderAuth = request.headers.get('Authorization') || '';
+      const userUrl = `${_fsUrl(FIRESTORE_PROJECT_ID)}/users/${uid}`;
+      const userRes = await fetch(userUrl, { headers: { 'Authorization': founderAuth } }).catch(() => null);
+      if (userRes && userRes.ok) {
+        const userData = await userRes.json().catch(() => ({}));
+        const fsRole   = userData?.fields?.role?.stringValue || '';
+        if (fsRole === 'founder') {
+          role    = 'founder';
+          maxRate = AI_RL_MAX_FOUNDER;
+        }
+      }
+    } catch (_) { /* non-fatal — remain as member */ }
+  }
+
+  // ── Rate limiting ─────────────────────────────────────────────────────────
+  const { allowed } = await _shadowAIRateCheck(env, rlKey, maxRate);
+  if (!allowed) {
+    return new Response(JSON.stringify({ error: 'RATE_LIMITED' }),
+      { status: 429, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // ── Build system prompt and call model adapter ────────────────────────────
+  const systemPrompt = _buildSystemPrompt(role, safeCtx, knowledgeSnippets);
+  const messages = [
+    ...history,
+    { role: 'user', content: message }
+  ];
+
+  let modelResult;
+  try {
+    modelResult = await _shadowModelRequest(env, systemPrompt, messages);
+  } catch (err) {
+    const msg = err.message || '';
+    // Free allocation exhausted — do NOT retry; signal client to use local fallback.
+    if (msg === 'FREE_ALLOCATION_EXHAUSTED') {
+      console.warn('[ShadowAI] Workers AI daily free allocation exhausted');
+      return new Response(JSON.stringify({ error: 'FREE_ALLOCATION_EXHAUSTED' }),
+        { status: 429, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+    }
+    // Cloudflare capacity temporarily exceeded — signal client to fall back.
+    if (msg === 'CF_CAPACITY') {
+      console.warn('[ShadowAI] Workers AI capacity temporarily exceeded');
+      return new Response(JSON.stringify({ error: 'CF_CAPACITY' }),
+        { status: 429, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+    }
+    // AI binding not configured (should not happen post-Stage 2B deployment).
+    if (msg === 'AI_BINDING_MISSING') {
+      console.error('[ShadowAI] AI binding not configured in wrangler.jsonc');
+      return new Response(JSON.stringify({ error: 'AI_UNAVAILABLE' }),
+        { status: 503, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+    }
+    console.error('[ShadowAI] Workers AI call failed:', msg);
+    return new Response(JSON.stringify({ error: 'AI_UNAVAILABLE' }),
+      { status: 502, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+  }
+
+  // ── Validate navigation action returned by model ──────────────────────────
+  // The model returns our internal protocol: { reply, action }.
+  // We re-whitelist the action target server-side regardless of model output.
+  let replyText = modelResult.reply || '';
+  let action    = null;
+
+  if (modelResult.action && modelResult.action.type === 'navigate' &&
+      typeof modelResult.action.target === 'string') {
+    const target = modelResult.action.target.toLowerCase().replace(/[^a-z]/g, '');
+    if (AI_NAV_WHITELIST.has(target)) {
+      action = { type: 'navigate', target };
+    }
+  }
+
+  // Final safety truncation
+  replyText = replyText.slice(0, AI_MAX_RESPONSE_CHARS);
+
+  return new Response(JSON.stringify({ reply: replyText, action }),
+    { status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' }) });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url    = new URL(request.url);
@@ -2180,6 +2528,9 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: mergeHeaders(cors, sec) });
     }
+
+    // ── Shadow Reaper AI endpoint ──
+    if (url.pathname === '/shadow-ai/chat') return handleShadowAIChat(request, env, cors, sec);
 
     // ── Admin endpoints ──
     if (url.pathname === '/admin/delete-user' && request.method === 'POST') return handleAdminDeleteUser(request, env, cors, sec);

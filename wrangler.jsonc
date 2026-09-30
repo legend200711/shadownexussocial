@@ -12,10 +12,41 @@
     }
   ],
 
+  // ── Workers AI binding ───────────────────────────────────────────────────
+  // Shadow Reaper AI calls Cloudflare Workers AI through env.AI.
+  // No API token, no external model server, no OpenAI key required.
+  "ai": {
+    "binding": "AI"
+  },
+
+  // ── Shadow Reaper AI rate-limit KV namespace ─────────────────────────────
+  // REQUIRED before deployment:
+  //   npx wrangler kv namespace create AI_RL
+  //   Then replace the id below with the returned namespace ID.
+  //
+  // Until the namespace is created, the Worker falls back to in-process
+  // rate limiting (per-isolate, resets on cold start) and logs a warning.
+  // DO NOT deploy with the placeholder ID below — replace it first.
+  //
+  // Example returned ID format: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+  "kv_namespaces": [
+    {
+      "binding": "AI_RL",
+      "id": "2b65e37116304cb88c861bae2fc5c7a4"
+    }
+  ],
+
   "vars": {
     "LIVEKIT_URL": "wss://chris-oxi8fwap.livekit.cloud",
     "SNX_ORIGIN":  "https://shadownexussocial.online",
     "SNX_ORIGIN2": "https://chrislegendofshadows.com"
   }
+
+  // ── Required secrets (set via `wrangler secret put`) ─────────────────────
+  // FIREBASE_WEB_API_KEY  — already set; required for Firebase auth
+  //
+  // Stage 2A secrets NO LONGER NEEDED (removed in Stage 2B):
+  //   SHADOW_MODEL_ENDPOINT  — removed; Workers AI binding replaces this
+  //   SHADOW_MODEL_AUTH      — removed; no external model server
 
 }

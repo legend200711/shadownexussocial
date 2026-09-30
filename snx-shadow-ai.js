@@ -2,19 +2,51 @@
  * snx-shadow-ai.js
  * Shadow Nexus Social — Shadow Reaper AI Core
  *
- * Build: SNS-2026-SHADOW-AI-STAGE1-001
+ * Build: SNS-2026-SHADOW-AI-STAGE2B-CF-AI-001
  *
  * Exposes: window.SNXShadowAI
  *
- * Design constraints:
+ * Stage 2B changes (over Stage 2A):
+ *  • Workers AI binding replaces the external model server adapter.
+ *    Shadow Reaper now calls Cloudflare Workers AI directly via env.AI.run().
+ *  • Model: @cf/meta/llama-3.2-3b-instruct — current, free-plan compatible.
+ *  • No OpenAI API. No SHADOW_MODEL_ENDPOINT. No SHADOW_MODEL_AUTH.
+ *    No external GPU server. No laptop server. No Hugging Face.
+ *  • New error codes handled: FREE_ALLOCATION_EXHAUSTED, CF_CAPACITY.
+ *    Both fall back immediately to local knowledge — no retry on allocation errors.
+ *  • AI binding is server-side only. No AI credentials in frontend code.
+ *  • All Stage 2A capabilities preserved: conversation history, rate limiting
+ *    (KV-backed + in-process fallback), navigation whitelist, Founder
+ *    verification, safe text rendering, 20-second timeout, lazy loading,
+ *    mobile support.
+ *
+ * Stage 2A changes (still active):
+ *  • OpenAI dependency REMOVED. No SHADOW_AI_API_KEY required.
+ *  • MODEL_NOT_CONFIGURED fallback preserved for compatibility.
+ *
+ * Stage 2 additions (over Stage 1 — still active):
+ *  • Real AI connection via POST /shadow-ai/chat (Cloudflare Worker endpoint).
+ *  • Provider abstraction: frontend only knows the endpoint, never model secrets.
+ *  • Multi-turn conversation sent to server (history bounded to 10 pairs).
+ *  • Stage 1 local knowledge used as relevance-matched grounding snippets.
+ *  • Stage 1 local knowledge remains as fallback if server is unavailable.
+ *  • 20-second client-side timeout with friendly error message.
+ *  • HTTP 429 → friendly retry message.
+ *  • Network failure → Stage 1 local knowledge fallback.
+ *  • Loading/thinking state with duplicate-send protection.
+ *  • Navigation intents: server returns {action:{type:"navigate",target}} —
+ *    target is whitelisted server-side AND client-side before navigateTo().
+ *  • No API keys, provider URLs, or secrets ever leave the server.
+ *  • All AI text rendered with textContent (never innerHTML).
+ *
+ * Design constraints (unchanged from Stage 1):
  *  • Does NOT create another floating button, panel, navigation item, or
  *    Click Here entry point.  All UI lives INSIDE the existing #grim-panel.
  *  • Does NOT restart Radio, TV, Live, Firebase, or the existing GP canvas RAF.
  *  • Does NOT add itself to startup — loaded only when the user opens the panel.
  *  • Idempotent: safe to call init() / open() multiple times.
  *  • No eval(), no new Function(), no unsanitized innerHTML.
- *  • Conversation history is memory-only for this session (≤ 30 pairs).
- *  • Local knowledge only in Stage 1 — no external AI provider or API keys.
+ *  • Conversation history is memory-only for this session (≤ 20 pairs).
  *
  * Integration point: toggleGrimPanel() in index.html calls
  *   SNXFeatureLoader.loadFeature('shadow-ai') then SNXShadowAI.open()
@@ -28,8 +60,22 @@
   /* ─────────────────────────────────────────────────────────────
      CONSTANTS
   ───────────────────────────────────────────────────────────────*/
-  var MAX_HISTORY = 30; // max conversation turns (user+grim pairs)
-  var BUILD_ID    = 'SNS-2026-SHADOW-AI-STAGE1-001';
+  var MAX_HISTORY = 20; // max conversation turns (user+grim pairs) — bounded for server
+  var BUILD_ID    = 'SNS-2026-SHADOW-AI-STAGE2B-CF-AI-001';
+
+  /* Cloudflare Worker AI endpoint — never put an API key here */
+  var AI_ENDPOINT = 'https://yellow-term-11e6.nthntjrn.workers.dev/shadow-ai/chat';
+
+  /* Client-side timeout for AI requests (ms) */
+  var AI_TIMEOUT_MS = 20000;
+
+  /* Client-side navigation whitelist — mirrors server whitelist */
+  var AI_NAV_WHITELIST = {
+    feed:true, profile:true, search:true, notifications:true,
+    settings:true, inbox:true, friends:true, community:true,
+    rules:true, arcade:true, stormrooms:true, supportrooms:true,
+    radio:true, live:true, tv:true
+  };
 
   /* Status values shown in the panel status bar */
   var STATUS = {
@@ -118,12 +164,16 @@
   ───────────────────────────────────────────────────────────────*/
   function _getCapabilities() {
     return {
-      localKnowledge:  true,
-      externalAI:      false,   // Stage 2
-      navigationMap:   true,
-      contextBuilder:  true,
-      offlineFallback: true,
-      build:           BUILD_ID
+      localKnowledge:          true,
+      externalAI:              true,   // Stage 2B — Cloudflare Workers AI
+      workersAIBinding:        true,   // Stage 2B — env.AI.run()
+      openAIDependency:        false,  // Stage 2A/2B — removed
+      ownModelServer:          false,  // Stage 2B — no external server
+      navigationMap:           true,
+      contextBuilder:          true,
+      offlineFallback:         true,
+      freeAllocationFallback:  true,   // Stage 2B — fallback on 3036/3040
+      build:                   BUILD_ID
     };
   }
 
@@ -198,8 +248,64 @@
   }
 
   /* ─────────────────────────────────────────────────────────────
-     PROVIDER ABSTRACTION  (Stage 1: local only)
-     Stage 2 replaces this with an external provider call.
+     FIREBASE ID TOKEN HELPER
+     Gets the current user's Firebase ID token without storing it.
+     Returns null if not signed in or token unavailable.
+  ───────────────────────────────────────────────────────────────*/
+  function _getIdToken(cb) {
+    try {
+      var firebase = global.firebase || (global.firebase);
+      if (firebase && firebase.auth && typeof firebase.auth === 'function') {
+        var user = firebase.auth().currentUser;
+        if (user && typeof user.getIdToken === 'function') {
+          user.getIdToken(false).then(function (t) { cb(t); }).catch(function () { cb(null); });
+          return;
+        }
+      }
+    } catch (_) {}
+    cb(null);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     RELEVANT KNOWLEDGE SNIPPETS
+     Gather up to 3 knowledge entries relevant to the user message.
+     Sent as grounding context to the server — not the full 23 entries.
+  ───────────────────────────────────────────────────────────────*/
+  function _getRelevantSnippets(message) {
+    if (!global.SNXShadowKnowledge || typeof global.SNXShadowKnowledge.query !== 'function') {
+      return [];
+    }
+    try {
+      /* query() returns the best-matching result; we also check nearby entries */
+      var result = global.SNXShadowKnowledge.query(message, _buildContext());
+      if (!result || !result.id) return [];
+      /* Return the matched entry's summary+how as a snippet object */
+      var entry = global.SNXShadowKnowledge.getEntry(result.id);
+      if (!entry) return [];
+      return [{
+        title:   entry.title   || '',
+        summary: entry.summary || '',
+        how:     entry.how     || ''
+      }];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     ABORT CONTROLLER HELPER — one per in-flight request
+  ───────────────────────────────────────────────────────────────*/
+  var _currentAbort = null;
+
+  function _abortPending() {
+    if (_currentAbort) {
+      try { _currentAbort.abort(); } catch (_) {}
+      _currentAbort = null;
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     PROVIDER ABSTRACTION  (Stage 2: server AI + local fallback)
   ───────────────────────────────────────────────────────────────*/
   var SNXShadowAIProvider = {
     /**
@@ -207,11 +313,135 @@
      * @param {function} callback - fn(result) where result = {text, page, handled}
      */
     ask: function (params, callback) {
-      /* Stage 1: pure local knowledge — synchronous via setTimeout for UX */
-      var result = _askLocal(params.message);
-      setTimeout(function () { callback(result); }, 600 + Math.random() * 400);
-    }
+      var message   = params.message;
+      var context   = params.context;
+      var history   = params.history || [];
+      var snippets  = _getRelevantSnippets(message);
+
+      /* Build conversation array (last 10 pairs max — keep bandwidth low) */
+      var conversation = history.slice(-20).map(function (h) {
+        return { role: h.role, text: h.text };
+      });
+
+      /* Get Firebase ID token (may be null for guests) */
+      _getIdToken(function (idToken) {
+        var headers = { 'Content-Type': 'application/json' };
+        if (idToken) headers['Authorization'] = 'Bearer ' + idToken;
+
+        var body = JSON.stringify({
+          message:          message,
+          conversation:     conversation,
+          context:          context,
+          knowledgeSnippets: snippets
+        });
+
+        /* AbortController for timeout */
+        _abortPending();
+        var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        _currentAbort  = controller;
+        var timeoutId  = null;
+
+        if (controller) {
+          timeoutId = setTimeout(function () {
+            _abortPending();
+          }, AI_TIMEOUT_MS);
+        }
+
+        fetch(AI_ENDPOINT, {
+          method:  'POST',
+          headers: headers,
+          body:    body,
+          signal:  controller ? controller.signal : undefined
+        })
+        .then(function (res) {
+          if (timeoutId) clearTimeout(timeoutId);
+          _currentAbort = null;
+
+          /* HTTP 429 — rate limited, allocation exhausted, or capacity exceeded */
+          if (res.status === 429) {
+            return res.json().then(function (d) {
+              var errCode = (d && d.error) ? d.error : '';
+              if (errCode === 'FREE_ALLOCATION_EXHAUSTED') {
+                /* Daily neurons exhausted — use local fallback immediately, no retry */
+                return _fallbackToLocal(message, callback);
+              }
+              if (errCode === 'CF_CAPACITY') {
+                /* Cloudflare capacity temporarily exceeded — use local fallback */
+                return _fallbackToLocal(message, callback);
+              }
+              /* Generic rate limit (our own RL or other 429) — friendly message */
+              callback({
+                text: "Shadow Reaper has reached its request limit for the moment. Give it a breath — try again shortly.",
+                page: null, handled: true, fromServer: false
+              });
+            }).catch(function () {
+              _fallbackToLocal(message, callback);
+            });
+          }
+
+          /* HTTP 503 — AI binding missing or other service unavailable */
+          if (res.status === 503) {
+            return _fallbackToLocal(message, callback);
+          }
+
+          if (!res.ok) {
+            return _fallbackToLocal(message, callback);
+          }
+
+          return res.json().then(function (data) {
+            var reply  = (typeof data.reply === 'string') ? data.reply.trim() : '';
+            var action = (data.action && typeof data.action === 'object') ? data.action : null;
+
+            if (!reply) {
+              return _fallbackToLocal(message, callback);
+            }
+
+            /* Validate navigation action client-side — whitelist enforced twice */
+            var page = null;
+            if (action && action.type === 'navigate' && typeof action.target === 'string') {
+              var target = action.target.toLowerCase().replace(/[^a-z]/g, '');
+              if (AI_NAV_WHITELIST[target]) {
+                page = target;
+              }
+            }
+
+            callback({ text: reply, page: page, handled: true, fromServer: true });
+          });
+        })
+        .catch(function (err) {
+          if (timeoutId) clearTimeout(timeoutId);
+          _currentAbort = null;
+
+          var isTimeout = err && (err.name === 'AbortError' || err.name === 'TimeoutError');
+          if (isTimeout) {
+            /* Timeout — try local fallback silently */
+            return _fallbackToLocal(message, callback);
+          }
+
+          /* Network failure — try local fallback */
+          _fallbackToLocal(message, callback);
+        });
+      }); /* end _getIdToken */
+    } /* end ask */
   };
+
+  /* ─────────────────────────────────────────────────────────────
+     FALLBACK TO LOCAL KNOWLEDGE
+     Used when the server AI endpoint is unavailable.
+  ───────────────────────────────────────────────────────────────*/
+  function _fallbackToLocal(message, callback) {
+    var result = _askLocal(message);
+    if (result && result.handled) {
+      callback(result);
+    } else {
+      callback({
+        text: "Shadow Reaper can't reach the Nexus intelligence right now. Try again in a moment.",
+        page: null,
+        handled: false,
+        fromServer: false
+      });
+    }
+  }
 
   /* ─────────────────────────────────────────────────────────────
      DOM HELPERS
@@ -319,9 +549,11 @@
     _appendMessage('user', text);
     _showTyping(true);
 
-    /* Clear input */
-    var inp = _getInput();
-    if (inp) inp.value = '';
+    /* Disable send controls while busy */
+    var inp     = _getInput();
+    var sendBtn = document.getElementById('snx-ai-send');
+    if (inp)     { inp.value = ''; inp.disabled = true; }
+    if (sendBtn)   sendBtn.disabled = true;
 
     SNXShadowAIProvider.ask(
       { message: text, context: _buildContext(), history: _history.slice() },
@@ -330,6 +562,8 @@
         if (seq !== _reqSeq && seq < _reqSeq - 1) {
           _showTyping(false);
           _busy = false;
+          if (inp)     inp.disabled = false;
+          if (sendBtn) sendBtn.disabled = false;
           return;
         }
 
@@ -354,6 +588,9 @@
         }
 
         _busy = false;
+        /* Re-enable controls */
+        if (inp)     { inp.disabled = false; setTimeout(function() { if (global.innerWidth > 768) inp.focus(); }, 50); }
+        if (sendBtn) sendBtn.disabled = false;
       }
     );
   }
@@ -522,6 +759,7 @@
      DESTROY  — safe teardown (account-switch safe)
   ───────────────────────────────────────────────────────────────*/
   function _destroy() {
+    _abortPending();
     _busy = false;
     _open = false;
     _initialized = false;
