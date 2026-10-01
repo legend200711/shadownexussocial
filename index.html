@@ -32409,13 +32409,13 @@ window.toggleGrimPanel = function () {
         if (menuBtn) { menuBtn.classList.remove('is-open'); menuBtn.setAttribute('aria-expanded','false'); }
         if (sideOverlay) sideOverlay.classList.remove('visible');
         if (mobileMenuBtn) { mobileMenuBtn.classList.remove('menu-open'); mobileMenuBtn.setAttribute('aria-expanded','false'); }
-        // ── Shadow Reaper AI: lazy-load the AI feature on first open ──────────
+        // ── Shadow Reaper AI: lazy-load the UNIFIED feature on first open ─────
+        // Stage 3: loads 'shadow-ai-unified' (existing deps + Unified Core + bridge).
         // Falls back to the existing GP.init() path if the feature fails to load.
-        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('shadow-ai')) {
-            window.SNXFeatureLoader.loadFeature('shadow-ai')
+        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('shadow-ai-unified')) {
+            window.SNXFeatureLoader.loadFeature('shadow-ai-unified')
                 .then(function () {
                     if (window.SNXShadowAI) {
-                        window.SNXShadowAI.init();
                         window.SNXShadowAI.open();
                     }
                 })
@@ -32426,8 +32426,8 @@ window.toggleGrimPanel = function () {
                 });
             return; // AI load is async; return now — panel is already open
         }
-        // ── If AI already loaded, open it directly ────────────────────────────
-        if (window.SNXShadowAI && window.SNXFeatureLoader && window.SNXFeatureLoader.isLoaded('shadow-ai')) {
+        // ── If UNIFIED AI already loaded, open it directly ────────────────────
+        if (window.SNXShadowAI && window.SNXFeatureLoader && window.SNXFeatureLoader.isLoaded('shadow-ai-unified')) {
             window.SNXShadowAI.open();
             return;
         }
