@@ -178,6 +178,58 @@
       ],
       esModules: [],
       init: null   // SNXShadowAI.init() + SNXShadowVoice.init() + SNXShadowCharacter.init() called by toggleGrimPanel after load
+    },
+
+    // ── Shadow Reaper AI — Stage 2 Unified Integration Bridge
+    // Loads the new unified ShadowReaper Core + bridge adapter.
+    // The existing 'shadow-ai' feature remains registered and unchanged.
+    // NOT loaded at startup. Loaded on demand when toggleGrimPanel fires
+    // and the bridge has been opted in to via SNXFeatureLoader.loadFeature('shadow-ai-unified').
+    'shadow-ai-unified': {
+      label: 'SHADOW REAPER AI (UNIFIED)',
+      css:  [
+        'snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE2-001',
+        'snx-shadow-voice.css?v=SNS-2026-SHADOW-VOICE-4A-001',
+        'snx-shadow-character.css?v=SNS-2026-SHADOW-CHARACTER-4B-001'
+      ],
+      scripts: [
+        // SNXShadowAI dependency chain (existing production files — unmodified)
+        'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
+        'snx-shadow-ai-e1.js?v=SNS-2026-SHADOW-EMOTION-E1-RC1',
+        'snx-shadow-memory.js?v=SNS-2026-SHADOW-MEMORY-E2-RC2',
+        'snx-shadow-conv-history.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
+        'snx-shadow-adaptive.js?v=SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1',
+        'snx-shadow-ai.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
+        'snx-shadow-voice.js?v=SNS-2026-SHADOW-VOICE-4A-001',
+        'snx-shadow-character.js?v=SNS-2026-SHADOW-CHARACTER-4B-001',
+        // New unified Core modules (shadow-reaper/)
+        'shadow-reaper/core/understanding-engine.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/core/context-engine.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/core/response-engine.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/core/conversation-engine.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/data/knowledge-engine.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/data/creator-knowledge.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/storage/conversation-history.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/storage/personal-memory.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/storage/adaptive-learning.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/ui/voice-interface.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/ui/character-interface.js?v=SR-2026-STAGE2-001',
+        'shadow-reaper/shadow-reaper.js?v=SR-2026-STAGE2-001',
+        // Bridge adapter (must load last — patches SNXShadowAI after all deps are ready)
+        'shadow-reaper/integration/sr-bridge.js?v=SR-2026-STAGE2-001'
+      ],
+      esModules: [],
+      init: function () {
+        // Called by SNXFeatureLoader after all scripts load.
+        // Bridge self-activates but we also call init() explicitly here.
+        if (global.SRBridge && typeof global.SRBridge.init === 'function') {
+          global.SRBridge.init();
+        }
+        // Initialize existing UI modules (same sequence as 'shadow-ai')
+        if (global.SNXShadowAI      && typeof global.SNXShadowAI.init      === 'function') global.SNXShadowAI.init();
+        if (global.SNXShadowVoice   && typeof global.SNXShadowVoice.init   === 'function') global.SNXShadowVoice.init();
+        if (global.SNXShadowCharacter && typeof global.SNXShadowCharacter.init === 'function') global.SNXShadowCharacter.init();
+      }
     }
   };
 
@@ -453,10 +505,10 @@
         if (_getState('live') === 'idle') {
           _loadCSS('live.css?v=SNS-2026-LIVE-003').catch(function () {});
         }
-        // Optional shadow-ai CSS prefetch: FULL + good/excellent connection only.
+        // Optional shadow-ai-unified CSS prefetch: FULL + good/excellent connection only.
         // Never prefetch JS — that waits for the user's first Click Here.
         var tier = global.SNX_NET ? global.SNX_NET.tierId : 'unknown';
-        if (_getState('shadow-ai') === 'idle' &&
+        if (_getState('shadow-ai-unified') === 'idle' &&
             (tier === 'good' || tier === 'excellent' || tier === 'unknown')) {
           _loadCSS('snx-shadow-ai.css?v=SNS-2026-SHADOW-AI-STAGE2-001').catch(function () {});
         }

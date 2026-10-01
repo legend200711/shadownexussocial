@@ -1,7 +1,7 @@
 {
-  "buildId": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
-  "swVersion": "v100",
-  "deployedAt": "2026-10-04T00:00:00Z",
+  "buildId": "SR-2026-UNIFIED-AI-RC-001",
+  "swVersion": "v101",
+  "deployedAt": "2026-09-25T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
@@ -34,5 +34,7 @@
   "shadowAIConvHistoryVersion": "SNS-2026-SHADOW-LOCAL-CONVERSATION-HISTORY-RC1",
   "shadowAIAdaptiveLearningVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1",
   "shadowAIAdaptiveLearningFinalVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
-  "note": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001: Shadow Reaper Adaptive Learning + Persistent Conversation History Final Production Release. BUILD BEFORE: SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001. RC builds promoted to FINAL after full automated validation: test-shadow-local-conv-rc1 (87 PASS / 0 WARN / 0 FAIL), test-shadow-adaptive-rc1 (85 PASS / 0 WARN / 0 FAIL), test-shadow-conv-history (94 PASS / 0 WARN / 0 FAIL), test-shadow-e3-final (179 PASS / 1 WARN / 0 FAIL — E3-INT-05 accepted), test-shadow-e2-memory (120 PASS), test-shadow-e1-conversation (153 PASS), test-shadow-5-rc1 (102 PASS), test-shadow-knowledge (121 PASS), test-shadow-3c (30 PASS), test-shadow-3d (124 PASS), test-shadow-4a-voice (78 PASS), test-shadow-4b-character (57 PASS). TOTAL: 1050 PASS / 1 WARN / 0 FAIL. LOCKED: Conversation History (E3), E2 Personal Memory, Adaptive Learning — THREE SEPARATE DATA SYSTEMS. SW UNCHANGED: v100 (snx-shadow-conv-history.js + snx-shadow-adaptive.js served network-first via feature loader). No changes to Live, WebRTC, Cohost, Radio, TV, DJ, R2, Auth. ROLLBACK CHECKPOINTS PRESERVED: SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001, SNS-2026-SHADOW-LOCAL-CONVERSATION-HISTORY-RC1, SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1."
+  "shadowAIUnifiedRCVersion": "SR-2026-UNIFIED-AI-RC-001",
+  "shadowAIUnifiedBridgeBuild": "SR-2026-STAGE2-BRIDGE-001",
+  "note": "SR-2026-UNIFIED-AI-RC-001: Shadow Reaper Unified AI Release Candidate. Stages 1-3 PASS. Unified Core (shadow-reaper/) + sr-bridge integration. Feature: shadow-ai-unified. Old shadow-ai preserved for rollback. Workers AI calls = 0. Test results: Stage1 134 PASS / 6 WARN / 0 FAIL / 1 SKIP; Stage2 58 PASS / 6 WARN / 0 FAIL. All warnings are Node.js test-context expected (browser-only systems not loaded in Node). SW: v101 (bump from v101 already active; shadow-reaper/ assets not precached — served network-first via snx-feature-loader.js, versioned via query strings). No changes to Live, WebRTC, Cohost, Radio, TV, DJ, R2, Auth, Firestore, Auth architecture. ROLLBACK: shadow-ai feature entry preserved unchanged in snx-feature-loader.js. PRIOR CHECKPOINT: SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001."
 }
