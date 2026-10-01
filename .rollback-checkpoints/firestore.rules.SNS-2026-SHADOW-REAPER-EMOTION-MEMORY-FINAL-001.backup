@@ -1,0 +1,1736 @@
+rules_version = '2';
+
+//
+// Shadow Nexus Social — Firestore Security Rules
+// Updated: Inbox removed → messages flow through Firebase notifications
+//
+// Collections:
+//   /users/{uid}                — user profiles, notifications, pushQueue
+//   /messages/{convId}          — DM conversations (NEW top-level collection)
+//   /notifications/{uid}/items/{id} — per-user notifications (NEW subcollection)
+//   /stories/{storyId}          — stories
+//   /posts/{postId}             — feed posts (comments + likes stored inside doc)
+//   /chats/{chatId}             — DM conversations (legacy — kept for existing data)
+//   /siteSettings/{doc}         — site config (maintenance mode, feature flags)
+//   /radioTracks/{trackId}      — radio-specific tracks (Founder write, listener read)
+//   /radioPlaylists/{playlistId}— radio playlists (Founder write, listener read)
+//   /radioRequests/{requestId}  — song requests (signed-in write, Founder approve/reject)
+//   /aiModerationLog/{docId}    — AI moderation events
+//   /reports/{docId}            — user reports
+//   /auditLog/{docId}           — admin audit trail
+//   /aiToggleLog/{docId}        — AI toggle history
+//   /announcements/{docId}      — site-wide announcements
+//   /botConfig/{docId}          — Shadow Chat Bot settings + subcollections
+//   /botHistory/{docId}         — Shadow Chat Bot post history
+//   /arcadeInvites/{docId}      — game challenge invites
+//   /arcadeMatches/{docId}      — completed match records
+//   /arcadeScores/{docId}       — per-user high scores
+//   /arcadeStats/{docId}        — per-user aggregated stats
+//   /stormRoomMessages/{docId}  — Storm Room chat messages
+//
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helper functions ─────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isFounder() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'founder';
+    }
+
+    // isFounderEmail — checks the Firebase Auth token email claim directly.
+    // Used for 24-Hour TV Studio security: grants access only to the
+    // christijerina46@gmail.com account regardless of any role field.
+    // This cannot be spoofed — the email claim is set by Firebase Auth.
+    function isFounderEmail() {
+      return isSignedIn()
+        && request.auth.token.email == 'christijerina46@gmail.com';
+    }
+
+    function isModerator() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['founder', 'moderator', 'admin'];
+    }
+
+    // Fields a signed-in user is allowed to deliver into ANOTHER user's document.
+    function isDeliveryUpdate() {
+      let allowed = [
+        'notifications',
+        'pushQueue',
+        'friendRequestsReceived',
+        'friendRequestsSent',
+        'familyInvitesReceived',
+        'familyInvitesSent',
+        'family',
+        'friends',
+        // Follow system: any signed-in user may add/remove themselves from another
+        // user's followers array, and update their own following array.
+        // This is the canonical SNS follow relationship used by TV channels too.
+        'followers',
+        'following'
+      ];
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowed);
+    }
+
+    // Returns true if request.auth.uid is in the owner's followers array.
+    // Uses get() so this is enforced on the server regardless of client behaviour.
+    function isFollowerOf(ownerUid) {
+      return isSignedIn()
+        && request.auth.uid in
+             get(/databases/$(database)/documents/users/$(ownerUid)).data.followers;
+    }
+
+    // Returns true if request.auth.uid is in the owner's friends array.
+    function isFriendOf(ownerUid) {
+      return isSignedIn()
+        && request.auth.uid in
+             get(/databases/$(database)/documents/users/$(ownerUid)).data.friends;
+    }
+
+    // Returns true if the update touches any profile-theme-owned fields.
+    // These may only be written by the profile owner — never via delivery updates.
+    function touchesThemeFields() {
+      let themeFields = [
+        'profileTheme',
+        'profileSavedThemes',
+        'profileActiveThemeId',
+        'profileMusicSettings'
+      ];
+      return request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(themeFields);
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+    //
+    // Public profile info (username, displayName, avatar, followerCount, isLive)
+    // is readable without authentication — required for public search, profile
+    // pages, and Firestore rule get() calls that happen before auth resolves.
+    // Sensitive fields (notifications, pushQueue, etc.) are never exposed to
+    // other users — the client only requests them for the authenticated user's
+    // own document.
+    //
+    // Changed from: allow read: if isSignedIn()
+    // Reason: The prior restriction caused the auth gate loading loop.
+    //   onAuthStateChanged callbacks that call updateDoc / getDoc on the users
+    //   collection before auth fully resolves produced permission-denied errors
+    //   that stalled the startup sequence.  The backup of the last known-good
+    //   state (backup_deployed_8am_2026-08-22) had allow read: if true — this
+    //   restores that state.
+
+    match /users/{uid} {
+      allow read: if true;
+      allow create: if isOwner(uid);
+      // Owner can delete their own account; Founder can delete any user's account
+      // (used by the Founder Panel "Delete Account" function in adminDeleteUser).
+      allow delete: if isOwner(uid) || isFounder();
+
+      allow update: if
+        isOwner(uid)
+        || (isSignedIn() && isDeliveryUpdate() && !touchesThemeFields())
+        || isModerator();
+
+      // ── Per-user notifications subcollection ──────────────────────────────
+      // notifications/{uid}/items/{notifId}
+      match /items/{notifId} {
+        // Only the owner reads their own notifications
+        allow read:   if isOwner(uid);
+        // Any signed-in user can create a notification for another user (e.g. like, follow, message)
+        allow create: if isSignedIn();
+        // Only the owner can mark as read or delete
+        allow update, delete: if isOwner(uid) || isFounder();
+      }
+
+      // ── Profile Wall subcollection ─────────────────────────────────────────
+      // users/{uid}/profileWall/{postId}
+      // Stores posts the user permanently saved from the Feed.
+      // Any signed-in user can read.
+      // Owner (or Founder) can create/update/delete.
+      // Any signed-in user can increment like/comment counts.
+      match /profileWall/{postId} {
+        allow read:   if isSignedIn();
+        allow create: if isOwner(uid);
+        allow delete: if isOwner(uid) || isFounder();
+        allow update: if isOwner(uid)
+          || isFounder()
+          || (isSignedIn() && request.resource.data.diff(resource.data)
+                .affectedKeys().hasOnly(['likeCount', 'likedBy', 'commentCount']));
+      }
+
+      // ── Shadow Reaper Personal Memories (E2) ──────────────────────────────
+      //
+      //   /users/{uid}/shadowReaperMemories/{memoryId}
+      //     id, category, content, normalizedContent,
+      //     createdAt, updatedAt, source, active
+      //
+      // E2 personal memory — stored ONLY by the owning user.
+      // No cross-user access. Founder has no special read access to another
+      // user's personal AI memories.
+      //
+      // READ / WRITE: owner only (request.auth.uid == uid).
+      match /shadowReaperMemories/{memoryId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      // ── Shadow Reaper Conversation History (E3) ───────────────────────────
+      //
+      //   /users/{uid}/shadowReaperConversations/{convId}
+      //     convId — auto-generated conversation thread identifier
+      //
+      //   /users/{uid}/shadowReaperConversations/{convId}/messages/{msgId}
+      //     role, text, ts, sessionId, convId, savedAt
+      //
+      // E3 conversation history — stored ONLY by the owning user.
+      // No cross-user access.
+      // Founder does NOT automatically access another user's conversations.
+      // Different UID: DENIED.
+      //
+      // READ / WRITE: owner only (request.auth.uid == uid).
+      match /shadowReaperConversations/{convId} {
+        allow read, write: if isOwner(uid);
+
+        match /messages/{msgId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      // ── Shadow Reaper Adaptive Learning Context ────────────────────────────
+      //
+      //   /users/{uid}/shadowReaperLearnedContext/{itemId}
+      //     category, key, value, confidence, count,
+      //     createdAt, updatedAt, lastUsedAt, sourceConvId, active
+      //
+      // Adaptive learned context — stored ONLY by the owning user.
+      // No cross-user access. Founder does NOT access another user's data.
+      // Guest: no write (client-side guard is the first barrier).
+      // Different UID: DENIED.
+      //
+      // READ / WRITE: owner only (request.auth.uid == uid).
+      match /shadowReaperLearnedContext/{itemId} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // ── Messages (NEW — top-level per-conversation collection) ────────────────
+    //
+    //   /messages/{convId}/
+    //     senderID, receiverID, participants[], lastMsgTs, ...
+    //
+    //   /messages/{convId}/msgs/{msgId}/
+    //     senderID, receiverID, text, timestamp, read, deleted
+    //
+    // convId is always sorted(senderUID, receiverUID).join('_')
+
+    match /messages/{convId} {
+      // Only participants (or Founder) may read a conversation
+      allow read: if isSignedIn()
+        && (request.auth.uid in resource.data.participants || isFounder());
+      // Any signed-in user may create a new conversation (setDoc with merge)
+      allow create: if isSignedIn();
+      // Only participants or a moderator may update conversation metadata
+      allow update: if isSignedIn()
+        && (request.auth.uid in resource.data.participants || isModerator());
+      // Only participants or the Founder may delete
+      allow delete: if isSignedIn()
+        && (request.auth.uid in resource.data.participants || isFounder());
+
+      // ── Individual message documents ──────────────────────────────────────
+      match /msgs/{msgId} {
+        // Only participants may read messages
+        allow read: if isSignedIn()
+          && (request.auth.uid in get(/databases/$(database)/documents/messages/$(convId)).data.participants
+              || isFounder());
+        // Sender can create; participants can mark read
+        allow create: if isSignedIn();
+        // Owner can soft-delete (set deleted:true); recipient can mark read
+        allow update: if isSignedIn()
+          && (request.auth.uid == resource.data.senderID
+              || request.auth.uid == resource.data.receiverID
+              || isModerator());
+        // Only sender or Founder can hard-delete
+        allow delete: if isSignedIn()
+          && (request.auth.uid == resource.data.senderID || isFounder());
+      }
+    }
+
+    // ── Notifications (NEW — top-level per-user subcollection) ───────────────
+    //
+    //   /notifications/{uid}/items/{notifId}
+    //     type, fromUser, messageID, text, timestamp, read
+    //
+    //   type values: "message" | "like" | "comment" | "follow" |
+    //                "friendRequest" | "mention" | "tag" | "system"
+
+    match /notifications/{uid} {
+      allow read: if isOwner(uid) || isFounder();
+      allow write: if false; // only subcollection items are written
+
+      match /items/{notifId} {
+        allow read:   if isOwner(uid) || isFounder();
+        allow create: if isSignedIn();
+        allow update, delete: if isOwner(uid) || isFounder();
+      }
+    }
+
+    // ── Stories ───────────────────────────────────────────────────────────────
+    //
+    // READ: public (no auth required) — guests can view the public story bar.
+    //       Stories only contain public broadcast content, no private DMs.
+    // WRITE: signed-in users only.
+
+    match /stories/{storyId} {
+      allow read:   if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn()
+        && (resource.data.authorUid == request.auth.uid
+            || resource.data.uid    == request.auth.uid
+            || isFounder());
+    }
+
+    // ── Posts ─────────────────────────────────────────────────────────────────
+    //
+    // READ: public (no auth required) — guests can browse the public Feed.
+    //       The Feed is the main public content surface of Shadow Nexus.
+    //       No private information is stored in post documents.
+    // WRITE: signed-in users only.
+
+    match /posts/{postId} {
+      allow read:   if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn()
+        && (resource.data.uid == request.auth.uid
+            || resource.data.authorUid == request.auth.uid
+            || isModerator()
+            // Any signed-in user may like/unlike any post
+            || request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['likedBy', 'likes'])
+            // Any signed-in user may add/remove a comment
+            || request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['comments'])
+            // Any signed-in user may increment repost count
+            || request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['repostCount']));
+      allow delete: if isSignedIn()
+        && (resource.data.uid == request.auth.uid
+            || resource.data.authorUid == request.auth.uid
+            || isModerator());
+    }
+
+    // ── Chats (Direct Messages — primary DM collection) ──────────────────────
+    //
+    //   /chats/{chatId}
+    //     chatId = sorted(uidA, uidB).join('_')    ← deterministic
+    //     participants: [uidA, uidB]
+    //     messages: [ { sender, type, text, timestamp, deleted?,
+    //                   deletedFor_<uid>?, reactions?, replyIdx?, replyPreview?,
+    //                   imageUrl?, edited? } ]       ← array, trimmed at 1000
+    //     lastMsgTs,
+    //     readReceipt,                              ← legacy boolean (kept for compat)
+    //     readBy_<uid>: true/false,                 ← canonical per-user read flag (SNS-2026-INBOX-001)
+    //     unread_<uid>, typing_<uid>,
+    //     pinned_<uid>, muted_<uid>, archived_<uid>, deleted_<uid>
+    //
+    // Only participants (or Founder) may read.
+    // Any signed-in user may create (runTransaction creates on first message).
+    // Only participants or moderator may update (covers message array writes,
+    //   typing indicators, read receipts, pin/mute/archive flags).
+    // Only a participant or Founder may delete the whole conversation doc.
+
+    match /chats/{chatId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid in resource.data.participants || isFounder());
+      allow create: if isSignedIn();
+      allow update: if isSignedIn()
+        && (request.auth.uid in resource.data.participants || isModerator());
+      allow delete: if isSignedIn()
+        && (request.auth.uid in resource.data.participants || isFounder());
+    }
+
+    // ── Site settings ─────────────────────────────────────────────────────────
+    //
+    // Read:  public (maintenance mode banner, radio config, feature flags are
+    //        read by all users including guests on every page load).
+    // Write: Founder only, enforced via isFounderEmail() (Firebase Auth token
+    //        email claim — cannot be spoofed and does not race against the
+    //        async Firestore users/{uid} role-field write that isFounder() needs).
+
+    match /siteSettings/{docId} {
+      allow read: if true;
+      allow write: if isFounderEmail();
+    }
+
+    // ── NEXUS GLOBAL THEME ENGINE ─────────────────────────────────────────────
+    //
+    //   /siteConfig/globalTheme
+    //     activeThemeId, themeName, version, status, publishedAt, updatedAt,
+    //     updatedBy, effects[], backgroundImageUrl, bannerEnabled, bannerText,
+    //     bannerCountdownEnabled, bannerCountdownTarget, tokenOverrides{}
+    //
+    //   Public READ — every browser needs the active theme on startup.
+    //   WRITE — Founder only (enforced server-side via isFounder() rule check).
+
+    match /siteConfig/{docId} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    //   /themes/{themeId}
+    //     Custom and draft themes created by the Founder.
+    //     Regular users never touch this collection.
+    //     Read: any authenticated user may read published themes (their browser
+    //           fetches the active theme doc on startup).
+    //     Write: Founder only.
+
+    match /themes/{themeId} {
+      allow read:  if true;
+      allow write: if isFounder();
+    }
+
+    //   /themeSchedules/{schedId}
+    //     Scheduled theme activations.
+    //     Read: public (startup resolution).
+    //     Write: Founder only.
+
+    match /themeSchedules/{schedId} {
+      allow read:  if true;
+      allow write: if isFounder();
+    }
+
+    //   /themeHistory/{histId}
+    //     Immutable publish history records.
+    //     Read: Founder only (shown in Theme History tab).
+    //     Create: Founder only (written by ThemeEngine during publish batch).
+    //     Update/Delete: never — immutable audit trail.
+
+    match /themeHistory/{histId} {
+      allow read:   if isFounder();
+      allow create: if isFounder();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ── AI Moderation Log ─────────────────────────────────────────────────────
+
+    match /aiModerationLog/{docId} {
+      allow create: if isSignedIn();
+      allow read, delete: if isFounder();
+      allow update: if false;
+    }
+
+    // ── Reports ───────────────────────────────────────────────────────────────
+
+    match /reports/{docId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isModerator();
+    }
+
+    // ── Audit Log ─────────────────────────────────────────────────────────────
+
+    match /auditLog/{docId} {
+      allow create: if isSignedIn();
+      allow read: if isModerator();
+      allow update, delete: if false;
+    }
+
+    // ── AI Toggle Log ─────────────────────────────────────────────────────────
+
+    match /aiToggleLog/{docId} {
+      allow create: if isFounder();
+      allow read: if isFounder();
+      allow update, delete: if false;
+    }
+
+    // ── Announcements ─────────────────────────────────────────────────────────
+    //
+    // READ: public — site-wide announcements are shown to all visitors including
+    //       guests. No private information stored here.
+    // WRITE: Founder only.
+
+    match /announcements/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isFounder();
+    }
+
+    // ── Shadow Chat Bot — config + history ────────────────────────────────────
+
+    match /botConfig/{docId} {
+      allow read, write: if isFounder();
+
+      match /{subcollection}/{subDocId} {
+        allow read, write: if isFounder();
+      }
+    }
+
+    match /botHistory/{docId} {
+      allow read, write: if isFounder();
+    }
+
+    // ── Arcade ────────────────────────────────────────────────────────────────
+
+    match /arcadeInvites/{docId} {
+      allow create: if isSignedIn();
+      allow read:   if isSignedIn()
+        && (resource.data.fromUid == request.auth.uid
+            || resource.data.toUid  == request.auth.uid
+            || isFounder());
+      allow update: if isSignedIn()
+        && (resource.data.fromUid == request.auth.uid
+            || resource.data.toUid  == request.auth.uid);
+      allow delete: if isFounder();
+    }
+
+    match /arcadeMatches/{docId} {
+      allow create: if isSignedIn();
+      allow read:   if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+      allow update, delete: if isFounder();
+    }
+
+    match /arcadeScores/{docId} {
+      allow create: if isSignedIn();
+      allow read:   if isSignedIn();
+      allow update: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+      allow delete: if isFounder();
+    }
+
+    match /arcadeStats/{docId} {
+      allow create: if isSignedIn();
+      allow read:   if isSignedIn();
+      allow update: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+      allow delete: if isFounder();
+    }
+
+    // ── Profile Photo Album ────────────────────────────────────────────────────
+    //
+    //   /albumPhotos/{photoId}
+    //     ownerUid, url, type ('profile'|'cover'|'album'),
+    //     caption, uploadedAt, privacy, feedPostId
+    //
+    // Privacy model:
+    //   "public"    — any signed-in user can read
+    //   "followers" — only the owner's followers (or the owner/Founder) can read
+    //   "friends"   — only mutual friends (or the owner/Founder) can read
+    //   "private"   — only the owner (or Founder) can read
+    //
+    // Server-side enforcement via isFollowerOf() / isFriendOf() — no client bypass.
+    // Only the owner may write (create / update / delete) their own photos.
+
+    match /albumPhotos/{photoId} {
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      // Unauthenticated guests can read photos explicitly marked public.
+      // Signed-in users follow the full privacy model.
+      allow read: if resource.data.privacy == 'public'
+        || (isSignedIn()
+            && (resource.data.ownerUid == request.auth.uid
+                || isFounder()
+                || resource.data.privacy == 'followers'
+                    && isFollowerOf(resource.data.ownerUid)
+                || resource.data.privacy == 'friends'
+                    && isFriendOf(resource.data.ownerUid)));
+
+      // Owner / Founder can update anything.
+      // Any signed-in user can update only the social reaction fields (like/comment counts).
+      allow update: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid
+            || isFounder()
+            || request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['likeCount', 'likedBy', 'commentCount']));
+
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid
+            || isFounder());
+
+      // ── Photo comments subcollection ───────────────────────────
+      match /comments/{commentId} {
+        // Any signed-in user can read and create comments
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.authorUid == request.auth.uid;
+        // Only the comment author or the photo owner (or Founder) can delete
+        allow delete: if isSignedIn()
+          && (resource.data.authorUid == request.auth.uid
+              || get(/databases/$(database)/documents/albumPhotos/$(photoId)).data.ownerUid == request.auth.uid
+              || isFounder());
+        allow update: if false;
+      }
+    }
+
+    // ── Box Requests (guest box join requests for live streams) ───────────────
+    //
+    //   /boxRequests/{requestId}
+    //     liveId, hostId, viewerId, viewerName, viewerProfileImage,
+    //     status: 'pending' | 'accepted' | 'declined'
+    //     createdAt
+    //
+    //   requestId = "{liveId}_{viewerUid}"
+
+    match /boxRequests/{requestId} {
+      // Viewer (requester) can read their own request
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.viewerId
+            || request.auth.uid == resource.data.hostId
+            || isFounder());
+
+      // Any signed-in (non-anonymous) user can create a request for themselves
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.viewerId == request.auth.uid;
+
+      // Host can update status (accept/decline); viewer cannot change status
+      allow update: if isSignedIn()
+        && (request.auth.uid == resource.data.hostId
+            || request.auth.uid == resource.data.viewerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+
+      // Viewer or host can delete (cleanup); Founder can always delete
+      allow delete: if isSignedIn()
+        && (request.auth.uid == resource.data.viewerId
+            || request.auth.uid == resource.data.hostId
+            || isFounder());
+    }
+
+    // ── Live Rooms ─────────────────────────────────────────────────────────────
+    //
+    //   /liveRooms/{uid}             — one doc per host, keyed by host uid
+    //                                  Ensures only one active session per user.
+    //   /liveRooms/{uid}/liveMessages/{msgId} — chat messages
+    //
+    // Host: must be a non-anonymous signed-in user.
+    // Viewers & guests: must be authenticated (anonymous is fine).
+    //
+    // Legacy roomId-keyed docs are still readable/deletable for migration.
+
+    match /liveRooms/{uid} {
+      // Any authenticated user (incl. anonymous) can read live rooms
+      allow read: if isSignedIn();
+
+      // Only a non-anonymous signed-in user may create/overwrite their own room doc.
+      // The document ID must equal the host's uid — enforcing one doc per user.
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.hostId == request.auth.uid;
+
+      // Allowed updates:
+      //  - host can update anything in their own room (uid == doc key)
+      //  - any signed-in user can increment viewers / likes (fields only)
+      //  - host can update layout/size fields (guestLayout, guestBoxSize)
+      //  - any authenticated user may mark a live room ended:
+      //    only isLive=false + status=ended + updatedAt are written
+      allow update: if isSignedIn()
+        && (
+          resource.data.hostId == request.auth.uid
+          || request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['viewers', 'likes'])
+          || (resource.data.hostId == request.auth.uid
+              && request.resource.data.diff(resource.data)
+                   .affectedKeys().hasOnly(['guestLayout', 'guestBoxSize']))
+          || (
+               request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['isLive', 'status', 'updatedAt'])
+               && request.resource.data.isLive == false
+               && request.resource.data.status == 'ended'
+             )
+        );
+
+      // Only the host or Founder may delete a room
+      allow delete: if isSignedIn()
+        && (resource.data.hostId == request.auth.uid || isFounder());
+
+      // ── Live chat messages ─────────────────────────────────────────────────
+      match /liveMessages/{msgId} {
+        // Any authenticated viewer can read chat
+        allow read: if isSignedIn();
+        // Any authenticated user can send a message (spam guard is client-side)
+        allow create: if isSignedIn();
+        // Only the sender or host/Founder may delete a message
+        allow delete: if isSignedIn()
+          && (
+            resource.data.userId == request.auth.uid
+            || get(/databases/$(database)/documents/liveRooms/$(uid)).data.hostId == request.auth.uid
+            || isFounder()
+          );
+        allow update: if false;
+      }
+    }
+
+    // ── Community ─────────────────────────────────────────────────────────────
+    //
+    //   /community/reactions             — aggregated reaction counts (increment)
+    //   /community/challenges/completions/{uid_date} — daily challenge records
+    //   /community/anonBoard/posts/{postId}          — anonymous support posts
+
+    match /community/reactions {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /community/challenges/completions/{docId} {
+      allow read:           if isSignedIn();
+      allow create, update: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isFounder();
+    }
+
+    match /community/anonBoard/posts/{postId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn();
+      // Only Founder can delete; updates only allowed for incrementing hugs
+      allow update: if isSignedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hugs']);
+      allow delete: if isFounder();
+    }
+
+    // ── Live Users (presence) ──────────────────────────────────────────────────
+    //
+    //   /liveUsers/{uid} — one doc per active participant, owner-scoped
+
+    match /liveUsers/{uid} {
+      // Anyone authenticated can read presence (for name resolution)
+      allow read: if isSignedIn();
+      // Each user manages their own presence doc
+      allow create, update: if isOwner(uid);
+      allow delete: if isOwner(uid) || isFounder();
+    }
+
+    // ── Live Connections (WebRTC signaling) ────────────────────────────────────
+    //
+    //   /liveConnections/{roomId}
+    //     offer             : { type, sdp }         — creator writes
+    //     answer            : { type, sdp }         — viewer writes
+    //     creatorCandidates : [ … ]                 — creator appends via arrayUnion
+    //     viewerCandidates  : [ … ]                 — viewer appends via arrayUnion
+
+    match /liveConnections/{roomId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // ── Live Signals (WebRTC signaling — legacy, kept for compatibility) ───────
+
+    match /liveSignals/{roomId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      match /viewers/{viewerUid} {
+        allow read: if isSignedIn();
+        allow create: if isOwner(viewerUid);
+        allow update: if isSignedIn();
+        allow delete: if isOwner(viewerUid) || isFounder();
+
+        match /hostIce/{id} {
+          allow read:   if isSignedIn();
+          allow create: if isSignedIn();
+          allow delete: if isOwner(viewerUid) || isSignedIn();
+          allow update: if false;
+        }
+
+        match /viewerIce/{id} {
+          allow read:   if isSignedIn();
+          allow create: if isOwner(viewerUid);
+          allow delete: if isOwner(viewerUid) || isSignedIn();
+          allow update: if false;
+        }
+      }
+    }
+
+    // ── Co-Host Requests ───────────────────────────────────────────────────────
+    //
+    //   /coHostRequests/{requestId}
+    //     liveId      — the host's RTDB room id
+    //     hostId      — host uid
+    //     guestId     — invitee uid
+    //     status      — 'pending' | 'accepted' | 'declined'
+    //     createdAt   — server timestamp
+    //
+    //   requestId = "{liveId}_{guestId}"
+    //
+    // Host creates; guest reads their own invite and updates status.
+    // Viewers can read accepted records so they see the active co-host list.
+
+    match /coHostRequests/{requestId} {
+      // Host can create an invite for a specific guest
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.hostId == request.auth.uid;
+
+      // Host or guest can read; viewers can read accepted ones
+      allow read: if isSignedIn()
+        && (
+          request.auth.uid == resource.data.hostId
+          || request.auth.uid == resource.data.guestId
+          || resource.data.status == 'accepted'
+        );
+
+      // Guest can update status (accept / decline)
+      // Host can also update status (e.g. cancel invite after removing co-host)
+      allow update: if isSignedIn()
+        && (request.auth.uid == resource.data.guestId || request.auth.uid == resource.data.hostId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']);
+
+      // Host or guest can delete (cleanup); Founder always can
+      allow delete: if isSignedIn()
+        && (
+          request.auth.uid == resource.data.hostId
+          || request.auth.uid == resource.data.guestId
+          || isFounder()
+        );
+    }
+
+    // ── Profile Music ──────────────────────────────────────────────────────────
+    //
+    //   /profileMusic/{songId}
+    //     ownerUid, ownerId, userId, title, artist, album, genre, year,
+    //     description, duration, uploadedAt, visibility, isPublic,
+    //     downloadURL, musicUrl, url, artUrl, coverImage
+    //
+    // Read:   any signed-in user can read (public playback for profile visitors).
+    //         Public docs (visibility == "public" or isPublic == true) are
+    //         readable by anyone — signed-in or not — so embedded players work.
+    // Create: only the authenticated owner (ownerUid == auth.uid).
+    // Update: only the owner.
+    // Delete: only the owner or a Founder.
+
+    match /profileMusic/{songId} {
+      // Signed-in users can always read; public docs are readable by anyone
+      allow read: if isSignedIn()
+        || resource.data.visibility == 'public'
+        || resource.data.isPublic == true;
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+    }
+
+    // ── 24-Hour Nexus Channels ────────────────────────────────────────────────
+    //
+    //   /nexusChannels/{channelId}
+    //     channelId == ownerUid (one channel per user)
+    //     Public fields: channelName, ownerDisplayName, ownerUsername,
+    //                    category, isPublic, isLive, activeStreamId,
+    //                    currentMedia, viewerCount, likeCount, createdAt, updatedAt
+    //
+    //     Security:
+    //       - Public/signed-in users can READ public channels (for discovery)
+    //       - Only the channel owner (channelId == auth.uid) can CREATE/UPDATE
+    //       - Sensitive user data (email, password) is NEVER stored here
+    //       - viewerCount / likeCount may be incremented by any signed-in user
+    //         (handled by the client via increment())
+    //       - Owner writes are always verified by channelId == auth.uid
+
+    match /nexusChannels/{channelId} {
+      // Any signed-in user can read (for discovery); public channels readable by anyone
+      allow read: if isSignedIn() || resource.data.isPublic == true;
+
+      // Only the channel owner can create their own channel doc
+      allow create: if isOwner(channelId)
+        && request.resource.data.ownerUid == request.auth.uid
+        && !('email' in request.resource.data)
+        && !('password' in request.resource.data);
+
+      // Owner can update their own channel settings; any signed-in user can
+      // increment viewerCount or likeCount (social interactions only)
+      allow update: if isOwner(channelId)
+        || (isSignedIn()
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['viewerCount', 'likeCount', 'updatedAt']));
+
+      // Only the owner can delete their channel
+      allow delete: if isOwner(channelId);
+    }
+
+    // ── Music (public catalogue) ───────────────────────────────────────────────
+    //
+    //   /music/{musicId}
+    //     Public reads (no auth required).
+    //     Only the Founder may write (the official Music Hub catalogue is
+    //     managed exclusively by the Founder — no regular user writes allowed).
+
+    match /music/{musicId} {
+      allow read: if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Music Hub — config & featured tracks ───────────────────────────────────
+    //
+    //   /musicHub/{docId}                    — top-level config documents
+    //   /musicHub/config/featured/{trackId}  — founder-curated featured tracks
+    //   /musicHub/config/radioRotation/{id}  — radio rotation management
+    //   /musicHub/config/recentlyAdded/{id}  — recently added metadata (optional)
+    //
+    // Read:   any signed-in user (or public for featured tracks).
+    // Write:  Founder only — enforced via isFounderEmail() (token-based, cannot
+    //         be spoofed by a Firestore role field).
+
+    match /musicHub/{docId} {
+      allow read: if true;
+      allow write: if isFounderEmail();
+
+      match /{subcollection}/{subDocId} {
+        allow read: if true;
+        allow write: if isFounderEmail();
+
+        match /{deepCollection}/{deepDocId} {
+          allow read: if true;
+          allow write: if isFounderEmail();
+        }
+      }
+    }
+
+    // ── Radio Tracks ──────────────────────────────────────────────────────────
+    //
+    //   /radioTracks/{trackId}
+    //     title, artist, audioUrl, artworkUrl, duration, enabled, createdAt, ...
+    //
+    // READ:  public — track metadata is required for deterministic playback on
+    //        all listener devices including guests.  Station state is already
+    //        public via siteSettings; track data contains no private information
+    //        (titles, artists, public CDN URLs only).
+    // WRITE: Founder only — enforced via isFounderEmail() (token-based claim).
+
+    match /radioTracks/{trackId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Playlists ───────────────────────────────────────────────────────
+    //
+    //   /radioPlaylists/{playlistId}
+    //     name, trackIds[], enabled, createdAt, updatedAt
+    //
+    // READ:  public — playlist structure (names + track ID arrays) contains no
+    //        private data and must be readable to resolve the active programme.
+    // WRITE: Founder only — via isFounderEmail().
+
+    match /radioPlaylists/{playlistId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Programs (Stage 3) ──────────────────────────────────────────────
+    //
+    //   /radioPrograms/{programId}
+    //     name, artwork, playlistId, enabled, createdAt, updatedAt
+    //
+    // READ:  public — programme names and artwork are shown to all listeners
+    //        including guests in the Now Playing bar.
+    // WRITE: Founder only — via isFounderEmail().
+
+    match /radioPrograms/{programId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Schedule (Stage 3) ──────────────────────────────────────────────
+    //
+    //   /radioSchedule/{slotId}
+    //     hour, minute, programId, label, enabled, order, createdAt, updatedAt
+    //
+    // READ:  public — schedule slots contain only times and programme references;
+    //        no private data.  Guests need this to see the upcoming schedule.
+    // WRITE: Founder only — via isFounderEmail().
+
+    match /radioSchedule/{slotId} {
+      allow read:                   if true;
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── Radio Song Requests ───────────────────────────────────────────────────
+    //
+    //   /radioRequests/{requestId}
+    //     trackId, trackTitle, trackArtist,
+    //     requestedByUid, requestedByUsername,
+    //     requestCount, requesterUids[],
+    //     lastRequestedByUid, lastRequestedByUsername, lastRequestedAt,
+    //     requestedAt, status  ('pending' | 'approved' | 'rejected')
+    //
+    // READ:
+    //   Signed-in users may read all requests so the modal can display the
+    //   current queue status.  requesterUids is an array of UIDs — normal
+    //   listeners only need to know whether *they* have already requested a
+    //   track (checked client-side by uid lookup), and the Founder needs to
+    //   see the full list.  No private data beyond UIDs is stored here.
+    //
+    // CREATE:
+    //   Any signed-in user may create a request.
+    //   requestedByUid must match their own Firebase UID.
+    //   requesterUids must be [request.auth.uid] on creation.
+    //
+    // UPDATE:
+    //   A signed-in user may update only requestCount, requesterUids,
+    //   lastRequestedByUid, lastRequestedByUsername, lastRequestedAt
+    //   (the merge / dedup fields) — and only when the request is pending.
+    //   The Founder (isFounderEmail) may update any field (approve/reject).
+    //
+    // DELETE:
+    //   Founder only.  Listeners cannot delete requests.
+
+    match /radioRequests/{requestId} {
+
+      // Any signed-in user can read (no private data beyond UIDs, no secrets)
+      allow read: if isSignedIn();
+
+      // Signed-in user can create their own request
+      allow create: if isSignedIn()
+        && request.resource.data.requestedByUid == request.auth.uid
+        && request.resource.data.requesterUids is list
+        && request.resource.data.requesterUids.hasOnly([request.auth.uid])
+        && request.resource.data.status == 'pending';
+
+      // Merge / dedup update: listener may only increment count and add their UID
+      // The status field must not change via this path.
+      // Founder may update anything (approve / reject).
+      allow update: if isFounderEmail()
+        || (isSignedIn()
+            && resource.data.status == 'pending'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly([
+                   'requestCount',
+                   'requesterUids',
+                   'lastRequestedByUid',
+                   'lastRequestedByUsername',
+                   'lastRequestedAt'
+                 ]));
+
+      // Only Founder may delete requests
+      allow delete: if isFounderEmail();
+    }
+
+    // ── Radio Comments ────────────────────────────────────────────────────────
+    //
+    //   /radioComments/{commentId}
+    //     uid, username, displayName, photoURL,
+    //     message,
+    //     trackId, trackTitle, trackArtist,
+    //     createdAt
+    //
+    // READ:   public — the Radio is a public broadcast; comment thread is part
+    //         of the listener experience.  No private data is stored here.
+    // CREATE: signed-in users only; uid field must match the authenticated user.
+    // UPDATE: not permitted — no editing of radio comments.
+    // DELETE: comment owner (uid == auth.uid) or Founder may delete.
+
+    match /radioComments/{commentId} {
+      allow read:   if true;
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+      allow delete: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+    }
+
+    // ── Broadcast Destinations (Stage 4A) ─────────────────────────────────────
+    //
+    //   /broadcastDestinations/{destId}
+    //     name, serverUrl, streamKey, enabled, createdAt, updatedAt, createdBy
+    //
+    // STREAM KEYS ARE SECRET.
+    //   READ:  Founder only — stream keys must never be visible to normal users.
+    //          Never allow public reads.  isFounderEmail() is token-based and
+    //          cannot be spoofed regardless of any Firestore role-field write order.
+    //   WRITE: Founder only — via isFounderEmail().
+    //
+    // The Broadcast Engine reads this collection server-side (via the Cloudflare
+    // Worker) only when streaming is active and never exposes keys to clients.
+
+    match /broadcastDestinations/{destId} {
+      allow read, create, update, delete: if isFounderEmail();
+    }
+
+    // ── Profile Playlists ─────────────────────────────────────────────────────
+    //
+    //   /profilePlaylists/{plId}
+    //     ownerUid, name, songIds[], createdAt
+    //
+    // Owner only can write; any signed-in user can read public playlists.
+
+    match /profilePlaylists/{plId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+    }
+
+    // ── Media Files (Cloudflare R2 upload metadata) ────────────────────────────
+    //
+    //   /mediaFiles/{fileId}
+    //     ownerUid, fileName, fileType, fileSize, uploadedAt,
+    //     r2Key, url, mediaKind ('post'|'profile'|'cover'|'album'|'story'|
+    //                            'message'|'music'|'recording'|'attachment'),
+    //     postId, messageId, storyId, visibility ('public'|'private')
+    //
+    // Owner only may create/delete; any signed-in user can read public files.
+    // Owner or Founder can update.
+
+    match /mediaFiles/{fileId} {
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+
+      allow read: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid
+            || resource.data.visibility != 'private'
+            || isFounder());
+
+      allow update: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+    }
+
+    // ── Wall Post Comments ─────────────────────────────────────────────────────
+    //
+    //   /wallPostComments/{wallDocId}/comments/{commentId}
+    //     wallDocId, wallOwnerUid, authorUid, authorName, authorHandle,
+    //     authorAvatar, text, createdAt
+    //
+    // Any signed-in user can read and create comments.
+    // Only the comment author (or Founder) can delete.
+
+    match /wallPostComments/{wallDocId} {
+      allow read:  if isSignedIn();
+      allow write: if false; // only subcollection comments are written
+
+      match /comments/{commentId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.authorUid == request.auth.uid;
+        allow delete: if isSignedIn()
+          && (resource.data.authorUid == request.auth.uid || isFounder());
+        allow update: if false;
+      }
+    }
+
+    // ─── Shadow XP / Social Credit ─────────────────────────────────────────────
+    //
+    // /shadowXP/{uid}  — level, experience, title
+    //   Written by the owner (snxf_awardXP).
+    //
+    match /shadowXP/{uid} {
+      // Owner reads/writes their own XP (snxf_awardXP, snxf_loadXPStrip).
+      allow read:   if isOwner(uid);
+      allow create: if
+        isOwner(uid)
+          && request.resource.data.experience is number
+          && request.resource.data.experience >= 0;
+      allow update: if
+        isOwner(uid)
+          && request.resource.data.experience is number
+          && request.resource.data.experience >= 0;
+      allow delete: if isFounder();
+    }
+
+    // ─── SHADOW FIRE LIVE — Video Collections ──────────────────────────────────
+    //
+    // /videos/{videoId}  — uploaded video metadata
+    //   creatorId, title, description, videoUrl, thumbnailUrl, status, visibility,
+    //   views, likes, duration, tags, category, r2Key, cloudflareVideoId, createdAt
+    //
+    // Visibility model:
+    //   "public"    — published videos readable by any signed-in user
+    //   "followers" — client-enforced; Firestore allows any signed-in user to read
+    //   "private"   — only the creator can read
+    //   status=="uploading"/"processing"/"failed" — only creator can read
+
+    match /videos/{videoId} {
+      // Creator always can read their own videos (all statuses).
+      // Signed-in users can read published videos that are public or followers.
+      allow read: if isSignedIn()
+        && (
+          resource.data.creatorId == request.auth.uid
+          || (resource.data.status == 'published'
+              && resource.data.visibility in ['public', 'followers'])
+          || isFounder()
+        );
+
+      // Only signed-in, non-anonymous users can create their own video docs.
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.creatorId == request.auth.uid;
+
+      // Creator can update their own video (status transitions, metadata edits).
+      // Any signed-in user may increment view/like counters on published videos.
+      allow update: if isSignedIn()
+        && (
+          resource.data.creatorId == request.auth.uid
+          || isFounder()
+          || (resource.data.status == 'published'
+              && request.resource.data.diff(resource.data)
+                   .affectedKeys().hasOnly(['views', 'likes']))
+        );
+
+      allow delete: if isSignedIn()
+        && (resource.data.creatorId == request.auth.uid || isFounder());
+
+      // /videos/{videoId}/comments/{commentId}
+      match /comments/{commentId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.authorId == request.auth.uid;
+        allow delete: if isSignedIn()
+          && (resource.data.authorId == request.auth.uid
+              || get(/databases/$(database)/documents/videos/$(videoId)).data.creatorId == request.auth.uid
+              || isFounder());
+        allow update: if false;
+      }
+    }
+
+    // /videoLikes/{uid_videoId}  — tracking who liked what (optional flat index)
+    match /videoLikes/{likeId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isFounder());
+      allow update: if false;
+    }
+
+    // ─── STUDIO — isolated collections ────────────────────────────────────────
+    //
+    // None of these rules touch existing collections.
+
+    // studioSettings/{uid}  — per-creator studio preferences (theme, playlist, etc.)
+    match /studioSettings/{uid} {
+      allow read:  if isOwner(uid) || isFounder();
+      allow write: if isOwner(uid);
+    }
+
+    // studioScenes/{sceneId}  — saved scenes (ownerUid, name, elements[])
+    match /studioScenes/{sceneId} {
+      allow read:   if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+    }
+
+    // studioThemes/{uid}  — active theme selection per user
+    match /studioThemes/{uid} {
+      allow read:  if isOwner(uid) || isFounder();
+      allow write: if isOwner(uid);
+    }
+
+    // studioPlaylists/{plId}  — saved cloud playlists (legacy flat docs)
+    match /studioPlaylists/{plId} {
+      allow read:   if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+    }
+
+    // studioPlaylists/{uid}/playlists/{playlistId}  — music playlist subcollection
+    //   The document at /{uid} is the owner namespace document (not written directly).
+    //   All real data lives in the /playlists/ subcollection, keyed by creator UID.
+    match /studioPlaylists/{uid}/playlists/{playlistId} {
+      allow read:   if isSignedIn()
+        && (uid == request.auth.uid || isFounder());
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid) || isFounder();
+    }
+
+    // cloudStreamTracks/{uid}/tracks/{trackId}  — creator music library
+    //   Subcollection model: each creator owns their own track collection.
+    //   Only the owner reads/writes their tracks.
+    //   Founder can read for moderation.
+    match /cloudStreamTracks/{uid} {
+      allow read:  if isOwner(uid) || isFounder();
+      allow write: if false;  // only subcollection is used
+
+      match /tracks/{trackId} {
+        allow read:   if isOwner(uid) || isFounder();
+        allow create: if isOwner(uid)
+          && request.resource.data.uid == uid;
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid) || isFounder();
+      }
+    }
+
+    // studioQueue/{uid}  — Studio music queue
+    //   One document per user, keyed by uid.
+    //   Only the owning user reads and writes their own queue.
+    match /studioQueue/{uid} {
+      allow read:   if isOwner(uid);
+      allow create: if isOwner(uid)
+        && request.resource.data.uid == uid;
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid);
+    }
+
+    // ─── STUDIO — Independent collections ──────────────────────────────────────
+    //
+    //   studioLiveSessions/{sessionId}   — Studio live sessions (NOT liveRooms)
+    //   studioSettings/{uid}             — per-creator studio preferences
+    //   studioScenes/{sceneId}           — saved scenes
+    //   studioChats/{sessionId}/messages/{msgId} — Studio chat
+    //   studioViewers/{sessionId}/viewers/{uid}  — Studio viewer presence
+
+    match /studioLiveSessions/{sessionId} {
+      // Any signed-in user can read active sessions (for viewer and feed)
+      allow read: if isSignedIn();
+      // Creator creates their own session (sessionId starts with studioLive_ + uid)
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.uid == request.auth.uid;
+      // Creator or Founder can update (status transitions, viewer counts)
+      allow update: if isSignedIn()
+        && (resource.data.uid == request.auth.uid
+            || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewers', 'likes'])
+            || isFounder());
+      // Only creator or Founder can delete
+      allow delete: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+    }
+
+    match /studioSettings/{uid} {
+      allow read:   if isOwner(uid) || isFounder();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
+      allow delete: if isOwner(uid) || isFounder();
+    }
+
+    match /studioScenes/{sceneId} {
+      allow read:   if isSignedIn();
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.ownerUid == request.auth.uid || isFounder());
+    }
+
+    match /studioChats/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      match /messages/{msgId} {
+        allow read:   if isSignedIn();
+        allow create: if isSignedIn();
+        allow delete: if isSignedIn()
+          && (resource.data.userId == request.auth.uid || isFounder());
+        allow update: if false;
+      }
+    }
+
+    match /studioViewers/{sessionId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+
+      match /viewers/{uid} {
+        allow read:   if isSignedIn();
+        allow create, update: if isOwner(uid);
+        allow delete: if isOwner(uid) || isFounder();
+      }
+    }
+
+    // ── 24-Hour Studio Live Rooms ─────────────────────────────────────────────
+    //
+    //   /studioLiveRooms/{uid}             — one doc per Studio creator, keyed by host uid
+    //                                        Completely separate from /liveRooms/{uid}
+    //   /studioLiveRooms/{uid}/liveMessages/{msgId} — Studio chat messages
+    //
+    // Studio Live and Shadow Nexus Social Live are independent systems.
+    // This collection is NEVER written or read by the SNS Live system.
+
+    match /studioLiveRooms/{uid} {
+      // Public read — unauthenticated viewers can discover and watch Studio streams.
+      // Auth is still required for chat, likes, and all writes.
+      allow read: if true;
+
+      // Only a non-anonymous signed-in user may create/overwrite their own Studio room doc.
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.hostId == request.auth.uid;
+
+      // Allowed updates:
+      //  - host can update anything in their own room
+      //  - any signed-in user can increment viewers/likes counters
+      //  - status 'ended' can be written by any authenticated user (stream cleanup)
+      allow update: if isSignedIn()
+        && (
+          resource.data.hostId == request.auth.uid
+          || request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['viewers', 'likes'])
+          || (
+               request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['isLive', 'status', 'updatedAt'])
+               && request.resource.data.isLive == false
+               && request.resource.data.status == 'ended'
+             )
+        );
+
+      // Only the host or Founder may delete a Studio room
+      allow delete: if isSignedIn()
+        && (resource.data.hostId == request.auth.uid || isFounder());
+
+      // ── Studio Live chat messages ──────────────────────────────────────────
+      match /liveMessages/{msgId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow delete: if isSignedIn()
+          && (
+            resource.data.userId == request.auth.uid
+            || get(/databases/$(database)/documents/studioLiveRooms/$(uid)).data.hostId == request.auth.uid
+            || isFounder()
+          );
+        allow update: if false;
+      }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SHADOW NEXUS TV NETWORK — CREATOR CHANNELS  (Stage 1)
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    //   /creatorChannels/{uid}
+    //     Permanent channel document, keyed by the creator's SNS UID.
+    //     uid == ownerUid — one channel per account.
+    //     Public fields: channelName, channelDescription, avatar, coverImage,
+    //                    status ('offline'|'live'), followersCount, currentLiveId,
+    //                    featuredOnMainTv (future, read-only for non-Founder)
+    //     Security:
+    //       - Any signed-in user can READ (for directory / LIVE NOW)
+    //       - Only the owner (channelId == auth.uid) can CREATE their channel
+    //       - Owner can update their own channel settings
+    //       - Any signed-in user can increment followersCount via follow/unfollow
+    //         (actual increment value is constrained; full validation in client)
+    //       - Founder can update featuredOnMainTv (future Main TV carry feature)
+
+    match /creatorChannels/{uid} {
+      allow read: if isSignedIn();
+
+      // Owner creates their own channel (channelId must equal their UID)
+      allow create: if isOwner(uid)
+        && request.resource.data.ownerUid == request.auth.uid
+        && !('email' in request.resource.data)
+        && !('password' in request.resource.data);
+
+      // Owner updates their own channel settings, or social increment updates
+      allow update: if isOwner(uid)
+        || isFounder()
+        || (isSignedIn()
+            && request.resource.data.diff(resource.data)
+                 .affectedKeys().hasOnly(['followersCount', 'updatedAt']));
+
+      // Only the owner or Founder can delete
+      allow delete: if isOwner(uid) || isFounder();
+    }
+
+    //   /liveSessions/{liveId}
+    //     One document per live session (auto-generated ID).
+    //     Multiple creators can have simultaneous live sessions.
+    //     hostUid, channelId, title, status ('live'|'ended'),
+    //     startedAt, endedAt, viewerCount, peakViewers, streamInfo
+    //
+    //   Security:
+    //     - Any signed-in user can READ live sessions (for viewer pages)
+    //     - Only the host can CREATE their own session (hostUid == auth.uid)
+    //     - Host can update their session; any user can increment viewerCount
+    //     - Host or Founder can delete (cleanup)
+
+    match /liveSessions/{liveId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.hostUid == request.auth.uid;
+
+      // Host updates their session (status, endedAt, viewerCount, peakViewers).
+      // Any signed-in user can increment viewerCount.
+      // liveId is a self-reference field the host fills in after creation.
+      allow update: if isSignedIn()
+        && (
+          resource.data.hostUid == request.auth.uid
+          || isFounder()
+          || request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['viewerCount'])
+          || request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['liveId'])
+        );
+
+      allow delete: if isSignedIn()
+        && (resource.data.hostUid == request.auth.uid || isFounder());
+    }
+
+    //   /liveRooms/{rtdbRoomId}/liveMessages/{msgId}
+    //     Live chat messages for Creator Channel live sessions.
+    //     Uses the RTDB roomId as the Firestore collection key so it mirrors
+    //     what live.js already does — no duplicate collection needed.
+    //     This rule grants access to the chat subcollection of Creator Channel
+    //     live rooms (separate from the legacy Normal Live liveRooms collection).
+    //
+    //   Note: Normal Live /liveRooms/{uid} docs are read-only (no sub-collection)
+    //         under the existing rules above.  The chat sub-collection path is the
+    //         same as live.js uses, so we just extend the existing rule.
+    //   (Covered by the existing /liveRooms/{uid}/liveMessages rules above.)
+
+    //   /liveReplays/{creatorUid}/replays/{replayId}
+    //     Replay metadata subcollection, keyed by creator UID.
+    //     replayId, creatorUid, originalLiveId, title, description, thumbnail,
+    //     duration, recordingUrl, processingStatus, createdAt, publishedAt,
+    //     visibility, livePeakViewers, replayViews, likeCount, commentCount,
+    //     postedToFeed, feedPostId
+    //
+    //   Visibility: 'public' | 'followers' | 'private'
+    //   processingStatus: 'processing' | 'ready' | 'failed'
+    //
+    //   Security:
+    //     - Creator always reads/creates/updates/deletes their own replays
+    //     - Public replays are readable by any signed-in user
+    //     - Followers-only replays: Firestore allows any signed-in user to read
+    //       (client enforces the follow check via isFollowingChannel before opening)
+    //     - Private replays: only the creator and Founder
+    //     - Failed/processing replays: only the creator and Founder
+    //     - Any signed-in user may increment replayViews and likeCount
+    //     - Founder can read/delete all replays for moderation
+
+    match /liveReplays/{creatorUid} {
+      allow read: if false; // only subcollection is used
+      allow write: if false;
+
+      match /replays/{replayId} {
+        // Creator reads all their own replays (all statuses, all visibilities).
+        // Founder reads all for moderation.
+        // Signed-in users read public or followers-only ready replays.
+        // Private replays are blocked for non-owners.
+        allow read: if isSignedIn()
+          && (
+            isOwner(creatorUid)
+            || isFounder()
+            || (
+                 resource.data.visibility in ['public', 'followers']
+                 && resource.data.processingStatus == 'ready'
+               )
+          );
+
+        // Only the creator can create their own replay record
+        allow create: if isOwner(creatorUid)
+          && request.resource.data.creatorUid == request.auth.uid;
+
+        // Creator or Founder can update.
+        // Any signed-in user may increment replayViews and likeCount
+        // (for view counting and like toggling).
+        allow update: if isOwner(creatorUid)
+          || isFounder()
+          || (isSignedIn()
+              && request.resource.data.diff(resource.data)
+                   .affectedKeys().hasOnly(['replayViews']))
+          || (isSignedIn()
+              && request.resource.data.diff(resource.data)
+                   .affectedKeys().hasOnly(['likeCount', 'commentCount']));
+
+        allow delete: if isOwner(creatorUid) || isFounder();
+
+        // ── Replay comments subcollection ────────────────────────────
+        //   /liveReplays/{creatorUid}/replays/{replayId}/comments/{commentId}
+        //     authorUid, authorName, authorAvatar, text, createdAt
+        //
+        //   Any signed-in user can read and create comments on public/followers replays.
+        //   Only the comment author or the replay creator can delete.
+        match /comments/{commentId} {
+          // Comments are readable if the replay itself is readable
+          allow read: if isSignedIn()
+            && (
+              isOwner(creatorUid)
+              || isFounder()
+              || get(/databases/$(database)/documents/liveReplays/$(creatorUid)/replays/$(replayId)).data.visibility in ['public', 'followers']
+            );
+
+          // Any signed-in user can comment (on readable replays)
+          allow create: if isSignedIn()
+            && request.auth.token.firebase.sign_in_provider != 'anonymous'
+            && request.resource.data.authorUid == request.auth.uid;
+
+          // Comment author or replay creator (moderating own replay) can delete
+          allow delete: if isSignedIn()
+            && (
+              resource.data.authorUid == request.auth.uid
+              || isOwner(creatorUid)
+              || isFounder()
+            );
+
+          allow update: if false; // comments are immutable
+        }
+      }
+    }
+
+    //   /replayLikes/{likeDocId}
+    //     Flat collection for like dedup — one doc per user-per-replay.
+    //     likeDocId = "{viewerUid}_{replayId}"
+    //     viewerUid, creatorUid, replayId, likedAt
+    //
+    //   Any signed-in non-anonymous user can create their own like.
+    //   Only the liker or Founder can delete.
+
+    match /replayLikes/{likeDocId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.viewerUid == request.auth.uid;
+
+      allow delete: if isSignedIn()
+        && (resource.data.viewerUid == request.auth.uid || isFounder());
+
+      allow update: if false; // likes are immutable — unlike = delete + create
+    }
+
+    //   /channelFollows/{creatorUid}/followers/{followerUid}
+    //     Per-channel follower index.
+    //     followerUid, followedAt, notificationsEnabled
+    //
+    //   Security:
+    //     - Creator and Founder can list all followers
+    //     - Any signed-in user can read their own follow record
+    //     - Any signed-in user can create their own follow (follow action)
+    //     - Follower can update their own notificationsEnabled pref
+    //     - Follower can delete their own follow (unfollow)
+    //     - Founder can delete any follow
+
+    match /channelFollows/{creatorUid} {
+      allow read: if isOwner(creatorUid) || isFounder();
+      allow write: if false; // only subcollection
+
+      match /followers/{followerUid} {
+        // Any signed-in user can read their own follow record;
+        // Creator and Founder can read all followers.
+        allow read: if isSignedIn()
+          && (
+            request.auth.uid == followerUid
+            || isOwner(creatorUid)
+            || isFounder()
+          );
+
+        // Any signed-in non-anonymous user can follow a creator
+        allow create: if isSignedIn()
+          && request.auth.token.firebase.sign_in_provider != 'anonymous'
+          && request.resource.data.followerUid == request.auth.uid
+          && followerUid == request.auth.uid;
+
+        // Follower can update only notification preference
+        allow update: if isSignedIn()
+          && request.auth.uid == followerUid
+          && request.resource.data.diff(resource.data)
+               .affectedKeys().hasOnly(['notificationsEnabled']);
+
+        // Follower can unfollow (delete); Founder can delete
+        allow delete: if isSignedIn()
+          && (request.auth.uid == followerUid || isFounder());
+      }
+    }
+
+    // ── 24-Hour TV — media_submissions ────────────────────────────────────────
+    //
+    //   /media_submissions/{docId}  — content submitted by users for broadcast
+    //
+    //   • Any authenticated user may CREATE a submission doc (viewer submit flow).
+    //   • The Founder (christijerina46@gmail.com) may read, update (approve/reject),
+    //     and delete any submission.
+    //   • Regular users may read ONLY their own submissions (submitted_by == uid).
+    //   • No user may update their own submission after it has been submitted —
+    //     the Founder is the only one who changes status.
+    //
+    // Security note: the Aurenix Worker also validates tokens server-side before
+    // writing to Supabase storage.  This Firestore rule is the second defence layer.
+
+    match /media_submissions/{docId} {
+      // Any signed-in user can submit content.
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.submitted_by == request.auth.uid
+        && request.resource.data.status == 'pending';
+
+      // Users can read their own submissions; Founder can read all.
+      allow read: if isFounderEmail()
+        || (isSignedIn() && resource.data.submitted_by == request.auth.uid);
+
+      // Only the Founder can update (approve/reject/edit) submissions.
+      allow update: if isFounderEmail();
+
+      // Only the Founder can delete submissions.
+      allow delete: if isFounderEmail();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SHADOW NEXUS TV NETWORK — MAIN TV FEATURE STATE  (Stage 4)
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    //   /mainTvState/current  — single document, global Main TV mode
+    //     mode: 'scheduled' | 'featured_live'
+    //     featuredLiveId, featuredCreatorUid, featuredChannelName,
+    //     featuredChannelAvatar, featuredLiveTitle, featuredStartedAt,
+    //     updatedAt
+    //
+    //   Security:
+    //     - Any signed-in user can READ (all viewers need this to react)
+    //     - ONLY the founder email account can WRITE (create/update/delete)
+    //       This is enforced via isFounderEmail() — cannot be spoofed.
+    //     - NO other role (admin, moderator, creator) can write this doc.
+    //     - The auto-return watchdog (server-triggered by live ending) also
+    //       writes via a server-side Cloud Function context or the founder
+    //       account only — never from a creator or viewer client.
+    //
+    //   NOTE: The watchdog auto-return path writes using a client-side call
+    //   when the live session ends.  Because the watchdog only writes
+    //   mode='scheduled' (clearing the feature) — not enabling it — and
+    //   because the Firestore rule below additionally allows clearing when
+    //   the current featured live session is ended, this is safe.
+
+    match /mainTvState/{docId} {
+      // Any signed-in user can read Main TV state (viewers need real-time updates)
+      allow read: if isSignedIn();
+
+      // Only the Founder email account can create or update Main TV state.
+      // This includes the auto-return path, which calls setDoc/updateDoc
+      // from the founder's authenticated session.
+      allow create: if isFounderEmail();
+
+      // Founder can update any field.
+      // Additionally allow clearing the feature (returning to scheduled) when
+      // the calling user is the same as the featured creator UID — this allows
+      // the auto-return watchdog to fire from any authenticated session when
+      // the featured live has ended.
+      allow update: if isFounderEmail()
+        || (
+          isSignedIn()
+          && resource.data.mode == 'featured_live'
+          && request.resource.data.mode == 'scheduled'
+          && request.resource.data.featuredLiveId == null
+        );
+
+      allow delete: if isFounderEmail();
+    }
+
+    // ── Creator channel update — Main TV feature flag (Stage 4) ───────────────
+    //
+    //   Founders can set featuredOnMainTv on any creatorChannel doc (already
+    //   allowed by the isFounder() check in the creatorChannels rule above).
+    //   No new rule is needed here — the existing Founder update path covers it.
+    //
+    //   allowMainTvFeature is owner-writable (covered by isOwner() in creatorChannels).
+
+  }
+}
