@@ -2,7 +2,7 @@
  * snx-shadow-ai-e1.js
  * Shadow Nexus Social — Shadow Reaper E1: Everyday Conversation & Emotional Intelligence
  *
- * Build: SNS-2026-SHADOW-EMOTION-E1-RC1
+ * Build: SNS-2026-SHADOW-LOCAL-CONVERSATION-HISTORY-RC1
  *
  * Exposes: window.SNXShadowE1
  *
@@ -10,11 +10,14 @@
  *  • GENERAL_CONVERSATION intent classification
  *  • Lightweight emotional-context detection (11 tone states)
  *  • Local casual conversation layer (common exchanges — no Workers AI)
+ *  • Extended local general conversation layer — handles richer everyday exchanges
+ *    without Workers AI: songs, rough days, breakups, boredom, help requests, etc.
+ *  • localGeneralAnswer() — covers the broader GENERAL_CONVERSATION intent locally.
  *  • Conversation context window for pronoun/topic continuity across general turns
  *  • Topic switch detection: website question mid-conversation correctly routes to core
  *  • Creative brainstorming, music discussion, humor-aware tone
  *  • Response style adaptation per detected emotional tone
- *  • Persona instructions for Workers AI general conversation pass-through
+ *  • Persona instructions are preserved but Workers AI is NOT called for general conv.
  *  • No permanent storage of any kind
  *  • No emotion profiling
  *  • Session context cleared on destroy()
@@ -32,7 +35,7 @@
 (function (global) {
   'use strict';
 
-  var BUILD_ID = 'SNS-2026-SHADOW-EMOTION-E1-RC1';
+  var BUILD_ID = 'SNS-2026-SHADOW-LOCAL-CONVERSATION-HISTORY-RC1';
 
   /* ─────────────────────────────────────────────────────────────
      EMOTION STATES
@@ -229,6 +232,210 @@
     if (/^(talk to me|let.s talk|chat with me|keep me company|i just want(ed)? to talk)$/.test(n)) return _pick(_CASUAL.TALK_TO_ME);
 
     return null;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     EXTENDED LOCAL GENERAL CONVERSATION LAYER
+     Handles richer everyday conversation turns locally —
+     no Workers AI required for any of these.
+     Called AFTER localCasualAnswer() returns null.
+     Returns a response string or null.
+     Never invents facts. Never fabricates knowledge.
+     Preserves Shadow Reaper character voice.
+  ───────────────────────────────────────────────────────────────*/
+  var _GENERAL_RESPONSES = {
+    ROUGH_DAY: [
+      "Rough days happen. What made it rough?",
+      "That sounds like a lot. I'm here — what's going on?",
+      "I hear you. Sometimes the day just takes it out of you. What happened?"
+    ],
+    SONG_WORKING: [
+      "A song in progress — I respect that. Where are you with it?",
+      "Working on music is real work. What stage are you at?",
+      "That's where the real craft happens. What's it sounding like so far?"
+    ],
+    GIRLFRIEND_BREAKUP: [
+      "That's not easy. How are you holding up?",
+      "Breakups cut deep. Take your time — I'm here if you want to talk through it.",
+      "That kind of loss is real. How are you feeling right now?"
+    ],
+    BORED_GENERAL: [
+      "Boredom means your mind's free. What's been sitting in the back of your head?",
+      "I'm here. We can go anywhere — work on something, talk, or just run it.",
+      "Say the word. What sounds right — conversation, creativity, or something else?"
+    ],
+    HELP_THINK: [
+      "I'm here for it. What are we thinking through?",
+      "Walk me through it — what's the situation?",
+      "Lay it out. I'll help you work through it."
+    ],
+    SHADOW_NEXUS_GENERAL: [
+      "Shadow Nexus Social is a platform built for creators and communities — Radio, Live, TV, Feed, and more. What do you want to know?",
+      "Shadow Nexus is Chris's creation — a full platform with streaming, social features, and creator tools. What aspect interests you?"
+    ],
+    SAD_GENERAL: [
+      "I hear you. You don't have to push through it alone — what's going on?",
+      "That kind of feeling is real. What's weighing on you?",
+      "I'm not going anywhere. Tell me what's happening."
+    ],
+    FRUSTRATED_GENERAL: [
+      "That sounds frustrating. What's the situation?",
+      "I can see why that's aggravating. What happened?",
+      "Walk me through it — what's going wrong?"
+    ],
+    EXCITED_GENERAL: [
+      "Let's hear it — what's got you going?",
+      "I can feel the energy from here. What's happening?",
+      "Tell me everything."
+    ],
+    TIRED_GENERAL: [
+      "Sounds like you need a moment. What's been going on?",
+      "Take it at your pace. What's been draining you?",
+      "Long stretch. What's been keeping you going?"
+    ],
+    CONTINUE_CONV: [
+      "Still here. What else is on your mind?",
+      "I'm listening. Keep going.",
+      "Take your time. What else?"
+    ],
+    IDEA_BRAINSTORM: [
+      "Let's hear it — what's the idea?",
+      "I'm in. Walk me through what you're thinking.",
+      "What's the concept? Start wherever feels right."
+    ],
+    HOW_DOES_RADIO_WORK: [
+      "Shadow Nexus Radio is a live streaming radio station. The Founder controls the station — listeners tune in from the Radio section. There's also a Request system where signed-in listeners can request songs. Want to know more about how it works?",
+      "Radio on Shadow Nexus is a continuous stream managed from the Radio Studio. Listeners can tune in, request songs, and see what's playing. What specifically do you want to know?"
+    ],
+    RELATIONSHIP_GENERAL: [
+      "That's a lot to carry. What's the situation?",
+      "Relationships are complicated. What's going on?",
+      "I'm here. Walk me through it."
+    ],
+    LONELY_GENERAL: [
+      "I'm here. You're not talking to nobody — I'm with you. What's going on?",
+      "That feeling is real. What's been happening?",
+      "You reached out — that counts. What's on your mind?"
+    ],
+    WORKING_ON_SOMETHING: [
+      "Tell me about it. What are you building?",
+      "I like it when people are building things. What's the project?",
+      "What are you working on? I'm listening."
+    ],
+    DEFAULT_GENERAL: [
+      "I'm here. Tell me more.",
+      "Go on — I'm listening.",
+      "What else is going on?"
+    ]
+  };
+
+  function _pickGeneral(key) {
+    var arr = _GENERAL_RESPONSES[key] || _GENERAL_RESPONSES.DEFAULT_GENERAL;
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  /**
+   * Extended local general conversation handler.
+   * Returns a response string or null (very rare fallback).
+   * Never calls Workers AI — this IS the local general conversation brain.
+   * @param {string} text  — user message (corrected, lowercase)
+   * @param {string} tone  — detected EMOTION constant
+   * @returns {string|null}
+   */
+  function localGeneralAnswer(text, tone) {
+    if (!text) return null;
+    var n = text.trim().toLowerCase();
+
+    /* ── Rough day / bad day ─────────────────────────────────── */
+    if (/\b(rough|long|bad|crazy|tough|hard|exhausting|terrible|awful|brutal|horrible)\s+(day|week|month|night)\b/i.test(n) ||
+        /\b(my day|today was|been a (rough|long|bad|crazy|tough|hard) (day|week))\b/i.test(n)) {
+      return _pickGeneral('ROUGH_DAY');
+    }
+
+    /* ── Song / music project ────────────────────────────────── */
+    if (/\b(working on (a )?song|writing (a )?song|finishing (a )?song|recording|my (new )?song|the (new )?song|my (new )?track|the track|the beat|my beat|new album|working on (an )?album)\b/i.test(n)) {
+      return _pickGeneral('SONG_WORKING');
+    }
+
+    /* ── Breakup / relationship end ──────────────────────────── */
+    if (/\b(broke up|break.?up|broken up|she (left|dumped)|he (left|dumped)|girlfriend (left|broke|ended)|boyfriend (left|broke|ended)|ended (the|our) relationship|she.s gone|we broke up|split up)\b/i.test(n)) {
+      return _pickGeneral('GIRLFRIEND_BREAKUP');
+    }
+
+    /* ── Lonely ───────────────────────────────────────────────── */
+    if (/\b(feel(ing)? alone|feel(ing)? lonely|so alone|no one (to talk to|around|cares)|talking to nobody|nobody (gets|understands|cares)|miss(ing)? (someone|people|them))\b/i.test(n)) {
+      return _pickGeneral('LONELY_GENERAL');
+    }
+
+    /* ── Sad / down ───────────────────────────────────────────── */
+    if (tone === 'SAD' || /\b(feel(ing)? (sad|down|depressed|low|blue|empty|hollow|hurt|heartbroken)|i.m sad|i.m down|i.m heartbroken|crying|cried|i cry)\b/i.test(n)) {
+      return _pickGeneral('SAD_GENERAL');
+    }
+
+    /* ── Frustrated ───────────────────────────────────────────── */
+    if (tone === 'FRUSTRATED' || tone === 'ANGRY') {
+      return _pickGeneral('FRUSTRATED_GENERAL');
+    }
+
+    /* ── Excited ──────────────────────────────────────────────── */
+    if (tone === 'EXCITED' || tone === 'HAPPY') {
+      return _pickGeneral('EXCITED_GENERAL');
+    }
+
+    /* ── Tired / exhausted ────────────────────────────────────── */
+    if (tone === 'TIRED' || /\b(exhausted|so tired|burnt out|burnout|drained|no energy|barely (made it|awake|keeping up))\b/i.test(n)) {
+      return _pickGeneral('TIRED_GENERAL');
+    }
+
+    /* ── Help me think / brainstorm ──────────────────────────── */
+    if (/\b(help me (think|brainstorm|figure out|decide|come up with)|let.s (brainstorm|think|talk through)|i need (ideas|help thinking)|i.ve got an idea|what do you think (about|of)|thoughts on|can we talk through)\b/i.test(n)) {
+      return _pickGeneral('HELP_THINK');
+    }
+
+    /* ── Idea / project ─────────────────────────────────────────  */
+    if (/\b(i have an idea|new idea|concept|had a thought|been thinking about|i.ve been working on|working on (a |my )?(new |secret )?(project|thing|app|site|feature))\b/i.test(n)) {
+      return _pickGeneral('IDEA_BRAINSTORM');
+    }
+
+    /* ── Bored ───────────────────────────────────────────────── */
+    if (/\b(i.m bored|so bored|just bored|bored out|nothing to do|got nothing (going on|to do))\b/i.test(n)) {
+      return _pickGeneral('BORED_GENERAL');
+    }
+
+    /* ── How does radio work ─────────────────────────────────── */
+    if (/\bhow does (the )?radio (work|operate|function)\b/i.test(n) ||
+        /\btell me (about|how) (the )?radio\b/i.test(n)) {
+      return _pickGeneral('HOW_DOES_RADIO_WORK');
+    }
+
+    /* ── Shadow Nexus general ─────────────────────────────────── */
+    if (/\btell me about shadow nexus\b/i.test(n) ||
+        /\bwhat is shadow nexus( social)?\b/i.test(n)) {
+      return _pickGeneral('SHADOW_NEXUS_GENERAL');
+    }
+
+    /* ── Relationship general ─────────────────────────────────── */
+    if (/\b(my (girlfriend|boyfriend|partner|wife|husband|ex)|relationship (issue|problem|trouble)|we (fought|argued|had a fight)|they (don.t|won.t)|love (is|was))\b/i.test(n)) {
+      return _pickGeneral('RELATIONSHIP_GENERAL');
+    }
+
+    /* ── Working on something ─────────────────────────────────── */
+    if (/\b(working on (it|something|a thing|this|that|a new|my)|i.m building|building (a |something|it)|starting (a |something)|i started)\b/i.test(n)) {
+      return _pickGeneral('WORKING_ON_SOMETHING');
+    }
+
+    /* ── Continuation / acknowledgement with substance ─────────── */
+    if (/\b(what else|tell me more|go on|and\?|keep going|i.m listening|continue|go ahead|what next|anyway|as i was saying)\b/i.test(n)) {
+      return _pickGeneral('CONTINUE_CONV');
+    }
+
+    /* ── Can we talk / I need to talk ────────────────────────── */
+    if (/\b(can we talk|i need (to talk|someone to talk to)|i just (want|wanted) to talk|need to (vent|talk))\b/i.test(n)) {
+      return _pickGeneral('HELP_THINK');
+    }
+
+    /* ── Default fallback for any unmatched GENERAL_CONVERSATION ── */
+    return _pickGeneral('DEFAULT_GENERAL');
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -436,6 +643,18 @@
      * @returns {string|null} response text or null
      */
     localCasualAnswer: localCasualAnswer,
+
+    /**
+     * Extended local general conversation handler.
+     * Handles richer everyday conversation turns without Workers AI.
+     * Called AFTER localCasualAnswer() returns null.
+     * Returns a response string. This function always returns a string
+     * (never null) to ensure Workers AI is never needed for general conv.
+     * @param {string} text  — user message
+     * @param {string} tone  — detected EMOTION constant
+     * @returns {string}
+     */
+    localGeneralAnswer: localGeneralAnswer,
 
     /**
      * Get response style hint for the given tone.

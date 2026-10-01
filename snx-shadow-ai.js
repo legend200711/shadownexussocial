@@ -67,9 +67,11 @@
      CONSTANTS
   ───────────────────────────────────────────────────────────────*/
   var MAX_HISTORY = 20; // max conversation turns (user+grim pairs) — bounded for server
-  var BUILD_ID    = 'SNS-2026-SHADOW-VOICE-4A-001';
+  var BUILD_ID    = 'SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001';
   var E1_BUILD_ID = 'SNS-2026-SHADOW-EMOTION-E1-RC1';
   var E2_BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC1';
+  var E3_BUILD_ID = 'SNS-2026-SHADOW-CONVERSATION-MEMORY-RC1';
+  var AL_BUILD_ID = 'SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1';
 
   /* Cloudflare Worker AI endpoint — never put an API key here */
   var AI_ENDPOINT = 'https://yellow-term-11e6.nthntjrn.workers.dev/shadow-ai/chat';
@@ -111,6 +113,12 @@
      Once true for the session, skip Workers AI entirely and use local knowledge.
      Shadow Reaper degrades gracefully rather than appearing broken. */
   var _aiLimitMode  = false;
+
+  /* E3: Persistent conversation history state.
+     Tracks whether we have loaded persistent context for this open() call.
+     Reset on destroy(); NOT reset on close() (panel stays loaded). */
+  var _convHistoryLoaded = false;
+  var _persistentContext = []; // loaded turns from Firestore for AI context
 
   /* ─────────────────────────────────────────────────────────────
      STAGE 3C: SESSION CONTEXT  — memory-only, never persisted
@@ -608,8 +616,9 @@
   /* ─────────────────────────────────────────────────────────────
      CONTEXT BUILDER  (safe — no tokens, no secrets)
      Stage 3: adds device type, platform, PWA detection, section.
+     Adaptive: injects bounded relevant learned context when available.
   ───────────────────────────────────────────────────────────────*/
-  function _buildContext() {
+  function _buildContext(userMsg) {
     var ctx = {};
 
     /* Performance mode */
@@ -671,6 +680,18 @@
 
     /* Current SNS section — derived from active page id */
     ctx.currentSection = _inferSection(activePage);
+
+    /* Adaptive Learning: inject bounded relevant learned context */
+    if (userMsg && global.SNXShadowAdaptive &&
+        typeof global.SNXShadowAdaptive.retrieveRelevant === 'function' &&
+        global.SNXShadowAdaptive.isEnabled()) {
+      try {
+        var learnedItems = global.SNXShadowAdaptive.retrieveRelevant(userMsg);
+        if (learnedItems && learnedItems.length) {
+          ctx.learnedContext = learnedItems;
+        }
+      } catch (_) { /* never block on adaptive errors */ }
+    }
 
     return ctx;
   }
@@ -877,6 +898,16 @@
     /* Enforce ceiling — remove oldest pair when over limit */
     while (_history.length > MAX_HISTORY * 2) {
       _history.splice(0, 2);
+    }
+
+    /* E3: Persist turn to conversation history (fire-and-forget, fails silently).
+       Only called after the actual reply is composed — not for greetings.
+       role mapping: 'user' → 'user', 'grim' → 'assistant' */
+    if (global.SNXShadowConvHistory && typeof global.SNXShadowConvHistory.saveTurn === 'function') {
+      try {
+        var persistRole = (role === 'user') ? 'user' : 'assistant';
+        global.SNXShadowConvHistory.saveTurn(persistRole, text);
+      } catch (_) { /* never block on storage errors */ }
     }
   }
 
@@ -1183,6 +1214,102 @@
         if (memIntent && _handleMemoryIntent(memIntent, message, callback)) return;
       }
 
+      /* ── ADAPTIVE STEP 0c: ADAPTIVE LEARNING PRIVACY INTENTS ─────
+         "What have you learned about me?" / "Clear what you learned"
+         Fully local — no Workers AI.
+      ──────────────────────────────────────────────────────────── */
+      if (global.SNXShadowAdaptive &&
+          typeof global.SNXShadowAdaptive.detectIntent === 'function') {
+        var adaptIntent = global.SNXShadowAdaptive.detectIntent(message);
+        if (adaptIntent === 'ADAPTIVE_LIST') {
+          var learnedAll = global.SNXShadowAdaptive.listAll();
+          var listText;
+          if (!learnedAll || !learnedAll.length) {
+            listText = "I haven't learned anything specific yet — I build up context as we have more conversations.";
+          } else {
+            var lines = ["Here is what I've learned from our conversations:"];
+            learnedAll.forEach(function (item) {
+              lines.push('  • [' + item.category + '] ' + item.value + ' (' + item.confidence + ')');
+            });
+            listText = lines.join('\n');
+          }
+          callback({ text: listText, page: null, handled: true, fromServer: false, confidence: 'HIGH' });
+          return;
+        }
+        if (adaptIntent === 'ADAPTIVE_CLEAR') {
+          global.SNXShadowAdaptive.clearAll(function (result) {
+            var t = result.success
+              ? "Done. I've cleared all learned context. I'll rebuild as we keep talking."
+              : "I had trouble clearing the stored data, but I've cleared the local cache.";
+            callback({ text: t, page: null, handled: true, fromServer: false, confidence: 'HIGH' });
+          });
+          return;
+        }
+        if (adaptIntent === 'ADAPTIVE_FORGET_ONE') {
+          /* Best-effort: clear all items (single-item key lookup by natural language is ambiguous) */
+          callback({
+            text: "To remove a specific learned item, open Shadow Reaper settings and choose 'What Shadow Reaper Learned', then delete it from there. Or say 'clear what you've learned' to remove everything.",
+            page: null, handled: true, fromServer: false, confidence: 'HIGH'
+          });
+          return;
+        }
+      }
+
+      /* ── E3 STEP 0b: CONVERSATION HISTORY CONTINUITY INTENT ──────
+         "What were we talking about?", "Continue where we left off.", etc.
+         Uses the loaded _persistentContext (already fetched on open()) to
+         respond immediately — no Workers AI round-trip for simple continuity.
+         Local-first: no Workers AI required for this response.
+      ──────────────────────────────────────────────────────────── */
+      if (global.SNXShadowConvHistory &&
+          typeof global.SNXShadowConvHistory.detectContinuity === 'function' &&
+          global.SNXShadowConvHistory.detectContinuity(message)) {
+        /* Build response from _persistentContext (loaded on open, bounded) */
+        var _ctxTurns = _persistentContext;
+        if (_ctxTurns && _ctxTurns.length > 0) {
+          var _lastUserTurn = null;
+          for (var _ci = _ctxTurns.length - 1; _ci >= 0; _ci--) {
+            if (_ctxTurns[_ci].role === 'user') {
+              _lastUserTurn = _ctxTurns[_ci].text;
+              break;
+            }
+          }
+          if (_lastUserTurn) {
+            var _contReply = 'When we last spoke, you were asking about: "' +
+              _lastUserTurn.substring(0, 200) + '".' +
+              (_ctxTurns.length > 2 ? ' We had ' + Math.floor(_ctxTurns.length / 2) + ' exchanges.' : '') +
+              ' Want to continue from there?';
+            callback({
+              text:       _contReply,
+              page:       null,
+              handled:    true,
+              fromServer: false,
+              confidence: 'HIGH'
+            });
+            return;
+          }
+        }
+        /* History enabled but empty, or not enabled — natural explanation */
+        if (global.SNXShadowConvHistory.isEnabled && !global.SNXShadowConvHistory.isEnabled()) {
+          callback({
+            text:       "Conversation History is currently turned off, so I don't have a record of what we talked about before. You can turn it on in my settings.",
+            page:       null,
+            handled:    true,
+            fromServer: false,
+            confidence: 'HIGH'
+          });
+          return;
+        }
+        callback({
+          text:       "I don't have any previous conversation history for you yet — this looks like our first exchange, or the conversation was cleared. What would you like to talk about?",
+          page:       null,
+          handled:    true,
+          fromServer: false,
+          confidence: 'HIGH'
+        });
+        return;
+      }
+
       /* ── STAGE 3C STEP 1: TYPO CORRECTION ───────────────────────
          Correct common misspellings before any processing.
       ──────────────────────────────────────────────────────────── */
@@ -1247,42 +1374,41 @@
         return;
       }
 
-      /* ── E1 STEP 5a: GENERAL CONVERSATION LOCAL CASUAL LAYER ─────
-         When intent is GENERAL_CONVERSATION and local knowledge did
-         not confidently answer, try the E1 local casual response layer.
-         Very common exchanges (greetings, thanks, lol, bye) answered
-         immediately — no Workers AI call needed.
+      /* ── E1 STEP 5a: GENERAL CONVERSATION — FULLY LOCAL ──────────
+         Normal conversation NEVER calls Workers AI.
+         Priority: localCasualAnswer (exact short phrases) →
+                   localGeneralAnswer (richer extended responses).
+         Neither function calls env.AI.run() or the Workers AI endpoint.
+         The rate-limit message will never appear for normal conversation.
       ──────────────────────────────────────────────────────────── */
       if (intent === 'GENERAL_CONVERSATION' && global.SNXShadowE1) {
         try {
+          var convTone  = global.SNXShadowE1.detectEmotion(correctedMsg);
+          var convTopic = global.SNXShadowE1.extractConvTopic(correctedMsg);
+          /* Layer 1: exact short-phrase casual layer */
           var casualReply = global.SNXShadowE1.localCasualAnswer(correctedMsg);
-          if (casualReply) {
-            var convTone  = global.SNXShadowE1.detectEmotion(correctedMsg);
-            var convTopic = global.SNXShadowE1.extractConvTopic(correctedMsg);
-            global.SNXShadowE1.updateConvContext(correctedMsg, convTone, convTopic);
-            _updateSessionCtx(resolvedMsg, intent, { id: null, page: null });
-            callback({
-              text:       casualReply,
-              page:       null,
-              handled:    true,
-              fromServer: false,
-              confidence: 'LOCAL_CASUAL'
-            });
-            return;
+          if (!casualReply && typeof global.SNXShadowE1.localGeneralAnswer === 'function') {
+            /* Layer 2: extended richer local conversation layer */
+            casualReply = global.SNXShadowE1.localGeneralAnswer(correctedMsg, convTone);
           }
-        } catch (_) {}
-      }
-
-      /* ── STAGE 3C STEP 6: AI-LIMIT MODE ─────────────────────────
-         Workers AI daily allocation exhausted this session.
-         E1: for general conversation, produce a warm local fallback.
-      ──────────────────────────────────────────────────────────── */
-      if (_aiLimitMode) {
-        _updateSessionCtx(resolvedMsg, intent, localResult);
-        if (intent === 'GENERAL_CONVERSATION') {
-          /* Provide a warm conversational fallback locally */
+          if (!casualReply) {
+            /* Layer 3: ultimate local fallback — never reaches Workers AI */
+            casualReply = "I'm here. Tell me more.";
+          }
+          global.SNXShadowE1.updateConvContext(correctedMsg, convTone, convTopic);
+          _updateSessionCtx(resolvedMsg, intent, { id: null, page: null });
           callback({
-            text:       "I'm running in local mode right now, but I'm still here. If you have a Shadow Nexus question I can help — or just keep talking.",
+            text:       casualReply,
+            page:       null,
+            handled:    true,
+            fromServer: false,
+            confidence: 'LOCAL_CASUAL'
+          });
+          return;
+        } catch (_) {
+          /* If E1 throws for any reason, still give a local response */
+          callback({
+            text:       "I'm here. What's on your mind?",
             page:       null,
             handled:    true,
             fromServer: false,
@@ -1290,6 +1416,14 @@
           });
           return;
         }
+      }
+
+      /* ── STAGE 3C STEP 6: AI-LIMIT MODE ─────────────────────────
+         Workers AI daily allocation exhausted this session.
+         General conversation never reaches this point (handled above).
+      ──────────────────────────────────────────────────────────── */
+      if (_aiLimitMode) {
+        _updateSessionCtx(resolvedMsg, intent, localResult);
         return _fallbackToLocal(resolvedMsg, callback, true);
       }
 
@@ -1327,10 +1461,29 @@
         }
       }
 
-      /* Build conversation array (last 10 pairs max) */
+      /* Build conversation array (last 10 pairs max from in-session history) */
       var conversation = history.slice(-20).map(function (h) {
         return { role: h.role, text: h.text };
       });
+
+      /* E3: Prepend bounded persistent context so Workers AI has cross-session continuity.
+         Only the most recent AI_CONTEXT_WINDOW turns are sent — never the full history.
+         This context is already loaded (in _persistentContext) — no extra Firestore read. */
+      if (_persistentContext && _persistentContext.length > 0) {
+        /* Filter to turns not already in in-session history to avoid duplication */
+        var sessionTexts = {};
+        conversation.forEach(function (t) { sessionTexts[t.text] = true; });
+        var extraCtx = _persistentContext.filter(function (t) {
+          return !sessionTexts[t.text];
+        }).map(function (t) {
+          return { role: t.role === 'assistant' ? 'grim' : t.role, text: t.text };
+        });
+        if (extraCtx.length > 0) {
+          conversation = extraCtx.concat(conversation);
+          /* Re-apply window limit after prepend */
+          conversation = conversation.slice(-20);
+        }
+      }
 
       /* Get Firebase ID token (may be null for guests) */
       _getIdToken(function (idToken) {
@@ -1648,7 +1801,7 @@
     if (sendBtn)   sendBtn.disabled = true;
 
     SNXShadowAIProvider.ask(
-      { message: text, context: _buildContext(), history: _history.slice() },
+      { message: text, context: _buildContext(text), history: _history.slice() },
       function (result) {
         /* Guard: if panel was destroyed or a newer request came in, discard */
         if (seq !== _reqSeq && seq < _reqSeq - 1) {
@@ -1669,6 +1822,17 @@
 
         _addToHistory('grim', replyText);
         var wrapper = _appendMessage('grim', replyText);
+
+        /* Adaptive Learning: process this turn after reply is composed (fire-and-forget) */
+        if (global.SNXShadowAdaptive &&
+            typeof global.SNXShadowAdaptive.processTurn === 'function') {
+          try {
+            var convId = (global.SNXShadowConvHistory &&
+                          typeof global.SNXShadowConvHistory.getCurrentConvId === 'function')
+              ? global.SNXShadowConvHistory.getCurrentConvId() : null;
+            global.SNXShadowAdaptive.processTurn(text, convId);
+          } catch (_) { /* never block the conversation on adaptive errors */ }
+        }
 
         /* Stage 4A: optional spoken response — after text is displayed */
         if (global.SNXShadowVoice && typeof global.SNXShadowVoice.speak === 'function') {
@@ -1816,6 +1980,266 @@
         global.SNXShadowVoice.injectControls();
       } catch (_) { /* voice errors never crash text assistant */ }
     }
+
+    /* E3: inject conversation history controls into the status bar */
+    _injectConvHistoryControls(statusBar);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     E3: CONVERSATION HISTORY CONTROLS
+     Injected into the existing status bar.
+     Adds: New Conversation button + settings gear (History ON/OFF, View/Clear).
+     No new navigation page — all controls inline in the panel.
+  ───────────────────────────────────────────────────────────────*/
+  function _injectConvHistoryControls(statusBar) {
+    if (!statusBar) return;
+    /* Guard — only inject once */
+    if (statusBar._snxConvCtrlsInjected) return;
+    statusBar._snxConvCtrlsInjected = true;
+
+    var CH = global.SNXShadowConvHistory;
+
+    /* ── New Conversation button ───────────────────────────────── */
+    var newConvBtn = document.createElement('button');
+    newConvBtn.id = 'snx-ai-new-conv';
+    newConvBtn.className = 'snx-ai-conv-ctrl snx-ai-new-conv-btn';
+    newConvBtn.setAttribute('aria-label', 'Start new conversation');
+    newConvBtn.setAttribute('title', 'New Conversation');
+    newConvBtn.textContent = '✦ New';
+    newConvBtn.addEventListener('click', function () {
+      if (CH && typeof CH.newConversation === 'function') {
+        try { CH.newConversation(); } catch (_) {}
+      }
+      /* Clear in-session history and DOM without destroying the panel */
+      _history = [];
+      _persistentContext = [];
+      _convHistoryLoaded = false;
+      _greeted = false;
+      var convArea = _getConvArea();
+      if (convArea) convArea.textContent = '';
+      _greet();
+    });
+
+    /* ── Settings menu toggle (gear icon) ─────────────────────── */
+    var settingsBtn = document.createElement('button');
+    settingsBtn.id = 'snx-ai-conv-settings-btn';
+    settingsBtn.className = 'snx-ai-conv-ctrl snx-ai-settings-btn';
+    settingsBtn.setAttribute('aria-label', 'Conversation history settings');
+    settingsBtn.setAttribute('title', 'Conversation History Settings');
+    settingsBtn.textContent = '⚙';
+
+    /* Settings dropdown panel */
+    var settingsPanel = document.createElement('div');
+    settingsPanel.id = 'snx-ai-conv-settings';
+    settingsPanel.className = 'snx-ai-conv-settings-panel';
+    settingsPanel.style.display = 'none';
+
+    /* ── History ON/OFF toggle row ─────────────────────────────── */
+    var toggleRow = document.createElement('div');
+    toggleRow.className = 'snx-ai-conv-settings-row';
+
+    var toggleLabel = document.createElement('span');
+    toggleLabel.textContent = 'Conversation History';
+
+    var toggleBtn = document.createElement('button');
+    toggleBtn.id = 'snx-ai-conv-toggle';
+    toggleBtn.className = 'snx-ai-conv-toggle';
+    var isOn = CH ? CH.isEnabled() : true;
+    toggleBtn.textContent = isOn ? 'ON' : 'OFF';
+    toggleBtn.setAttribute('aria-label', 'Toggle conversation history');
+    toggleBtn.setAttribute('aria-pressed', String(isOn));
+    toggleBtn.classList.add(isOn ? 'snx-ai-conv-toggle--on' : 'snx-ai-conv-toggle--off');
+    toggleBtn.addEventListener('click', function () {
+      if (!CH) return;
+      var nowOn = !CH.isEnabled();
+      CH.setEnabled(nowOn);
+      toggleBtn.textContent = nowOn ? 'ON' : 'OFF';
+      toggleBtn.setAttribute('aria-pressed', String(nowOn));
+      toggleBtn.classList.toggle('snx-ai-conv-toggle--on', nowOn);
+      toggleBtn.classList.toggle('snx-ai-conv-toggle--off', !nowOn);
+    });
+
+    toggleRow.appendChild(toggleLabel);
+    toggleRow.appendChild(toggleBtn);
+
+    /* ── Clear Conversation History row ───────────────────────── */
+    var clearRow = document.createElement('div');
+    clearRow.className = 'snx-ai-conv-settings-row';
+
+    var clearBtn = document.createElement('button');
+    clearBtn.id = 'snx-ai-conv-clear';
+    clearBtn.className = 'snx-ai-conv-clear-btn';
+    clearBtn.textContent = 'Clear Conversation History';
+    clearBtn.setAttribute('aria-label', 'Clear conversation history');
+    clearBtn.addEventListener('click', function () {
+      /* Require a second click to confirm — replaces button text */
+      if (clearBtn._confirmPending) {
+        clearBtn.textContent = 'Clearing…';
+        clearBtn.disabled = true;
+        if (CH && typeof CH.clearHistory === 'function') {
+          CH.clearHistory(function (result) {
+            _persistentContext = [];
+            _convHistoryLoaded = false;
+            _history = [];
+            _greeted = false;
+            var convArea = _getConvArea();
+            if (convArea) convArea.textContent = '';
+            clearBtn.textContent = result.success ? 'Cleared.' : 'Error — try again';
+            clearBtn.disabled = false;
+            clearBtn._confirmPending = false;
+            setTimeout(function () {
+              clearBtn.textContent = 'Clear Conversation History';
+              settingsPanel.style.display = 'none';
+              _greet();
+            }, 1800);
+          });
+        }
+      } else {
+        clearBtn._confirmPending = true;
+        clearBtn.textContent = 'Tap again to confirm';
+        setTimeout(function () {
+          if (clearBtn._confirmPending) {
+            clearBtn._confirmPending = false;
+            clearBtn.textContent = 'Clear Conversation History';
+          }
+        }, 3500);
+      }
+    });
+
+    clearRow.appendChild(clearBtn);
+
+    /* ── Adaptive Learning section ─────────────────────────────── */
+    var AL = global.SNXShadowAdaptive;
+
+    var adaptDivider = document.createElement('div');
+    adaptDivider.className = 'snx-ai-conv-settings-row snx-ai-settings-divider';
+    adaptDivider.style.cssText = 'border-top:1px solid rgba(255,255,255,0.08);margin:4px 0;';
+
+    /* Adaptive Learning ON/OFF toggle */
+    var adaptToggleRow = document.createElement('div');
+    adaptToggleRow.className = 'snx-ai-conv-settings-row';
+
+    var adaptToggleLabel = document.createElement('span');
+    adaptToggleLabel.textContent = 'Adaptive Learning';
+
+    var adaptToggleBtn = document.createElement('button');
+    adaptToggleBtn.id = 'snx-ai-adapt-toggle';
+    adaptToggleBtn.className = 'snx-ai-conv-toggle';
+    var adaptOn = AL ? AL.isEnabled() : true;
+    adaptToggleBtn.textContent = adaptOn ? 'ON' : 'OFF';
+    adaptToggleBtn.setAttribute('aria-label', 'Toggle adaptive learning');
+    adaptToggleBtn.setAttribute('aria-pressed', String(adaptOn));
+    adaptToggleBtn.classList.add(adaptOn ? 'snx-ai-conv-toggle--on' : 'snx-ai-conv-toggle--off');
+    adaptToggleBtn.addEventListener('click', function () {
+      if (!AL) return;
+      var nowOn = !AL.isEnabled();
+      AL.setEnabled(nowOn);
+      adaptToggleBtn.textContent = nowOn ? 'ON' : 'OFF';
+      adaptToggleBtn.setAttribute('aria-pressed', String(nowOn));
+      adaptToggleBtn.classList.toggle('snx-ai-conv-toggle--on', nowOn);
+      adaptToggleBtn.classList.toggle('snx-ai-conv-toggle--off', !nowOn);
+    });
+
+    adaptToggleRow.appendChild(adaptToggleLabel);
+    adaptToggleRow.appendChild(adaptToggleBtn);
+
+    /* What Shadow Reaper Learned button */
+    var viewLearnedRow = document.createElement('div');
+    viewLearnedRow.className = 'snx-ai-conv-settings-row';
+
+    var viewLearnedBtn = document.createElement('button');
+    viewLearnedBtn.id = 'snx-ai-adapt-view';
+    viewLearnedBtn.className = 'snx-ai-conv-clear-btn';
+    viewLearnedBtn.textContent = 'What Shadow Reaper Learned';
+    viewLearnedBtn.setAttribute('aria-label', 'View what Shadow Reaper has learned');
+    viewLearnedBtn.addEventListener('click', function () {
+      settingsPanel.style.display = 'none';
+      if (!AL) return;
+      var items = AL.listAll();
+      var convArea = _getConvArea();
+      if (!convArea) return;
+      if (!items || !items.length) {
+        _appendMessage('grim', "I haven't built up any learned context yet — we need more conversations first.");
+      } else {
+        var lines = ["Here is what I've learned from our conversations:"];
+        items.forEach(function (item) {
+          lines.push('  \u2022 [' + item.category + '] ' + item.value + ' (' + item.confidence + ')');
+        });
+        _appendMessage('grim', lines.join('\n'));
+      }
+    });
+
+    viewLearnedRow.appendChild(viewLearnedBtn);
+
+    /* Clear Learned Data button */
+    var clearLearnedRow = document.createElement('div');
+    clearLearnedRow.className = 'snx-ai-conv-settings-row';
+
+    var clearLearnedBtn = document.createElement('button');
+    clearLearnedBtn.id = 'snx-ai-adapt-clear';
+    clearLearnedBtn.className = 'snx-ai-conv-clear-btn';
+    clearLearnedBtn.textContent = 'Clear Learned Data';
+    clearLearnedBtn.setAttribute('aria-label', 'Clear all adaptive learned data');
+    clearLearnedBtn.addEventListener('click', function () {
+      if (clearLearnedBtn._confirmPending) {
+        clearLearnedBtn.textContent = 'Clearing\u2026';
+        clearLearnedBtn.disabled = true;
+        if (AL && typeof AL.clearAll === 'function') {
+          AL.clearAll(function (result) {
+            clearLearnedBtn.textContent = result.success ? 'Cleared.' : 'Error \u2014 try again';
+            clearLearnedBtn.disabled = false;
+            clearLearnedBtn._confirmPending = false;
+            setTimeout(function () {
+              clearLearnedBtn.textContent = 'Clear Learned Data';
+              settingsPanel.style.display = 'none';
+            }, 1800);
+          });
+        }
+      } else {
+        clearLearnedBtn._confirmPending = true;
+        clearLearnedBtn.textContent = 'Tap again to confirm';
+        setTimeout(function () {
+          if (clearLearnedBtn._confirmPending) {
+            clearLearnedBtn._confirmPending = false;
+            clearLearnedBtn.textContent = 'Clear Learned Data';
+          }
+        }, 3500);
+      }
+    });
+
+    clearLearnedRow.appendChild(clearLearnedBtn);
+
+    settingsPanel.appendChild(toggleRow);
+    settingsPanel.appendChild(clearRow);
+    settingsPanel.appendChild(adaptDivider);
+    settingsPanel.appendChild(adaptToggleRow);
+    settingsPanel.appendChild(viewLearnedRow);
+    settingsPanel.appendChild(clearLearnedRow);
+
+    /* ── Wire settings toggle ─────────────────────────────────── */
+    settingsBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var showing = settingsPanel.style.display !== 'none';
+      settingsPanel.style.display = showing ? 'none' : 'block';
+    });
+
+    /* ── Close settings on outside click ─────────────────────── */
+    document.addEventListener('click', function () {
+      if (settingsPanel) settingsPanel.style.display = 'none';
+    });
+
+    /* Build the controls wrapper — left-aligned in statusbar */
+    var ctrlsWrapper = document.createElement('div');
+    ctrlsWrapper.id = 'snx-ai-conv-ctrls';
+    ctrlsWrapper.className = 'snx-ai-conv-ctrls';
+    ctrlsWrapper.style.position = 'relative';
+
+    ctrlsWrapper.appendChild(newConvBtn);
+    ctrlsWrapper.appendChild(settingsBtn);
+    ctrlsWrapper.appendChild(settingsPanel);
+
+    /* Insert controls at the START of the status bar (before status pill) */
+    statusBar.insertBefore(ctrlsWrapper, statusBar.firstChild);
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -1832,7 +2256,9 @@
       "Guardian of Shadow Nexus at your service. Looking for a feature or carrying something else — I am here for both."
     ];
     var text = greetings[Math.floor(Math.random() * greetings.length)];
-    _addToHistory('grim', text);
+    /* Greeting is displayed but NOT persisted to conversation history (not a real turn) */
+    _history.push({ role: 'grim', text: text });
+    while (_history.length > MAX_HISTORY * 2) { _history.splice(0, 2); }
     setTimeout(function () { _appendMessage('grim', text); }, 500);
     _setStatus(STATUS.READY);
   }
@@ -1842,6 +2268,33 @@
   ───────────────────────────────────────────────────────────────*/
   function _open() {
     _injectUI();
+
+    /* E3: Initialize conversation history module on first open.
+       Load bounded persistent context for continuity — lazy, only on open.
+       Does NOT load during general SNS startup. */
+    if (global.SNXShadowConvHistory && typeof global.SNXShadowConvHistory.init === 'function') {
+      try { global.SNXShadowConvHistory.init(); } catch (_) {}
+    }
+    if (!_convHistoryLoaded &&
+        global.SNXShadowConvHistory &&
+        typeof global.SNXShadowConvHistory.loadRecentContext === 'function') {
+      _convHistoryLoaded = true; /* prevent double-load */
+      global.SNXShadowConvHistory.loadRecentContext(function (result) {
+        _persistentContext = (result && result.turns) ? result.turns : [];
+      });
+    }
+
+    /* Adaptive Learning: initialize and ensure DB cache is loaded (lazy).
+       Only happens when Shadow Reaper opens — NOT during general SNS startup. */
+    if (global.SNXShadowAdaptive && typeof global.SNXShadowAdaptive.init === 'function') {
+      try {
+        global.SNXShadowAdaptive.init();
+        if (typeof global.SNXShadowAdaptive.ensureLoaded === 'function') {
+          global.SNXShadowAdaptive.ensureLoaded();
+        }
+      } catch (_) {}
+    }
+
     _greet();
     _open_flag();
     /* Focus input */
@@ -1910,6 +2363,18 @@
     /* E2: reset memory session state — persistent data NOT affected */
     if (global.SNXShadowMemory && typeof global.SNXShadowMemory.destroy === 'function') {
       try { global.SNXShadowMemory.destroy(); } catch (_) {}
+    }
+
+    /* E3: reset conversation history session state — persistent data NOT affected */
+    _convHistoryLoaded = false;
+    _persistentContext = [];
+    if (global.SNXShadowConvHistory && typeof global.SNXShadowConvHistory.destroy === 'function') {
+      try { global.SNXShadowConvHistory.destroy(); } catch (_) {}
+    }
+
+    /* Adaptive Learning: reset session state — persistent learned data NOT affected */
+    if (global.SNXShadowAdaptive && typeof global.SNXShadowAdaptive.destroy === 'function') {
+      try { global.SNXShadowAdaptive.destroy(); } catch (_) {}
     }
 
     /* Re-show old GP elements */

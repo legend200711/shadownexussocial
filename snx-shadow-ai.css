@@ -325,3 +325,155 @@
     font-size: 16px; /* prevent iOS zoom-on-focus */
   }
 }
+
+/* ════════════════════════════════════════════════════════════
+   E3: CONVERSATION HISTORY CONTROLS
+   New Conversation button + settings gear + settings dropdown.
+   Added: SNS-2026-SHADOW-CONVERSATION-MEMORY-RC1
+════════════════════════════════════════════════════════════ */
+
+/* ── Controls wrapper (left side of status bar) ─────────── */
+#snx-ai-conv-ctrls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+/* ── Shared button base ──────────────────────────────────── */
+.snx-ai-conv-ctrl {
+  background: transparent;
+  border: 1px solid rgba(159,122,234,0.22);
+  border-radius: 12px;
+  color: rgba(180,150,230,0.72);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: background 0.13s, border-color 0.13s, color 0.13s;
+  touch-action: manipulation;
+  white-space: nowrap;
+}
+
+.snx-ai-conv-ctrl:hover,
+.snx-ai-conv-ctrl:focus-visible {
+  background: rgba(90,50,160,0.2);
+  border-color: rgba(159,122,234,0.5);
+  color: rgba(210,180,255,0.95);
+  outline: none;
+}
+
+/* ── New Conversation button ─────────────────────────────── */
+#snx-ai-new-conv {
+  color: rgba(0,207,216,0.75);
+  border-color: rgba(0,207,216,0.28);
+}
+
+#snx-ai-new-conv:hover,
+#snx-ai-new-conv:focus-visible {
+  background: rgba(0,80,90,0.22);
+  border-color: rgba(0,207,216,0.55);
+  color: rgba(0,207,216,0.95);
+}
+
+/* ── Settings gear button ────────────────────────────────── */
+#snx-ai-conv-settings-btn {
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── Settings dropdown panel ─────────────────────────────── */
+#snx-ai-conv-settings {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 9999;
+  background: rgba(10,6,20,0.97);
+  border: 1px solid rgba(159,122,234,0.32);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-width: 210px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.snx-ai-conv-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(159,122,234,0.12);
+}
+
+.snx-ai-conv-settings-row:last-child {
+  border-bottom: none;
+  padding-top: 7px;
+}
+
+.snx-ai-conv-settings-row span {
+  font-size: 11px;
+  color: rgba(200,170,240,0.85);
+  flex: 1 1 auto;
+}
+
+/* ── ON/OFF toggle ───────────────────────────────────────── */
+.snx-ai-conv-toggle {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.13s, border-color 0.13s;
+}
+
+.snx-ai-conv-toggle--on {
+  background: rgba(40,100,70,0.28);
+  border-color: rgba(80,200,120,0.4);
+  color: rgba(100,220,150,0.92);
+}
+
+.snx-ai-conv-toggle--off {
+  background: rgba(60,20,20,0.28);
+  border-color: rgba(180,60,60,0.3);
+  color: rgba(200,100,100,0.82);
+}
+
+/* ── Clear History button ────────────────────────────────── */
+.snx-ai-conv-clear-btn {
+  font-size: 10px;
+  color: rgba(220,120,100,0.78);
+  background: transparent;
+  border: 1px solid rgba(220,120,100,0.25);
+  border-radius: 8px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  width: 100%;
+  text-align: center;
+  touch-action: manipulation;
+}
+
+.snx-ai-conv-clear-btn:hover,
+.snx-ai-conv-clear-btn:focus-visible {
+  background: rgba(100,20,20,0.28);
+  border-color: rgba(220,120,100,0.55);
+  color: rgba(255,150,130,0.95);
+  outline: none;
+}
+
+/* ── LITE / MINIMAL: remove shadows and complex effects ─── */
+.snx-quality-lite #snx-ai-conv-settings,
+.snx-quality-minimal #snx-ai-conv-settings {
+  box-shadow: none !important;
+}

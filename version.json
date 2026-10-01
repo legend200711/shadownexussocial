@@ -1,5 +1,5 @@
 {
-  "buildId": "SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001",
+  "buildId": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
   "swVersion": "v100",
   "deployedAt": "2026-10-04T00:00:00Z",
   "project": "horr-a08f4",
@@ -31,5 +31,8 @@
   "shadowAIE2Version": "SNS-2026-SHADOW-MEMORY-E2-RC1",
   "shadowAIE3Version": "SNS-2026-SHADOW-EMOTION-MEMORY-E3-RC1",
   "shadowAIEmotionMemoryVersion": "SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001",
-  "note": "SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001: Shadow Reaper Emotional Conversation + Personal Memory Final Production Release. BUILD BEFORE: SNS-2026-SHADOW-REAPER-FINAL-001. E3-RC1 promoted to FINAL after 453 PASS / 1 WARN / 0 FAIL automated validation across all suites (E1+E2+E3) plus full regression (test-shadow-5-rc1, knowledge, 3c, 3d, 4a, 4b) and Creator physical device test PASS. LOCKED: E1 Everyday Conversation + Emotional Intelligence, E2 Optional Personal Memory + Memory Retrieval/Forget/Controls/Privacy, E3 Integration + Security + Production Validation. SW UNCHANGED: v100. No changes to Live, WebRTC, Cohost, Radio, TV, DJ, R2, Auth. SHADOW REAPER CORE + E1 + E2 + E3: LOCKED. ROLLBACK CHECKPOINTS PRESERVED: SNS-2026-SHADOW-REAPER-FINAL-001, SNS-2026-SHADOW-EMOTION-E1-RC1, SNS-2026-SHADOW-MEMORY-E2-RC1, SNS-2026-SHADOW-EMOTION-MEMORY-E3-RC1."
+  "shadowAIConvHistoryVersion": "SNS-2026-SHADOW-LOCAL-CONVERSATION-HISTORY-RC1",
+  "shadowAIAdaptiveLearningVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1",
+  "shadowAIAdaptiveLearningFinalVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
+  "note": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001: Shadow Reaper Adaptive Learning + Persistent Conversation History Final Production Release. BUILD BEFORE: SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001. RC builds promoted to FINAL after full automated validation: test-shadow-local-conv-rc1 (87 PASS / 0 WARN / 0 FAIL), test-shadow-adaptive-rc1 (85 PASS / 0 WARN / 0 FAIL), test-shadow-conv-history (94 PASS / 0 WARN / 0 FAIL), test-shadow-e3-final (179 PASS / 1 WARN / 0 FAIL — E3-INT-05 accepted), test-shadow-e2-memory (120 PASS), test-shadow-e1-conversation (153 PASS), test-shadow-5-rc1 (102 PASS), test-shadow-knowledge (121 PASS), test-shadow-3c (30 PASS), test-shadow-3d (124 PASS), test-shadow-4a-voice (78 PASS), test-shadow-4b-character (57 PASS). TOTAL: 1050 PASS / 1 WARN / 0 FAIL. LOCKED: Conversation History (E3), E2 Personal Memory, Adaptive Learning — THREE SEPARATE DATA SYSTEMS. SW UNCHANGED: v100 (snx-shadow-conv-history.js + snx-shadow-adaptive.js served network-first via feature loader). No changes to Live, WebRTC, Cohost, Radio, TV, DJ, R2, Auth. ROLLBACK CHECKPOINTS PRESERVED: SNS-2026-SHADOW-REAPER-EMOTION-MEMORY-FINAL-001, SNS-2026-SHADOW-LOCAL-CONVERSATION-HISTORY-RC1, SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1."
 }

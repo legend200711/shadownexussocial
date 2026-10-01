@@ -179,6 +179,44 @@ service cloud.firestore {
       match /shadowReaperMemories/{memoryId} {
         allow read, write: if isOwner(uid);
       }
+
+      // ── Shadow Reaper Conversation History (E3) ───────────────────────────
+      //
+      //   /users/{uid}/shadowReaperConversations/{convId}
+      //     convId — auto-generated conversation thread identifier
+      //
+      //   /users/{uid}/shadowReaperConversations/{convId}/messages/{msgId}
+      //     role, text, ts, sessionId, convId, savedAt
+      //
+      // E3 conversation history — stored ONLY by the owning user.
+      // No cross-user access.
+      // Founder does NOT automatically access another user's conversations.
+      // Different UID: DENIED.
+      //
+      // READ / WRITE: owner only (request.auth.uid == uid).
+      match /shadowReaperConversations/{convId} {
+        allow read, write: if isOwner(uid);
+
+        match /messages/{msgId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      // ── Shadow Reaper Adaptive Learning Context ────────────────────────────
+      //
+      //   /users/{uid}/shadowReaperLearnedContext/{itemId}
+      //     category, key, value, confidence, count,
+      //     createdAt, updatedAt, lastUsedAt, sourceConvId, active
+      //
+      // Adaptive learned context — stored ONLY by the owning user.
+      // No cross-user access. Founder does NOT access another user's data.
+      // Guest: no write (client-side guard is the first barrier).
+      // Different UID: DENIED.
+      //
+      // READ / WRITE: owner only (request.auth.uid == uid).
+      match /shadowReaperLearnedContext/{itemId} {
+        allow read, write: if isOwner(uid);
+      }
     }
 
     // ── Messages (NEW — top-level per-conversation collection) ────────────────

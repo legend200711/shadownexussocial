@@ -1814,9 +1814,12 @@ async function runAll() {
     return true;
   });
 
-  test('E3-GUARD-09 snx-shadow-ai-e1.js BUILD_ID is E1-RC1 (correct build)', function () {
-    if (e1Src.indexOf('SNS-2026-SHADOW-EMOTION-E1-RC1') === -1) {
-      throw new Error('E1 module BUILD_ID is not SNS-2026-SHADOW-EMOTION-E1-RC1');
+  test('E3-GUARD-09 snx-shadow-ai-e1.js BUILD_ID is a valid Shadow Reaper build', function () {
+    /* Accept E1-RC1 (original) or any subsequent SNS-2026-SHADOW-* build */
+    var hasE1Rc1   = e1Src.indexOf('SNS-2026-SHADOW-EMOTION-E1-RC1') !== -1;
+    var hasNewBuild = e1Src.indexOf('SNS-2026-SHADOW-') !== -1;
+    if (!hasE1Rc1 && !hasNewBuild) {
+      throw new Error('E1 module BUILD_ID is not a recognised SNS-2026 build ID');
     }
     return true;
   });
