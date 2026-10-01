@@ -124,6 +124,13 @@
         ? _understanding.understand(userMessage, _sessionCtx)
         : _fallbackUnderstand(userMessage);
 
+      // ── DIAGNOSTIC: log pipeline entry ──
+      console.log('[SRConversation] ACTIVE BRAIN: ShadowReaper unified core');
+      console.log('[SRConversation] Intent: ' + understanding.intent +
+        ' | Feature: ' + (understanding.feature || 'none') +
+        ' | Topic: ' + (understanding.topic || 'none') +
+        ' | GeneralChat: ' + understanding.isGeneralChat);
+
       // ── Step 2: Update session context from understanding ──
       if (understanding.feature) _sessionCtx.lastFeature = understanding.feature;
       if (understanding.topic)   _sessionCtx.lastTopic   = understanding.topic;
@@ -205,6 +212,7 @@
             result = { text: _fallbackResponse(fullContext), signal: null, navigateTo: null };
           }
 
+          console.log('[SRConversation] Response Engine → routing to _finalize()');
           _finalize(userMessage, result.text, result.signal, result.navigateTo, resolve);
         });
       });
@@ -217,6 +225,7 @@
   function _finalize(userMessage, responseText, signal, navigateTo, resolve) {
     var finalText = responseText || "I'm not sure how to respond to that. Could you try rephrasing?";
     var finalSignal = signal || null;
+    console.log('[SRConversation] _finalize() → History save | Adaptive processing | WORKERS AI CALLS: 0');
 
     // Save session turns
     _sessionTurns.push({ role: 'user',      text: userMessage });
@@ -254,8 +263,10 @@
     var pending = 3;
     function done() { if (--pending === 0) callback({ historyTurns: historyTurns, memories: memories, learnedItems: learnedItems }); }
 
-    // Load conversation history
-    if (_convHistory && typeof _convHistory.loadRecentContext === 'function' && understanding.isContinuity) {
+    // Load conversation history — on continuity intent OR when history query detected
+    var needsHistory = understanding.isContinuity ||
+      /what (were we|did we|have we|project|were you) (talk|say|discuss|work|do|tell)/i.test(understanding.corrected || '');
+    if (_convHistory && typeof _convHistory.loadRecentContext === 'function' && needsHistory) {
       _convHistory.loadRecentContext(function (turns) {
         historyTurns = turns || [];
         done();

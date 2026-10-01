@@ -155,14 +155,14 @@
      INTENT PATTERNS
   ───────────────────────────────────────────────────────────────*/
   var _GREETING_PATTERNS = [
-    /^(hi|hello|hey|howdy|sup|what'?s up|good morning|good afternoon|good evening|greetings|yo|hiya|hi there|hey there|hello there)\b/i,
-    /^(how are you|how'?re you|how do you do|how'?s it going|what'?s good)\b/i
+    /^(hi|hello|hey|howdy|sup|good morning|good afternoon|good evening|greetings|yo|hiya|hi there|hey there|hello there)\b/i
   ];
 
   var _CONTINUITY_PATTERNS = [
     /\b(what were we|where were we|continue where|pick up where|last (time|conversation|session|chat)|what did (i|we) (say|talk|discuss)|what were (we|you) talking|restore|reload|go back to)\b/i,
     /\b(what did i tell you|what do you remember (about me|from last)|from (yesterday|last week|before))\b/i,
-    /\b(what project were we|what were we working on)\b/i
+    /\b(what project were we|what were we working on|what project did i|which project did i|what have we been)\b/i,
+    /\b(what (was|is) (the )?project|what project (did|have|were|are) (i|we)|what were we (doing|building|making|creating))\b/i
   ];
 
   var _MEMORY_PATTERNS = [
@@ -207,7 +207,17 @@
     /\b(i (feel|felt|am feeling|was feeling|think|thought|believe|wonder|love|hate|miss|enjoy|want|need|like|dislike)|my (mood|day|life|story|opinion|view|feeling|experience))\b/i,
     /\b(tell me (a joke|something funny|a story|about yourself)|are you (sentient|conscious|alive|real|an ai)|what('?s| is) your (name|favorite|opinion|view|thought))\b/i,
     /\b(let'?s (chat|talk|discuss)|i want to (chat|talk|discuss|ask you|say|vent|share))\b/i,
-    /\b(just (talking|chatting|thinking|wondering|curious)|random(ly)?)\b/i
+    /\b(just (talking|chatting|thinking|wondering|curious)|random(ly)?)\b/i,
+    // Conversational questions about feelings, day, opinions — NOT SNS questions
+    /\b(how (was|is|has been|'s) your (day|week|morning|evening|night))\b/i,
+    /\b(how are you|how'?re you|how do you do|how'?re you doing|how do you feel|how'?s it going|what'?s (good|up|new))\b/i,
+    /\b(do you (like|enjoy|love|hate|think about|have opinions on))\b/i,
+    /\b(can we (talk|chat|hang|speak|have a conversation))\b/i,
+    /\b(tell me something (funny|interesting|random|cool)|say something (funny|interesting))\b/i,
+    /\b(what should we (talk about|discuss|chat about))\b/i,
+    /\b(i'?m (sad|happy|tired|bored|excited|angry|upset|stressed|anxious|lonely|down|depressed|good|great|fine|okay|ok))\b/i,
+    /\b(i (feel) (sad|down|depressed|upset|hurt|lonely|anxious|stressed|tired|exhausted|happy|excited|good|great))\b/i,
+    /\bi am (sad|down|depressed|upset|hurt|lonely|anxious|stressed|tired|exhausted|happy|excited|good|great|bored|angry)\b/i
   ];
 
   /* ─────────────────────────────────────────────────────────────

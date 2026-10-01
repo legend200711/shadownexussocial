@@ -271,6 +271,7 @@
     AI.ask = function (message) {
       if (_state === 'fallback') {
         /* Bridge broken — delegate to original */
+        _warn('ask() in fallback state — routing to original SNXShadowAI. OLD PROVIDER: YES');
         return _originalAI.ask.call(this, message);
       }
 
@@ -279,6 +280,8 @@
 
       var text = message.trim();
       _busy = true;
+
+      _log('ask() intercepted → routing to ShadowReaper.ask() | OLD PROVIDER: NO');
 
       try {
         /* Show user bubble immediately */

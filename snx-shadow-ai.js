@@ -1877,6 +1877,82 @@
     if (inp)     { inp.value = ''; inp.disabled = true; }
     if (sendBtn)   sendBtn.disabled = true;
 
+    /* ──────────────────────────────────────────────────────────────────
+       UNIFIED BRAIN ROUTING
+       When the SRBridge is active, route ENTIRELY through window.ShadowReaper.
+       ONE MESSAGE → ONE BRAIN → ONE RESPONSE.
+       The old SNXShadowAIProvider is used ONLY as an emergency fallback when
+       the unified Core has not initialized.
+    ─────────────────────────────────────────────────────────────────── */
+    var usedUnifiedBrain = false;
+
+    if (global.SRBridge && global.SRBridge.isActive() &&
+        global.ShadowReaper && typeof global.ShadowReaper.ask === 'function') {
+
+      usedUnifiedBrain = true;
+      console.log('[SNXShadowAI._send] ACTIVE BRAIN: ShadowReaper unified core | OLD PROVIDER: NO');
+
+      global.ShadowReaper.ask(text).then(function (result) {
+        /* Guard: discard stale responses */
+        if (seq !== _reqSeq && seq < _reqSeq - 1) {
+          _showTyping(false);
+          _busy = false;
+          if (inp)     inp.disabled = false;
+          if (sendBtn) sendBtn.disabled = false;
+          return;
+        }
+
+        _showTyping(false);
+        _setStatus(navigator.onLine ? STATUS.READY : STATUS.OFFLINE);
+
+        var replyText = (result && result.text) ? result.text
+          : "I don't have enough information about that yet.";
+
+        _addToHistory('grim', replyText);
+        var wrapper = _appendMessage('grim', replyText);
+
+        /* Stage 4A: optional spoken response */
+        if (global.SNXShadowVoice && typeof global.SNXShadowVoice.speak === 'function') {
+          try { global.SNXShadowVoice.speak(replyText); } catch (_) {}
+        }
+
+        /* Stage 4B: notify character controller — answer received */
+        for (var _ai3 = 0; _ai3 < _answerListeners.length; _ai3++) {
+          try { _answerListeners[_ai3](); } catch (_) {}
+        }
+
+        /* Navigation button */
+        if (result && result.signal === 'NAVIGATE' && result.navigateTo) {
+          var delay = replyText.length * 13 + 400;
+          var dest  = result.navigateTo;
+          setTimeout(function () {
+            _appendNavBtn(wrapper, dest);
+          }, delay);
+        }
+
+        _busy = false;
+        if (inp)     { inp.disabled = false; setTimeout(function () { if (global.innerWidth > 768) inp.focus(); }, 50); }
+        if (sendBtn) sendBtn.disabled = false;
+
+      }).catch(function (err) {
+        console.warn('[SNXShadowAI._send] ShadowReaper.ask() failed: ' + (err && err.message));
+        _showTyping(false);
+        _setStatus(navigator.onLine ? STATUS.READY : STATUS.OFFLINE);
+        _busy = false;
+        _appendMessage('grim', "Shadow Reaper ran into a problem. Please try again.");
+        if (inp)     inp.disabled = false;
+        if (sendBtn) sendBtn.disabled = false;
+      });
+
+      return; /* STOP — do not fall through to old provider */
+    }
+
+    /* ──────────────────────────────────────────────────────────────────
+       EMERGENCY FALLBACK — only reached when unified Core is NOT active.
+       Normal operation should NEVER reach this path once SRBridge is live.
+    ─────────────────────────────────────────────────────────────────── */
+    console.warn('[SNXShadowAI._send] ACTIVE BRAIN: SNXShadowAIProvider (fallback) | Unified Core not active');
+
     SNXShadowAIProvider.ask(
       { message: text, context: _buildContext(text), history: _history.slice() },
       function (result) {
