@@ -67,7 +67,7 @@
      CONSTANTS
   ───────────────────────────────────────────────────────────────*/
   var MAX_HISTORY = 20; // max conversation turns (user+grim pairs) — bounded for server
-  var BUILD_ID    = 'SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001';
+  var BUILD_ID    = 'SNS-2026-SHADOW-CONV-HISTORY-FIX-002';
   var E1_BUILD_ID = 'SNS-2026-SHADOW-EMOTION-E1-RC1';
   var E2_BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC2';
   var E3_BUILD_ID = 'SNS-2026-SHADOW-CONVERSATION-MEMORY-RC1';
@@ -255,6 +255,13 @@
     { intent: 'CREATOR',     pattern: /\b(who (is|was|created|built|made|founded|owns?)|chris|legend of shadows|the creator|the founder|stay legendary|why (he|chris)|his (music|story|sister|values|symbols))\b/i },
     { intent: 'STATUS',      pattern: /\b(what can you do|what do you know|can you help|what can i ask|what are you|who are you|your capabilities|what is shadow reaper)\b/i },
     { intent: 'FEATURE',     pattern: /\b(what is|how does|tell me about|explain)\s+(radio|live|tv|feed|inbox|notifications|search|friends|community|arcade|storm rooms|support rooms|profile|settings|uploads|pwa|dj|cohost|pwas|channel)\b/i },
+    /* Personal project / design statements — must appear BEFORE QUESTION so "is" in
+       "my project is called X" doesn't short-circuit to the wrong intent. */
+    { intent: 'GENERAL_CONVERSATION', pattern: /\b(?:my |the )?project (?:is called|is named|called|named)\b/i },
+    { intent: 'GENERAL_CONVERSATION', pattern: /\bi(?:'?m| am) (?:calling|naming) (?:it|the project)\b/i },
+    { intent: 'GENERAL_CONVERSATION', pattern: /\bi(?:'?m| am) working on (?:the |a )?(?:homepage|landing page|settings page|dashboard|about page|nav|header|footer|sidebar|design|layout|ui|frontend|backend|app|site|website|feature|module|component)\b/i },
+    { intent: 'GENERAL_CONVERSATION', pattern: /\bi want (?:it|the (?:homepage|page|design|background|theme|layout))\s+(?:to be\s+)?(?:dark|light|blue|minimal|clean|neon|cinematic|purple|gradient|animated)\b/i },
+    { intent: 'GENERAL_CONVERSATION', pattern: /\b(?:blue lightning|dark theme|dark background|dark mode|neon background|gradient background|animated background)\b/i },
     { intent: 'QUESTION',    pattern: /\b(what|where|when|who|why|which|does|is|are|can)\b/i },
     { intent: 'GENERAL_CONVERSATION', pattern: /^(hey|hi|hello|howdy|what.s up|sup|yo|good (morning|afternoon|evening|night)|morning|night|bye|goodbye|later|see ya|see you|talk later|take care)\s*[.!?]*$/i },
     { intent: 'GENERAL_CONVERSATION', pattern: /\b(talk to me|let.s talk|tell me something|i.m (bored|tired|sad|excited|frustrated)|my day|had a (rough|long|crazy|good|bad|great|weird|busy) day|i feel|feeling|lol|lmao|haha|thank you|thanks|ok|okay|cool|nice|help me think|help me brainstorm|working on (a )?song|i.ve got an idea)\b/i }
@@ -917,8 +924,19 @@
      Returns null if not signed in or token unavailable.
   ───────────────────────────────────────────────────────────────*/
   function _getIdToken(cb) {
+    /* Primary: modular Auth instance exposed by index.html */
     try {
-      var firebase = global.firebase || (global.firebase);
+      if (global._snxAuth && global._snxAuth.currentUser &&
+          typeof global._snxAuth.currentUser.getIdToken === 'function') {
+        global._snxAuth.currentUser.getIdToken(false)
+          .then(function (t) { cb(t); })
+          .catch(function () { cb(null); });
+        return;
+      }
+    } catch (_) {}
+    /* Fallback: legacy Firebase Compat SDK (not present in this project, kept for safety) */
+    try {
+      var firebase = global.firebase;
       if (firebase && firebase.auth && typeof firebase.auth === 'function') {
         var user = firebase.auth().currentUser;
         if (user && typeof user.getIdToken === 'function') {
@@ -1267,18 +1285,77 @@
         /* Build response from _persistentContext (loaded on open, bounded) */
         var _ctxTurns = _persistentContext;
         if (_ctxTurns && _ctxTurns.length > 0) {
-          var _lastUserTurn = null;
-          for (var _ci = _ctxTurns.length - 1; _ci >= 0; _ci--) {
+          /* Collect all user turns from restored context */
+          var _userTurns = [];
+          for (var _ci = 0; _ci < _ctxTurns.length; _ci++) {
             if (_ctxTurns[_ci].role === 'user') {
-              _lastUserTurn = _ctxTurns[_ci].text;
-              break;
+              _userTurns.push(_ctxTurns[_ci].text);
             }
           }
-          if (_lastUserTurn) {
-            var _contReply = 'When we last spoke, you were asking about: "' +
-              _lastUserTurn.substring(0, 200) + '".' +
-              (_ctxTurns.length > 2 ? ' We had ' + Math.floor(_ctxTurns.length / 2) + ' exchanges.' : '') +
-              ' Want to continue from there?';
+
+          if (_userTurns.length > 0) {
+            /* ── LOCAL CONTEXT SYNTHESIZER ──────────────────────────
+               Extract named values and topics from the restored turns.
+               No Workers AI. No eval. Deterministic local extraction.
+               Priority: named project/item > topic tag > raw last turn.
+            ────────────────────────────────────────────────────────── */
+            var _allUserText = _userTurns.join(' ');
+
+            /* Extract named project ("my project is called X", "called X", "named X",
+               "project called Blue Wolf", "it's called X", "I called it X") */
+            var _namedProject = null;
+            var _namedMatch = _allUserText.match(
+              /\b(?:(?:my |the )?project (?:is (?:called|named)|called|named)|(?:it|the project|called) (?:is called|is named|called)|i(?:'?m| am) calling it|i called it)\s+["']?([A-Za-z0-9][A-Za-z0-9 _\-]{1,50}?)["']?(?:\s|$|[.,!?])/i
+            );
+            if (_namedMatch) _namedProject = _namedMatch[1].trim();
+
+            /* Extract homepage / page-level mentions ("working on the homepage",
+               "the homepage", "the landing page", "the settings page") */
+            var _pageMatch = _allUserText.match(
+              /\b(?:working on|building|designing|making)\s+(?:the\s+)?([a-z]+(?:\s+page|page)?)\b/i
+            );
+            var _pageMention = _pageMatch ? _pageMatch[1].trim() : null;
+
+            /* Extract design/style mentions ("dark", "blue lightning", "minimal", etc.) */
+            var _designMentions = [];
+            var _designPat = /\b(?:(?:want|make|needs?)\s+(?:it\s+)?|it(?:'?s| is)\s+(?:going to be\s+)?|going with\s+|design(?:ing)?\s+(?:it\s+)?(?:to be\s+)?)([a-z][a-z\s]{2,30}?)(?:\s+(?:design|theme|style|background|color|colours?|look))?(?:\s*(?:and|with|,|\.))/gi;
+            var _dm;
+            while ((_dm = _designPat.exec(_allUserText)) !== null && _designMentions.length < 3) {
+              var _dv = _dm[1].trim();
+              if (_dv.length > 2 && _dv.length < 40) _designMentions.push(_dv);
+            }
+            /* Also pick up explicit "dark" / "blue lightning" style adjectives */
+            var _simpleDesign = _allUserText.match(/\b(dark(?: theme| background| mode)?|blue lightning|neon|minimal|clean|glassmorphism|cinematic|purple|gradient|animated)\b/gi);
+            if (_simpleDesign) {
+              _simpleDesign.forEach(function(d) {
+                if (_designMentions.indexOf(d.toLowerCase()) === -1) _designMentions.push(d.toLowerCase());
+              });
+            }
+
+            /* Build the continuity response — synthesized, not just a raw quote */
+            var _contParts = [];
+
+            if (_namedProject) {
+              _contParts.push('You were working on a project called **' + _namedProject + '**');
+            } else {
+              /* Fallback: quote the last user turn (capped to 200 chars) */
+              _contParts.push('You were telling me: "' + _userTurns[_userTurns.length - 1].substring(0, 200) + '"');
+            }
+
+            if (_pageMention && _namedProject) {
+              _contParts.push('specifically working on the ' + _pageMention);
+            }
+
+            if (_designMentions.length > 0) {
+              _contParts.push('with ' + _designMentions.slice(0, 3).join(', ') + ' design decisions');
+            }
+
+            if (_userTurns.length > 1) {
+              _contParts.push('We had ' + _userTurns.length + ' exchange' + (_userTurns.length > 1 ? 's' : '') + ' last time');
+            }
+
+            var _contReply = _contParts.join('. ') + '. Want to pick up from there?';
+
             callback({
               text:       _contReply,
               page:       null,
@@ -2289,7 +2366,9 @@
 
     /* E3: Initialize conversation history module on first open.
        Load bounded persistent context for continuity — lazy, only on open.
-       Does NOT load during general SNS startup. */
+       Does NOT load during general SNS startup.
+       loadRecentContext() internally defers via _snxOnAuthReady so there
+       is no race condition with Firebase Auth restoration. */
     if (global.SNXShadowConvHistory && typeof global.SNXShadowConvHistory.init === 'function') {
       try { global.SNXShadowConvHistory.init(); } catch (_) {}
     }
@@ -2297,8 +2376,10 @@
         global.SNXShadowConvHistory &&
         typeof global.SNXShadowConvHistory.loadRecentContext === 'function') {
       _convHistoryLoaded = true; /* prevent double-load */
+      console.log('[ShadowHistoryDebug] context load requested on panel open');
       global.SNXShadowConvHistory.loadRecentContext(function (result) {
         _persistentContext = (result && result.turns) ? result.turns : [];
+        console.log('[ShadowHistoryDebug] context injected: ' + (_persistentContext.length > 0) + ', turns: ' + _persistentContext.length);
       });
     }
 
@@ -2492,6 +2573,93 @@
         _answerListeners.push(fn);
       }
     }
+  };
+
+  /* ─────────────────────────────────────────────────────────────
+     INTEGRATION DIAGNOSTIC
+     window.SNXShadowIntegrationStatus()
+     Safe connection-status diagnostic — NO user data, NO tokens,
+     NO conversation text, NO memory contents, NO UID ever exposed.
+     Use for development troubleshooting only.
+  ───────────────────────────────────────────────────────────────*/
+  global.SNXShadowIntegrationStatus = function () {
+    var CH = global.SNXShadowConvHistory;
+    var AL = global.SNXShadowAdaptive;
+    var M  = global.SNXShadowMemory;
+
+    /* Existence checks — only boolean flags */
+    var aiExists        = !!(global.SNXShadowAI);
+    var knowledgeExists = !!(global.SNXShadowKnowledge);
+    var e1Exists        = !!(global.SNXShadowE1);
+    var memoryExists    = !!(M);
+    var historyExists   = !!(CH);
+    var adaptiveExists  = !!(AL);
+    var voiceExists     = !!(global.SNXShadowVoice);
+    var charExists      = !!(global.SNXShadowCharacter);
+
+    /* Initialization checks */
+    var historyInitialized  = historyExists ? CH.isEnabled !== undefined : false;
+    var adaptiveInitialized = adaptiveExists ? AL.isEnabled !== undefined : false;
+    var memoryInitialized   = memoryExists ? M.isEnabled !== undefined : false;
+
+    /* Connection to main AI checks — verify the expected API surface */
+    var historyConnectedToAI  = historyExists &&
+      typeof CH.saveTurn === 'function' &&
+      typeof CH.loadRecentContext === 'function' &&
+      typeof CH.detectContinuity === 'function';
+
+    var adaptiveConnectedToAI = adaptiveExists &&
+      typeof AL.processTurn === 'function' &&
+      typeof AL.retrieveRelevant === 'function' &&
+      typeof AL.ensureLoaded === 'function';
+
+    var memoryConnectedToAI   = memoryExists &&
+      typeof M.save === 'function' &&
+      typeof M.recall === 'function' &&
+      typeof M.detectIntent === 'function';
+
+    /* Firebase bridge check — no auth state, no UID */
+    var firebaseCompatBridgePresent = !!(global._snxDbCompat);
+    var authBridgePresent           = !!(global._snxAuth);
+
+    return {
+      /* Module presence */
+      ai:                  aiExists,
+      knowledge:           knowledgeExists,
+      conversationEngine:  e1Exists,
+      personalMemory:      memoryExists,
+      conversationHistory: historyExists,
+      adaptiveLearning:    adaptiveExists,
+      voice:               voiceExists,
+      character:           charExists,
+
+      /* Initialization state */
+      historyInitialized:  historyInitialized,
+      adaptiveInitialized: adaptiveInitialized,
+      memoryInitialized:   memoryInitialized,
+
+      /* Pipeline connections */
+      historyConnectedToAI:  historyConnectedToAI,
+      adaptiveConnectedToAI: adaptiveConnectedToAI,
+      memoryConnectedToAI:   memoryConnectedToAI,
+
+      /* Firebase bridge */
+      firebaseCompatBridgePresent: firebaseCompatBridgePresent,
+      authBridgePresent:           authBridgePresent,
+
+      /* Feature loader state (no private data) */
+      featureLoaderPresent: !!(global.SNXFeatureLoader),
+      shadowAiFeatureLoaded: !!(global.SNXFeatureLoader && global.SNXFeatureLoader.isLoaded('shadow-ai')),
+
+      /* Build IDs */
+      aiBuild:        BUILD_ID,
+      historyBuild:   historyExists ? (CH.build || 'unknown') : null,
+      adaptiveBuild:  adaptiveExists ? (AL.build || 'unknown') : null,
+      memoryBuild:    memoryExists ? (M.build || 'unknown') : null,
+
+      /* Safety note */
+      _note: 'Connection status only. No user data, no UID, no tokens, no conversation text.'
+    };
   };
 
 })(window);

@@ -38,8 +38,8 @@
  *   v100
  */
 
-const CACHE_VERSION = 'v100';
-const BUILD_ID      = 'SNS-2026-LIVE-ANDROID-FIX-001';
+const CACHE_VERSION = 'v101';
+const BUILD_ID      = 'SNS-2026-SHADOW-RECONNECT-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -158,6 +158,10 @@ const TV_NETWORK_FIRST_FILES = [
   'snx-shadow-ai-e1.js',
   'snx-shadow-voice.js',
   'snx-shadow-character.js',
+  // Shadow Reaper AI CSS — lazy-loaded with the shadow-ai feature; must always be fresh
+  'snx-shadow-ai.css',
+  'snx-shadow-voice.css',
+  'snx-shadow-character.css',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

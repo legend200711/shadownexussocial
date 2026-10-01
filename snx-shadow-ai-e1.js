@@ -419,6 +419,19 @@
       return _pickGeneral('RELATIONSHIP_GENERAL');
     }
 
+    /* ── Project named / called ──────────────────────────────── */
+    if (/\b(?:my |the )?project (?:is called|is named|called|named)\b/i.test(n) ||
+        /\bi(?:'?m| am) (?:calling|naming) (?:it|the project)\b/i.test(n)) {
+      return _pickGeneral('WORKING_ON_SOMETHING');
+    }
+
+    /* ── Design / style decision ─────────────────────────────── */
+    if (/\bi want (?:it|the (?:homepage|page|design|background|theme|layout))\b/i.test(n) ||
+        /\b(?:blue lightning|dark theme|dark background|dark mode|neon background)\b/i.test(n) ||
+        /\bi(?:'?m| am) working on (?:the )?(?:homepage|landing page|dashboard|settings page|about page|nav|header|footer)\b/i.test(n)) {
+      return _pickGeneral('WORKING_ON_SOMETHING');
+    }
+
     /* ── Working on something ─────────────────────────────────── */
     if (/\b(working on (it|something|a thing|this|that|a new|my)|i.m building|building (a |something|it)|starting (a |something)|i started)\b/i.test(n)) {
       return _pickGeneral('WORKING_ON_SOMETHING');

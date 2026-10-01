@@ -170,9 +170,9 @@
         'snx-shadow-ai-knowledge.js?v=SNS-2026-SHADOW-AI-STAGE2-001',
         'snx-shadow-ai-e1.js?v=SNS-2026-SHADOW-EMOTION-E1-RC1',
         'snx-shadow-memory.js?v=SNS-2026-SHADOW-MEMORY-E2-RC2',
-        'snx-shadow-conv-history.js?v=SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-002',
-        'snx-shadow-adaptive.js?v=SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-002',
-        'snx-shadow-ai.js?v=SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-002',
+        'snx-shadow-conv-history.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
+        'snx-shadow-adaptive.js?v=SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1',
+        'snx-shadow-ai.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
         'snx-shadow-voice.js?v=SNS-2026-SHADOW-VOICE-4A-001',
         'snx-shadow-character.js?v=SNS-2026-SHADOW-CHARACTER-4B-001'
       ],

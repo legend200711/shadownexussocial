@@ -48,7 +48,7 @@
 (function (global) {
   'use strict';
 
-  var BUILD_ID = 'SNS-2026-SHADOW-CONVERSATION-MEMORY-RC1';
+  var BUILD_ID = 'SNS-2026-SHADOW-CONV-HISTORY-FIX-002';
 
   /* ─────────────────────────────────────────────────────────────
      CONSTANTS
@@ -94,6 +94,8 @@
   ───────────────────────────────────────────────────────────────*/
   var _CONTINUITY_PATTERNS = [
     /\bwhat (were|was) we (talking|discussing)\b/i,
+    /\bwhat .{0,30} were we (talking|discussing)\b/i,
+    /\bwhat .{0,30} was (the|our|a) .{0,30} (we were|we've been|i was) (talking|discussing|working on)\b/i,
     /\bcontinue (where|from) (we|we were)\b/i,
     /\bgo back to (what|our|the)\b/i,
     /\bwhat (did i|did we) (tell|talk|say|discuss|mention)\b.*\b(yesterday|earlier|before|last time)\b/i,
@@ -105,7 +107,15 @@
     /\bwhat (were|was) (i|we) (working on|doing|saying)\b/i,
     /\blet'?s (go back|continue|pick up)\b/i,
     /\bwhat (did i|was i) (tell|talking) you (about|earlier)\b/i,
-    /\bwhat did (i|we) (say|talk about) (last|before|earlier|yesterday)\b/i
+    /\bwhat did (i|we) (say|talk about) (last|before|earlier|yesterday)\b/i,
+    /\bwhat (project|topic|subject|thing) were we (just |recently )?(talking|discussing|working on)\b/i,
+    /\bwhat (project|topic|subject|thing) (did i|did we|was i|was we) (tell|talk about|mention|discuss)\b/i,
+    /\bwhat was (the )?(project|topic|subject|thing) (we were|i was|we've been)\b/i,
+    /\bwhat were (we|you and i) (just |recently )?(talking|discussing|working on)\b/i,
+    /\bwhat (was|is) the (name|title|project name|thing) (i|we) (told|gave|called|named|mentioned)\b/i,
+    /\bwhat (name|title) did i (tell|give|say|use|pick|choose)\b/i,
+    /\bwhat was (it|the project) called\b/i,
+    /\bwhat (did i|was i) (call|name|title) (it|the project|the thing)\b/i
   ];
 
   /**
@@ -135,12 +145,13 @@
 
   /* ─────────────────────────────────────────────────────────────
      FIREBASE HELPERS
-     Uses existing window.firebase global — does NOT create a new app.
-  ───────────────────────────────────────────────────────────────*/
+     Uses existing window._snxDbCompat / window._snxAuth globals.
+     Does NOT create a new app. Does NOT use window.firebase compat SDK.
+   ───────────────────────────────────────────────────────────────*/
   function _getFirestore() {
     /* Primary: use the compat bridge exposed by index.html (modular SDK v12) */
     if (global._snxDbCompat) return global._snxDbCompat;
-    /* Fallback: legacy Firebase Compat SDK (not present in this project, kept for safety) */
+    /* Fallback: legacy Firebase Compat SDK (kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.firestore && typeof fb.firestore === 'function') {
@@ -161,7 +172,7 @@
     if (global._snxCurrentUser && global._snxCurrentUser.uid) {
       return global._snxCurrentUser.uid;
     }
-    /* Legacy Firebase Compat SDK (not present in this project, kept for safety) */
+    /* Legacy Firebase Compat SDK (kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.auth && typeof fb.auth === 'function') {
@@ -174,6 +185,35 @@
 
   function _isSignedIn() {
     return !!_getCurrentUID();
+  }
+
+  /**
+   * Run fn() when Firebase auth is resolved.
+   * Uses _snxOnAuthReady — the authoritative SNS auth-ready mechanism.
+   * No polling. No intervals. No RAF.
+   * Safety timeout is ONE-SHOT only (never repeating).
+   */
+  function _whenAuthReady(fn) {
+    /* Already signed in — call immediately */
+    if (_isSignedIn()) { fn(); return; }
+    /* Auth resolved but user is signed out — call immediately (guest path) */
+    if (global._snxAuthResolved) { fn(); return; }
+    /* Primary: defer via the existing auth-ready queue (authoritative) */
+    if (typeof global._snxOnAuthReady === 'function') {
+      global._snxOnAuthReady(fn);
+      return;
+    }
+    /* Secondary: _snxOnAuthReady not yet defined — push directly to the
+       underlying queue that index.html always initialises first.
+       No polling, no interval. */
+    if (Array.isArray(global._snxAuthReadyQueue)) {
+      global._snxAuthReadyQueue.push(fn);
+      return;
+    }
+    /* Last-resort: ONE-SHOT timeout — never repeating, never polling.
+       This path is only reached if the SNS auth infrastructure has not
+       loaded at all (should not occur in normal operation). */
+    setTimeout(fn, 4000);
   }
 
   function _getServerTimestamp() {
@@ -322,39 +362,28 @@
   function _saveTurn(role, text, callback) {
     callback = callback || function () {};
 
-    /* Guest: no persistence */
-    if (!_isSignedIn()) {
-      callback({ success: false, reason: 'GUEST' });
-      return;
-    }
-
     /* History disabled: no persistence */
     if (!_isEnabled()) {
+      console.log('[ShadowHistoryDebug] saveTurn skipped — history disabled');
       callback({ success: false, reason: 'DISABLED' });
       return;
     }
 
     /* Offline: no persistence (do not claim it was saved) */
     if (!global.navigator.onLine) {
+      console.log('[ShadowHistoryDebug] saveTurn skipped — offline');
       callback({ success: false, reason: 'OFFLINE' });
       return;
     }
 
     /* Secret detection: never store credentials */
     if (_isSecret(text)) {
+      console.log('[ShadowHistoryDebug] saveTurn skipped — secret detected');
       callback({ success: false, reason: 'SECRET' });
       return;
     }
 
-    var uid    = _getCurrentUID();
-    var convId = _getOrCreateConvId();
-    var ref    = _getMessagesRef(uid, convId);
-    if (!ref) {
-      callback({ success: false, reason: 'DB_UNAVAILABLE' });
-      return;
-    }
-
-    /* Sanitize and bound text */
+    /* Sanitize and bound text early so we can catch EMPTY before auth wait */
     var safe = _sanitize(text);
     if (safe.length > MAX_TEXT_LEN) safe = safe.substring(0, MAX_TEXT_LEN);
     if (!safe) {
@@ -362,31 +391,60 @@
       return;
     }
 
-    var turn = {
-      role:      role === 'user' ? 'user' : 'assistant',
-      text:      safe,
-      ts:        Date.now(),
-      sessionId: _getOrCreateSessionId(),
-      convId:    convId
-    };
+    /* Defer until auth resolves — avoids false GUEST failures on first open */
+    _whenAuthReady(function () {
+      /* Guest: no persistence */
+      if (!_isSignedIn()) {
+        console.log('[ShadowHistoryDebug] saveTurn skipped — guest (not signed in)');
+        callback({ success: false, reason: 'GUEST' });
+        return;
+      }
 
-    /* Store in session buffer (capped) */
-    _sessionTurns.push(turn);
-    if (_sessionTurns.length > MAX_TURNS_STORED) {
-      _sessionTurns = _sessionTurns.slice(-MAX_TURNS_STORED);
-    }
+      var uid    = _getCurrentUID();
+      var convId = _getOrCreateConvId();
+      var ref    = _getMessagesRef(uid, convId);
+      if (!ref) {
+        console.log('[ShadowHistoryDebug] saveTurn failed — Firestore unavailable');
+        callback({ success: false, reason: 'DB_UNAVAILABLE' });
+        return;
+      }
 
-    /* Persist to Firestore */
-    ref.add(Object.assign({}, turn, { savedAt: _getServerTimestamp() }))
-      .then(function () {
-        /* After saving, enforce bounded storage limit asynchronously */
-        _trimHistory(uid, convId);
-        callback({ success: true });
-      })
-      .catch(function () {
-        /* Storage failure — current session continues unaffected */
-        callback({ success: false, reason: 'DB_ERROR' });
-      });
+      var turn = {
+        role:      role === 'user' ? 'user' : 'assistant',
+        text:      safe,
+        ts:        Date.now(),
+        sessionId: _getOrCreateSessionId(),
+        convId:    convId
+      };
+
+      /* Store in session buffer (capped) */
+      _sessionTurns.push(turn);
+      if (_sessionTurns.length > MAX_TURNS_STORED) {
+        _sessionTurns = _sessionTurns.slice(-MAX_TURNS_STORED);
+      }
+
+      /* Persist to Firestore */
+      console.log('[ShadowHistoryDebug] saveTurn — writing role=' + turn.role + ' convId=' + convId.slice(0, 8) + '…');
+      ref.add(Object.assign({}, turn, { savedAt: _getServerTimestamp() }))
+        .then(function () {
+          /* After saving, enforce bounded storage limit asynchronously */
+          _trimHistory(uid, convId);
+          /* Update lastTs on the conversation document so cross-device recovery
+             can find the most-recent conversation via orderBy('lastTs', 'desc').
+             Fire-and-forget — never blocks the current session. */
+          var convRef = _getConvRef(uid, convId);
+          if (convRef) {
+            convRef.set({ lastTs: turn.ts, convId: convId }, { merge: true }).catch(function () {});
+          }
+          console.log('[ShadowHistoryDebug] saveTurn — write success');
+          callback({ success: true });
+        })
+        .catch(function (err) {
+          /* Storage failure — current session continues unaffected */
+          console.warn('[ShadowHistoryDebug] saveTurn — write failed:', err && err.message);
+          callback({ success: false, reason: 'DB_ERROR' });
+        });
+    });
   }
 
   /**
@@ -426,43 +484,111 @@
   function _loadRecentContext(callback) {
     callback = callback || function () {};
 
-    if (!_isSignedIn()) {
-      callback({ turns: [], reason: 'GUEST' });
-      return;
-    }
-
     if (!_isEnabled()) {
+      console.log('[ShadowHistoryDebug] loadRecentContext — history disabled');
       callback({ turns: [], reason: 'DISABLED' });
       return;
     }
 
-    var uid    = _getCurrentUID();
-    var convId = _getOrCreateConvId();
-    var ref    = _getMessagesRef(uid, convId);
-    if (!ref) {
-      callback({ turns: [], reason: 'DB_UNAVAILABLE' });
-      return;
-    }
+    console.log('[ShadowHistoryDebug] loadRecentContext — waiting for auth…');
 
-    /* Fetch only the most recent AI_CONTEXT_WINDOW turns */
-    ref.orderBy('ts', 'desc').limit(AI_CONTEXT_WINDOW).get()
-      .then(function (snapshot) {
-        var turns = [];
-        snapshot.forEach(function (doc) {
-          var d = doc.data();
-          turns.push({
-            role: d.role,
-            text: d.text,
-            ts:   d.ts || 0
+    /* Defer until auth resolves — avoids false GUEST returns on first open */
+    _whenAuthReady(function () {
+      if (!_isSignedIn()) {
+        console.log('[ShadowHistoryDebug] loadRecentContext — guest (not signed in)');
+        callback({ turns: [], reason: 'GUEST' });
+        return;
+      }
+
+      var uid    = _getCurrentUID();
+      var convId = _getOrCreateConvId();
+      var db     = _getFirestore();
+
+      console.log('[ShadowHistoryDebug] loadRecentContext — auth ready, user available: true, Firestore available: ' + !!db + ', convId: ' + convId.slice(0, 8) + '…');
+
+      var ref = _getMessagesRef(uid, convId);
+      if (!ref) {
+        console.log('[ShadowHistoryDebug] loadRecentContext — Firestore unavailable');
+        callback({ turns: [], reason: 'DB_UNAVAILABLE' });
+        return;
+      }
+
+      /* Fetch only the most recent AI_CONTEXT_WINDOW turns */
+      ref.orderBy('ts', 'desc').limit(AI_CONTEXT_WINDOW).get()
+        .then(function (snapshot) {
+          /* If this convId has no messages, check Firestore for the most-recent
+             conversation (handles cross-device / cleared-localStorage scenarios) */
+          if (snapshot.size === 0) {
+            console.log('[ShadowHistoryDebug] loadRecentContext — convId empty, searching for most recent conversation…');
+            var convsRef = _getConvsRef(uid);
+            if (!convsRef) {
+              console.log('[ShadowHistoryDebug] loadRecentContext — no conversations ref');
+              callback({ turns: [] });
+              return;
+            }
+            /* Find the conversation with the latest message (by savedAt descending) */
+            convsRef.orderBy('lastTs', 'desc').limit(1).get()
+              .then(function (convSnap) {
+                if (!convSnap || convSnap.size === 0) {
+                  console.log('[ShadowHistoryDebug] loadRecentContext — no previous conversations found');
+                  callback({ turns: [] });
+                  return;
+                }
+                var latestConvId = null;
+                convSnap.forEach(function (d) { latestConvId = d.id; });
+                if (!latestConvId) {
+                  callback({ turns: [] });
+                  return;
+                }
+                console.log('[ShadowHistoryDebug] loadRecentContext — found prior conversation: ' + latestConvId.slice(0, 8) + '…');
+                /* Adopt this as the active conversation so future turns append to it */
+                _currentConvId = latestConvId;
+                try { global.localStorage.setItem('snxShadowConvId', latestConvId); } catch (_) {}
+                var priorRef = _getMessagesRef(uid, latestConvId);
+                if (!priorRef) { callback({ turns: [] }); return; }
+                priorRef.orderBy('ts', 'desc').limit(AI_CONTEXT_WINDOW).get()
+                  .then(function (msgSnap) {
+                    var turns = [];
+                    msgSnap.forEach(function (doc) {
+                      var d = doc.data();
+                      turns.push({ role: d.role, text: d.text, ts: d.ts || 0 });
+                    });
+                    turns.sort(function (a, b) { return a.ts - b.ts; });
+                    console.log('[ShadowHistoryDebug] loadRecentContext — retrieved ' + turns.length + ' turns from prior conversation');
+                    callback({ turns: turns });
+                  })
+                  .catch(function (err) {
+                    console.warn('[ShadowHistoryDebug] loadRecentContext — prior conv query failed:', err && err.message);
+                    callback({ turns: [], reason: 'DB_ERROR' });
+                  });
+              })
+              .catch(function (err) {
+                /* lastTs index may not exist yet — fall back gracefully */
+                console.log('[ShadowHistoryDebug] loadRecentContext — lastTs index unavailable, falling back to no context');
+                callback({ turns: [] });
+              });
+            return;
+          }
+
+          var turns = [];
+          snapshot.forEach(function (doc) {
+            var d = doc.data();
+            turns.push({
+              role: d.role,
+              text: d.text,
+              ts:   d.ts || 0
+            });
           });
+          /* Restore chronological order (oldest first) */
+          turns.sort(function (a, b) { return a.ts - b.ts; });
+          console.log('[ShadowHistoryDebug] loadRecentContext — retrieved ' + turns.length + ' turns, context injected: true');
+          callback({ turns: turns });
+        })
+        .catch(function (err) {
+          console.warn('[ShadowHistoryDebug] loadRecentContext — query failed:', err && err.message);
+          callback({ turns: [], reason: 'DB_ERROR' });
         });
-        /* Restore chronological order (oldest first) */
-        turns.sort(function (a, b) { return a.ts - b.ts; });
-        callback({ turns: turns });
-      })
-      .catch(function () {
-        callback({ turns: [], reason: 'DB_ERROR' });
-      });
+    });
   }
 
   /* ─────────────────────────────────────────────────────────────
@@ -582,6 +708,7 @@
     if (_initialized) return;
     _initialized = true;
     _getOrCreateConvId(); /* warm up convId from localStorage */
+    console.log('[ShadowHistoryDebug] module loaded, history enabled: ' + _isEnabled());
   }
 
   /**
@@ -694,7 +821,7 @@
   global.SNXShadowConvHistory = {
 
     /** Build identifier */
-    build: BUILD_ID,
+    build: 'SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
 
     /** Maximum turns stored per user */
     MAX_TURNS_STORED: MAX_TURNS_STORED,
