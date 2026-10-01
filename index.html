@@ -12533,6 +12533,145 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   window._snxFirestoreDB  = db;
   window._snxFirestoreFns = { doc, getDoc, setDoc, updateDoc };
 
+  // ── Firestore compat bridge for non-module Shadow Reaper scripts ──────────
+  // snx-shadow-memory.js, snx-shadow-conv-history.js, and snx-shadow-adaptive.js
+  // use the Firebase Compat chained API (db.collection(...).doc(...).where(...)).
+  // This project uses the modular SDK v12, so we expose a thin compat wrapper
+  // that translates compat-style calls into modular SDK calls.
+  // This is the ONLY change needed to fix the "Memory unavailable" regression.
+  //
+  // Exposed as window._snxDbCompat — used by _getFirestore() in those modules.
+  // Does NOT replace window._snxDb (modular) or window._snxFirestore (modular).
+  // Does NOT create a second Firebase app instance.
+  (function() {
+    'use strict';
+    var _db = db;
+    var _fns = window._snxFirestore;
+    if (!_db || !_fns) return; // guard: should not happen
+
+    // Build a chainable query from a Firestore modular query ref
+    function _wrapQuery(q) {
+      return {
+        where: function(f, op, v) { return _wrapQuery(_fns.query(q, _fns.where(f, op, v))); },
+        orderBy: function(f, dir) { return _wrapQuery(_fns.query(q, _fns.orderBy(f, dir || 'asc'))); },
+        limit: function(n) { return _wrapQuery(_fns.query(q, _fns.limit(n))); },
+        get: function() {
+          return _fns.getDocs(q).then(function(snap) {
+            var docs = [];
+            snap.forEach(function(d) {
+              docs.push({ id: d.id, data: function() { return d.data(); }, ref: _wrapDocRef(d.ref) });
+            });
+            docs.size = snap.size;
+            docs.forEach = function(fn) { docs.filter(function(){return true;}).forEach(fn); };
+            // Return an object that mimics a QuerySnapshot
+            return {
+              size: snap.size,
+              empty: snap.empty,
+              docs: docs,
+              forEach: function(fn) {
+                snap.forEach(function(d) {
+                  fn({ id: d.id, data: function() { return d.data(); }, ref: _wrapDocRef(d.ref) });
+                });
+              }
+            };
+          });
+        }
+      };
+    }
+
+    // Wrap a modular DocumentReference into a compat-like object
+    function _wrapDocRef(docRef) {
+      return {
+        id: docRef.id,
+        ref: docRef, // expose raw ref for batch operations
+        collection: function(subPath) { return _wrapCollRef(_fns.collection(docRef, subPath)); },
+        get: function() {
+          return _fns.getDoc(docRef).then(function(snap) {
+            return { id: snap.id, exists: snap.exists(), data: function() { return snap.data(); }, ref: _wrapDocRef(docRef) };
+          });
+        },
+        set: function(data, opts) { return opts ? _fns.setDoc(docRef, data, opts) : _fns.setDoc(docRef, data); },
+        update: function(data) { return _fns.updateDoc(docRef, data); },
+        delete: function() { return _fns.deleteDoc(docRef); }
+      };
+    }
+
+    // Wrap a modular CollectionReference into a compat-like object
+    function _wrapCollRef(collRef) {
+      return {
+        // collection().doc(id) → DocumentRef
+        doc: function(id) {
+          var docRef = id
+            ? _fns.doc(collRef, id)
+            : _fns.doc(collRef); // auto-id
+          return _wrapDocRef(docRef);
+        },
+        // collection().add(data) → Promise<DocumentRef>
+        add: function(data) {
+          return _fns.addDoc(collRef, data).then(function(ref) {
+            return _wrapDocRef(ref);
+          });
+        },
+        // collection().where(...) → Query
+        where: function(f, op, v) { return _wrapQuery(_fns.query(collRef, _fns.where(f, op, v))); },
+        // collection().orderBy(...) → Query
+        orderBy: function(f, dir) { return _wrapQuery(_fns.query(collRef, _fns.orderBy(f, dir || 'asc'))); },
+        // collection().limit(n) → Query
+        limit: function(n) { return _wrapQuery(_fns.query(collRef, _fns.limit(n))); },
+        // collection().get() — equivalent to getDocs with no filter
+        get: function() {
+          return _fns.getDocs(collRef).then(function(snap) {
+            return {
+              size: snap.size,
+              empty: snap.empty,
+              forEach: function(fn) {
+                snap.forEach(function(d) {
+                  fn({ id: d.id, data: function() { return d.data(); }, ref: _wrapDocRef(d.ref) });
+                });
+              }
+            };
+          });
+        }
+      };
+    }
+
+    // Wrap a modular WriteBatch into a compat-like object
+    function _wrapBatch(batch) {
+      return {
+        set:    function(docRefWrapped, data, opts) {
+          var raw = docRefWrapped && docRefWrapped.ref ? docRefWrapped.ref : docRefWrapped;
+          return opts ? batch.set(raw, data, opts) : batch.set(raw, data);
+        },
+        update: function(docRefWrapped, data) {
+          var raw = docRefWrapped && docRefWrapped.ref ? docRefWrapped.ref : docRefWrapped;
+          batch.update(raw, data);
+        },
+        delete: function(docRefWrapped) {
+          var raw = docRefWrapped && docRefWrapped.ref ? docRefWrapped.ref : docRefWrapped;
+          batch.delete(raw);
+        },
+        commit: function() { return batch.commit(); }
+      };
+    }
+
+    // The compat-style db object
+    window._snxDbCompat = {
+      collection: function(path) {
+        return _wrapCollRef(_fns.collection(_db, path));
+      },
+      batch: function() {
+        return _wrapBatch(_fns.writeBatch(_db));
+      },
+      // Expose FieldValue.serverTimestamp() in compat style
+      firestore: {
+        FieldValue: {
+          serverTimestamp: function() { return _fns.serverTimestamp(); }
+        }
+      }
+    };
+  })();
+  // ── End Firestore compat bridge ────────────────────────────────────────────
+
   // ── Auth-ready queue — lets non-module scripts register callbacks that
   //    run as soon as Firebase auth resolves (avoids the re-login requirement) ──
   // Expose the Firebase Auth instance on window so external scripts (profile-music.js,

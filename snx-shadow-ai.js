@@ -69,7 +69,7 @@
   var MAX_HISTORY = 20; // max conversation turns (user+grim pairs) — bounded for server
   var BUILD_ID    = 'SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001';
   var E1_BUILD_ID = 'SNS-2026-SHADOW-EMOTION-E1-RC1';
-  var E2_BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC1';
+  var E2_BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC2';
   var E3_BUILD_ID = 'SNS-2026-SHADOW-CONVERSATION-MEMORY-RC1';
   var AL_BUILD_ID = 'SNS-2026-SHADOW-ADAPTIVE-LEARNING-RC1';
 
@@ -2267,7 +2267,25 @@
      OPEN / CLOSE
   ───────────────────────────────────────────────────────────────*/
   function _open() {
+    /* [ShadowMemoryDebug] feature requested (open called) */
+    console.log('[ShadowMemoryDebug] feature requested — SNXShadowMemory exists: ' + !!(global.SNXShadowMemory));
+    if (global.SNXShadowMemory) {
+      console.log('[ShadowMemoryDebug] init function exists: ' + (typeof global.SNXShadowMemory.init === 'function'));
+      console.log('[ShadowMemoryDebug] Firebase app available: ' + !!(global._snxApp || global.firebase));
+      console.log('[ShadowMemoryDebug] Auth available: ' + !!(global._snxAuth || (global.firebase && global.firebase.auth)));
+      console.log('[ShadowMemoryDebug] auth.currentUser available: ' + !!(global._snxAuth && global._snxAuth.currentUser));
+      console.log('[ShadowMemoryDebug] UID available: ' + !!(global._snxAuth && global._snxAuth.currentUser && global._snxAuth.currentUser.uid));
+      console.log('[ShadowMemoryDebug] Firestore available: ' + !!(global._snxDbCompat || global.firebase));
+    } else {
+      console.error('[ShadowMemoryDebug] SNXShadowMemory NOT LOADED — script may not have executed yet');
+    }
+
     _injectUI();
+
+    /* E2: Initialize memory module on first open — runs diagnostics via [ShadowMemoryDebug] */
+    if (global.SNXShadowMemory && typeof global.SNXShadowMemory.init === 'function') {
+      try { global.SNXShadowMemory.init(); } catch (_) {}
+    }
 
     /* E3: Initialize conversation history module on first open.
        Load bounded persistent context for continuity — lazy, only on open.

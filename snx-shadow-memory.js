@@ -2,7 +2,7 @@
  * snx-shadow-memory.js
  * Shadow Nexus Social — Shadow Reaper E2: Optional Personal Memory
  *
- * Build: SNS-2026-SHADOW-MEMORY-E2-RC1
+ * Build: SNS-2026-SHADOW-MEMORY-E2-RC2
  *
  * Exposes: window.SNXShadowMemory
  *
@@ -32,7 +32,7 @@
 (function (global) {
   'use strict';
 
-  var BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC1';
+  var BUILD_ID = 'SNS-2026-SHADOW-MEMORY-E2-RC2';
 
   /* ─────────────────────────────────────────────────────────────
      CONSTANTS
@@ -288,7 +288,9 @@
      Does NOT create a new Firebase app.
   ───────────────────────────────────────────────────────────────*/
   function _getFirestore() {
-    /* Try the global firebase compat SDK first (used by index.html) */
+    /* Primary: use the compat bridge exposed by index.html (modular SDK v12) */
+    if (global._snxDbCompat) return global._snxDbCompat;
+    /* Fallback: legacy Firebase Compat SDK (not present in this project, kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.firestore && typeof fb.firestore === 'function') {
@@ -299,6 +301,17 @@
   }
 
   function _getCurrentUID() {
+    /* Primary: modular Auth instance exposed by index.html */
+    try {
+      if (global._snxAuth && global._snxAuth.currentUser && global._snxAuth.currentUser.uid) {
+        return global._snxAuth.currentUser.uid;
+      }
+    } catch (_) {}
+    /* Fallback: SNS auth state global */
+    if (global._snxCurrentUser && global._snxCurrentUser.uid) {
+      return global._snxCurrentUser.uid;
+    }
+    /* Legacy Firebase Compat SDK (not present in this project, kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.auth && typeof fb.auth === 'function') {
@@ -306,10 +319,6 @@
         if (user && user.uid) return user.uid;
       }
     } catch (_) {}
-    /* Also check the SNS global */
-    if (global._snxCurrentUser && global._snxCurrentUser.uid) {
-      return global._snxCurrentUser.uid;
-    }
     return null;
   }
 
@@ -324,6 +333,20 @@
   }
 
   function _getServerTimestamp() {
+    /* Primary: compat bridge exposes FieldValue via _snxDbCompat.firestore.FieldValue */
+    try {
+      if (global._snxDbCompat && global._snxDbCompat.firestore &&
+          global._snxDbCompat.firestore.FieldValue) {
+        return global._snxDbCompat.firestore.FieldValue.serverTimestamp();
+      }
+    } catch (_) {}
+    /* Fallback: modular serverTimestamp from _snxFirestore */
+    try {
+      if (global._snxFirestore && typeof global._snxFirestore.serverTimestamp === 'function') {
+        return global._snxFirestore.serverTimestamp();
+      }
+    } catch (_) {}
+    /* Legacy Firebase Compat SDK (not present in this project, kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.firestore && fb.firestore.FieldValue) {
@@ -446,7 +469,24 @@
   function init() {
     if (_initialized) return;
     _initialized = true;
-    /* Nothing async here — loads only when Shadow Reaper requires it */
+    /* [ShadowMemoryDebug] initialization started */
+    console.log('[ShadowMemoryDebug] initialization started');
+    var _dbOk  = !!_getFirestore();
+    var _uidOk = !!_getCurrentUID();
+    console.log('[ShadowMemoryDebug] SNXShadowMemory exists: true');
+    console.log('[ShadowMemoryDebug] init function exists: true');
+    console.log('[ShadowMemoryDebug] Firebase app available: ' + !!(global._snxApp || global.firebase));
+    console.log('[ShadowMemoryDebug] Auth available: ' + !!(global._snxAuth || (global.firebase && global.firebase.auth)));
+    console.log('[ShadowMemoryDebug] auth.currentUser available: ' + !!(global._snxAuth && global._snxAuth.currentUser));
+    console.log('[ShadowMemoryDebug] UID available: ' + _uidOk);
+    console.log('[ShadowMemoryDebug] Firestore available: ' + _dbOk);
+    if (!_dbOk) {
+      console.error('[ShadowMemoryDebug] _getFirestore() returned null — _snxDbCompat=' + (typeof global._snxDbCompat) + ', window.firebase=' + (typeof global.firebase));
+    }
+    if (!_uidOk) {
+      console.error('[ShadowMemoryDebug] _getCurrentUID() returned null — _snxAuth.currentUser=' + (global._snxAuth && global._snxAuth.currentUser ? 'SET' : 'NULL') + ', _snxCurrentUser=' + (global._snxCurrentUser ? 'SET' : 'NULL'));
+    }
+    console.log('[ShadowMemoryDebug] initialization completed');
   }
 
   /**
@@ -1114,5 +1154,10 @@
      */
     destroy: destroy
   };
+
+  /* [ShadowMemoryDebug] script loaded */
+  console.log('[ShadowMemoryDebug] script loaded — build: ' + BUILD_ID);
+  console.log('[ShadowMemoryDebug] SNXShadowMemory exists: true');
+  console.log('[ShadowMemoryDebug] init function exists: ' + (typeof init === 'function'));
 
 })(window);

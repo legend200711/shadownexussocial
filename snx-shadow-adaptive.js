@@ -209,6 +209,9 @@
      FIREBASE HELPERS
   ───────────────────────────────────────────────────────────────*/
   function _getFirestore() {
+    /* Primary: use the compat bridge exposed by index.html (modular SDK v12) */
+    if (global._snxDbCompat) return global._snxDbCompat;
+    /* Fallback: legacy Firebase Compat SDK (not present in this project, kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.firestore && typeof fb.firestore === 'function') return fb.firestore();
@@ -217,6 +220,15 @@
   }
 
   function _getCurrentUID() {
+    /* Primary: modular Auth instance exposed by index.html */
+    try {
+      if (global._snxAuth && global._snxAuth.currentUser && global._snxAuth.currentUser.uid) {
+        return global._snxAuth.currentUser.uid;
+      }
+    } catch (_) {}
+    /* Fallback: SNS auth state global */
+    if (global._snxCurrentUser && global._snxCurrentUser.uid) return global._snxCurrentUser.uid;
+    /* Legacy Firebase Compat SDK (not present in this project, kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.auth && typeof fb.auth === 'function') {
@@ -224,13 +236,26 @@
         if (user && user.uid) return user.uid;
       }
     } catch (_) {}
-    if (global._snxCurrentUser && global._snxCurrentUser.uid) return global._snxCurrentUser.uid;
     return null;
   }
 
   function _isSignedIn() { return !!_getCurrentUID(); }
 
   function _getServerTimestamp() {
+    /* Primary: compat bridge exposes FieldValue via _snxDbCompat.firestore.FieldValue */
+    try {
+      if (global._snxDbCompat && global._snxDbCompat.firestore &&
+          global._snxDbCompat.firestore.FieldValue) {
+        return global._snxDbCompat.firestore.FieldValue.serverTimestamp();
+      }
+    } catch (_) {}
+    /* Fallback: modular serverTimestamp from _snxFirestore */
+    try {
+      if (global._snxFirestore && typeof global._snxFirestore.serverTimestamp === 'function') {
+        return global._snxFirestore.serverTimestamp();
+      }
+    } catch (_) {}
+    /* Legacy Firebase Compat SDK (not present in this project, kept for safety) */
     try {
       var fb = global.firebase;
       if (fb && fb.firestore && fb.firestore.FieldValue) return fb.firestore.FieldValue.serverTimestamp();

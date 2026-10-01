@@ -149,6 +149,15 @@ const TV_NETWORK_FIRST_FILES = [
   'snx-radio-dj.js',
   // Broadcast Engine — lazy-loaded by radio-studio feature; must always be fresh
   'snx-broadcast-engine.js',
+  // Shadow Reaper AI — lazy-loaded by SNXFeatureLoader on first open; must always be fresh
+  'snx-shadow-memory.js',
+  'snx-shadow-conv-history.js',
+  'snx-shadow-adaptive.js',
+  'snx-shadow-ai.js',
+  'snx-shadow-ai-knowledge.js',
+  'snx-shadow-ai-e1.js',
+  'snx-shadow-voice.js',
+  'snx-shadow-character.js',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);
