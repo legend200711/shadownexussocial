@@ -223,23 +223,6 @@
   animation: none !important;
 }
 
-/* Bolt launcher icon — continuous filter+transform animation */
-.snx-quality-lite .bolt-icon,
-.snx-quality-minimal .bolt-icon {
-  animation: none !important;
-  filter: drop-shadow(0 0 5px rgba(0,174,239,0.6)) !important;
-}
-.snx-quality-balanced .bolt-icon {
-  animation-duration: 6s !important;
-}
-.snx-quality-lite .bolt-label,
-.snx-quality-minimal .bolt-label {
-  animation: none !important;
-}
-.snx-quality-balanced .bolt-label {
-  animation-duration: 6s !important;
-}
-
 /* ══════════════════════════════════════════════════
    WILL-CHANGE — release on page-hidden and lite
    Prevents browser holding unnecessary GPU layers.
@@ -254,7 +237,6 @@
   will-change: transform !important;
 }
 /* Page hidden: release all GPU hints globally */
-.snx-page-hidden .bolt-icon,
 .snx-page-hidden body::before,
 .snx-page-hidden body::after,
 .snx-page-hidden .ash-particle,
@@ -320,8 +302,6 @@
   .eclipse-title,
   .sidebar-brand-name,
   .sidebar-brand-icon,
-  .bolt-icon,
-  .bolt-label,
   .badge-rarity-epic,
   .badge-rarity-legendary,
   .snx-mood-sticker,

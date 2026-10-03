@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SR V2 — Stage 3B Live Diagnostic Probe</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #0d0d0f; color: #e0e0e0; padding: 16px; font-size: 13px; }
+    h1 { color: #9977ee; margin-bottom: 12px; font-size: 15px; }
+    h2 { color: #ffcc44; margin: 16px 0 6px; font-size: 13px; border-bottom: 1px solid #222; padding-bottom: 4px; }
+    .row { display: flex; gap: 8px; margin: 3px 0; }
+    .label { color: #888; min-width: 280px; }
+    .val { color: #e0e0e0; }
+    .val.ok  { color: #4caf7d; }
+    .val.err { color: #e05050; }
+    .val.warn { color: #ffcc44; }
+    .val.dim  { color: #555; }
+    pre { background: #111; border: 1px solid #222; padding: 10px; margin: 8px 0; overflow-x: auto; font-size: 11px; max-height: 200px; overflow-y: auto; }
+    button { background: #1a1a2a; border: 1px solid #4438aa; color: #c8c0ff; padding: 8px 18px; cursor: pointer; font-family: monospace; font-size: 13px; margin: 4px; }
+    button:hover { background: #22223a; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #log { background: #080810; border: 1px solid #222; padding: 8px; margin-top: 12px; height: 240px; overflow-y: auto; font-size: 11px; }
+    .log-line { margin: 1px 0; }
+    .log-ok   { color: #4caf7d; }
+    .log-err  { color: #e05050; }
+    .log-warn { color: #ffcc44; }
+    .log-info { color: #c8c0ff; }
+    .section { margin-bottom: 20px; }
+    #registryList { max-height: 180px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>Shadow Reaper V2 — Stage 3B Live Diagnostic Probe</h1>
+
+  <div class="section">
+    <h2>BROWSER ENVIRONMENT</h2>
+    <div class="row"><span class="label">Browser</span><span class="val" id="rBrowser">—</span></div>
+    <div class="row"><span class="label">Secure Context</span><span class="val" id="rSecure">—</span></div>
+    <div class="row"><span class="label">navigator.gpu Available</span><span class="val" id="rGpuApi">—</span></div>
+    <div class="row"><span class="label">WebGPU Adapter Available</span><span class="val" id="rAdapter">—</span></div>
+    <div class="row"><span class="label">GPU Device Obtained</span><span class="val" id="rDevice">—</span></div>
+  </div>
+
+  <div class="section">
+    <h2>WEBLLM IMPORT</h2>
+    <div class="row"><span class="label">CDN URL</span><span class="val" id="rCDN">https://esm.run/@mlc-ai/web-llm</span></div>
+    <div class="row"><span class="label">Import Status</span><span class="val" id="rImport">—</span></div>
+    <div class="row"><span class="label">WebLLM Version</span><span class="val" id="rVersion">—</span></div>
+    <div class="row"><span class="label">MLCEngine exists</span><span class="val" id="rMLCEngine">—</span></div>
+    <div class="row"><span class="label">CreateMLCEngine exists</span><span class="val" id="rCreateMLCEngine">—</span></div>
+    <div class="row"><span class="label">prebuiltAppConfig accessible</span><span class="val" id="rRegistry">—</span></div>
+    <div class="row"><span class="label">Registry model count</span><span class="val" id="rRegistryCount">—</span></div>
+    <div class="row"><span class="label">SmolLM2-360M in registry</span><span class="val" id="rSmolInReg">—</span></div>
+    <div class="row"><span class="label">Llama-3.2-1B in registry</span><span class="val" id="rLlamaInReg">—</span></div>
+    <div id="registryList"></div>
+  </div>
+
+  <div class="section">
+    <h2>MODEL LOAD SEQUENCE</h2>
+    <div class="row"><span class="label">Model ID Requested</span><span class="val" id="rModelReq">—</span></div>
+    <div class="row"><span class="label">Engine Created</span><span class="val" id="rEngineCreated">—</span></div>
+    <div class="row"><span class="label">Reload Started</span><span class="val" id="rReloadStart">—</span></div>
+    <div class="row"><span class="label">Download Started</span><span class="val" id="rDlStart">—</span></div>
+    <div class="row"><span class="label">Last Download Progress</span><span class="val" id="rDlProg">—</span></div>
+    <div class="row"><span class="label">Download Completed</span><span class="val" id="rDlDone">—</span></div>
+    <div class="row"><span class="label">Reload Returned</span><span class="val" id="rReloadRet">—</span></div>
+    <div class="row"><span class="label">Pipeline / Loaded Model State</span><span class="val" id="rPipeline">—</span></div>
+    <div class="row"><span class="label">Model ID Actually Loaded</span><span class="val" id="rModelLoaded">—</span></div>
+    <div class="row"><span class="label">Model Cache Status</span><span class="val" id="rCache">—</span></div>
+  </div>
+
+  <div class="section">
+    <h2>VERIFY INFERENCE</h2>
+    <div class="row"><span class="label">Verify Started</span><span class="val" id="rVerifyStart">—</span></div>
+    <div class="row"><span class="label">Verify Prompt Used</span><span class="val" id="rVerifyPrompt">—</span></div>
+    <div class="row"><span class="label">Verify Raw Response</span><span class="val" id="rVerifyResp">—</span></div>
+    <div class="row"><span class="label">Verify Result</span><span class="val" id="rVerifyResult">—</span></div>
+  </div>
+
+  <div class="section">
+    <h2>MODEL STATE &amp; ERRORS</h2>
+    <div class="row"><span class="label">Final Model State</span><span class="val" id="rModelState">—</span></div>
+    <div class="row"><span class="label">First Failed Operation</span><span class="val" id="rFailOp">—</span></div>
+    <div class="row"><span class="label">Error Code</span><span class="val" id="rErrCode">—</span></div>
+    <div class="row"><span class="label">Error Name</span><span class="val" id="rErrName">—</span></div>
+    <div class="row"><span class="label">Error Message</span><span class="val" id="rErrMsg">—</span></div>
+    <div class="row"><span class="label">Error Stack (first line)</span><span class="val" id="rErrStack">—</span></div>
+    <div class="row"><span class="label">AbortError Detected</span><span class="val" id="rAbort">—</span></div>
+    <div class="row"><span class="label">ModelNotLoadedError</span><span class="val" id="rMNLE">—</span></div>
+  </div>
+
+  <div class="section">
+    <h2>REAL INFERENCE (after READY)</h2>
+    <div class="row"><span class="label">"Reply with exactly: sky blue" — source</span><span class="val" id="rInf1src">—</span></div>
+    <div class="row"><span class="label">"Reply with exactly: sky blue" — response</span><span class="val" id="rInf1resp">—</span></div>
+    <div class="row"><span class="label">"Tell me something funny." — source</span><span class="val" id="rInf2src">—</span></div>
+    <div class="row"><span class="label">"Tell me something funny." — response</span><span class="val" id="rInf2resp">—</span></div>
+    <div class="row"><span class="label">"What is a video game?" — source</span><span class="val" id="rInf3src">—</span></div>
+    <div class="row"><span class="label">"What is a video game?" — response</span><span class="val" id="rInf3resp">—</span></div>
+    <div class="row"><span class="label">"My project is called Blue Wolf." — source</span><span class="val" id="rInf4src">—</span></div>
+    <div class="row"><span class="label">"What project did I just tell you about?" — source</span><span class="val" id="rInf5src">—</span></div>
+    <div class="row"><span class="label">"What project did I just tell you about?" — response</span><span class="val" id="rInf5resp">—</span></div>
+    <div class="row"><span class="label">Workers AI calls</span><span class="val ok" id="rWorkers">0</span></div>
+  </div>
+
+  <div style="margin: 10px 0;">
+    <button id="btnProbe">▶ Run Full Probe (Import + GPU + Registry)</button>
+    <button id="btnLoad" disabled>▶ Load Model</button>
+    <button id="btnInference" disabled>▶ Run Inference Tests</button>
+    <button id="btnCopy">📋 Copy Results JSON</button>
+  </div>
+
+  <h2>LOG</h2>
+  <div id="log"></div>
+
+  <script type="module">
+    // ── Logging ─────────────────────────────────────────────────────────────────
+    const logEl = document.getElementById('log');
+    function log(msg, cls) {
+      const d = document.createElement('div');
+      d.className = 'log-line ' + (cls || 'log-info');
+      d.textContent = '[' + new Date().toISOString().substring(11,23) + '] ' + msg;
+      logEl.appendChild(d);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    function logOk(m)   { log('✓ ' + m, 'log-ok');   }
+    function logErr(m)  { log('✗ ' + m, 'log-err');  }
+    function logWarn(m) { log('⚠ ' + m, 'log-warn'); }
+    function logInfo(m) { log('  ' + m, 'log-info'); }
+
+    function set(id, val, cls) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = (val === null || val === undefined) ? '—' : String(val);
+      if (cls) el.className = 'val ' + cls;
+    }
+
+    // ── State ───────────────────────────────────────────────────────────────────
+    const WEBLLM_CDN = 'https://esm.run/@mlc-ai/web-llm';
+    let _mod    = null;
+    let _engine = null;
+    let _results = {};
+
+    // ── Step 1: Browser / GPU probe ─────────────────────────────────────────────
+    async function probeBrowser() {
+      log('=== BROWSER / GPU PROBE ===', 'log-warn');
+
+      set('rBrowser', navigator.userAgent.substring(0, 80));
+      _results.browser = navigator.userAgent.substring(0, 80);
+
+      const secure = window.isSecureContext;
+      set('rSecure', secure, secure ? 'ok' : 'err');
+      _results.secureContext = secure;
+      secure ? logOk('Secure context') : logWarn('NOT secure context — WebGPU may be unavailable');
+
+      const gpuApi = !!(navigator.gpu);
+      set('rGpuApi', gpuApi, gpuApi ? 'ok' : 'err');
+      _results.webgpuAvailable = gpuApi;
+      gpuApi ? logOk('navigator.gpu present') : logErr('navigator.gpu MISSING — WebGPU not available');
+
+      if (gpuApi) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          const hasAdapter = !!adapter;
+          set('rAdapter', hasAdapter, hasAdapter ? 'ok' : 'err');
+          _results.gpuAdapterAvailable = hasAdapter;
+          hasAdapter ? logOk('GPU adapter obtained: ' + (adapter.name || 'unnamed')) : logErr('GPU adapter NULL — no compatible GPU');
+
+          if (hasAdapter) {
+            try {
+              const device = await adapter.requestDevice();
+              const hasDev = !!device;
+              set('rDevice', hasDev, hasDev ? 'ok' : 'err');
+              _results.gpuDeviceObtained = hasDev;
+              hasDev ? logOk('GPU device obtained') : logErr('GPU device NULL');
+              if (device) device.destroy();
+            } catch (de) {
+              set('rDevice', 'ERROR: ' + de.message, 'err');
+              _results.gpuDeviceObtained = false;
+              logErr('GPU device error: ' + de.message);
+            }
+          }
+        } catch (ae) {
+          set('rAdapter', 'ERROR: ' + ae.message, 'err');
+          _results.gpuAdapterAvailable = false;
+          logErr('requestAdapter() error: ' + ae.message);
+        }
+      } else {
+        set('rAdapter', 'N/A (no navigator.gpu)', 'dim');
+        set('rDevice',  'N/A (no navigator.gpu)', 'dim');
+        _results.gpuAdapterAvailable = false;
+        _results.gpuDeviceObtained   = false;
+      }
+    }
+
+    // ── Step 2: WebLLM import ────────────────────────────────────────────────────
+    async function probeWebLLM() {
+      log('=== WEBLLM IMPORT ===', 'log-warn');
+      logInfo('Importing from: ' + WEBLLM_CDN);
+      try {
+        _mod = await import(WEBLLM_CDN);
+        logOk('WebLLM import OK');
+        set('rImport', 'OK', 'ok');
+        _results.webllmImport = 'OK';
+
+        // Version
+        const ver = _mod.version || _mod.VERSION ||
+                    (_mod.MLCEngine && _mod.MLCEngine.version) ||
+                    (_mod.prebuiltAppConfig && _mod.prebuiltAppConfig.version) ||
+                    'NOT_EXPOSED';
+        set('rVersion', ver);
+        _results.webllmVersion = ver;
+        logInfo('Version: ' + ver);
+
+        // API surface
+        const hasMLCEngine       = !!(typeof _mod.MLCEngine === 'function');
+        const hasCreateMLCEngine = !!(typeof _mod.CreateMLCEngine === 'function');
+        set('rMLCEngine',       hasMLCEngine       ? 'YES (function)' : 'NO', hasMLCEngine       ? 'ok' : 'warn');
+        set('rCreateMLCEngine', hasCreateMLCEngine ? 'YES (function)' : 'NO', hasCreateMLCEngine ? 'ok' : 'warn');
+        _results.mlcEngineClass    = hasMLCEngine;
+        _results.createMLCEngine   = hasCreateMLCEngine;
+        logInfo('MLCEngine class: ' + hasMLCEngine + ' | CreateMLCEngine fn: ' + hasCreateMLCEngine);
+
+        // Exported keys for debugging
+        const keys = Object.keys(_mod);
+        logInfo('Exported keys: ' + keys.join(', '));
+        _results.exportedKeys = keys;
+
+        // Registry
+        await probeRegistry();
+
+      } catch (err) {
+        logErr('WebLLM import FAILED: ' + err.message);
+        set('rImport', 'FAILED: ' + err.message, 'err');
+        _results.webllmImport = 'FAILED';
+        _results.importError  = err.message;
+        _results.firstFailedOperation = 'IMPORT_WEBLLM';
+      }
+    }
+
+    // ── Step 3: Registry probe ───────────────────────────────────────────────────
+    async function probeRegistry() {
+      log('=== REGISTRY PROBE ===', 'log-warn');
+      let registry = null;
+
+      if (_mod.prebuiltAppConfig && Array.isArray(_mod.prebuiltAppConfig.model_list)) {
+        registry = _mod.prebuiltAppConfig.model_list;
+        logOk('prebuiltAppConfig.model_list found, ' + registry.length + ' entries');
+      } else if (Array.isArray(_mod.prebuiltList)) {
+        registry = _mod.prebuiltList;
+        logOk('prebuiltList found, ' + registry.length + ' entries');
+      } else if (Array.isArray(_mod.modelList)) {
+        registry = _mod.modelList;
+        logOk('modelList found, ' + registry.length + ' entries');
+      } else {
+        logWarn('No model registry accessible from module');
+        set('rRegistry', 'NOT ACCESSIBLE', 'warn');
+        _results.registryAccessible = false;
+        _results.registryCount = 0;
+        return;
+      }
+
+      set('rRegistry', 'YES', 'ok');
+      set('rRegistryCount', registry.length);
+      _results.registryAccessible = true;
+      _results.registryCount = registry.length;
+
+      // Extract IDs
+      const ids = registry.map(function(e) {
+        return typeof e === 'string' ? e : (e.model_id || e.id || JSON.stringify(e).substring(0,60));
+      });
+      _results.registryIds = ids;
+
+      // Check for our target model
+      const TARGET = 'SmolLM2-360M-Instruct-q4f16_1-MLC';
+      const LLAMA   = 'Llama-3.2-1B-Instruct-q4f16_1-MLC';
+
+      const smolExact = ids.includes(TARGET);
+      const llamaExact = ids.includes(LLAMA);
+
+      // Also check case-insensitive or partial match for SmolLM2
+      const smolPartial = ids.filter(id => id.toLowerCase().includes('smollm2') || id.toLowerCase().includes('smol'));
+      const llamaPartial = ids.filter(id => id.toLowerCase().includes('llama-3.2-1b'));
+
+      set('rSmolInReg', smolExact ? 'YES — ' + TARGET : ('NO (exact match failed). Partial: ' + (smolPartial.join(', ') || 'none')), smolExact ? 'ok' : 'err');
+      set('rLlamaInReg', llamaExact ? 'YES — ' + LLAMA : ('NO. Partial: ' + (llamaPartial.join(', ') || 'none')), llamaExact ? 'ok' : 'warn');
+
+      _results.smolModelInRegistry   = smolExact;
+      _results.llamaModelInRegistry  = llamaExact;
+      _results.smolPartialMatches    = smolPartial;
+      _results.llamaPartialMatches   = llamaPartial;
+
+      if (smolExact) {
+        logOk('SmolLM2-360M confirmed in registry: ' + TARGET);
+      } else {
+        logErr('SmolLM2-360M NOT FOUND in registry with exact ID: ' + TARGET);
+        logWarn('SmolLM2 partial matches: ' + (smolPartial.join(', ') || 'NONE'));
+      }
+
+      // Show all IDs in registry list
+      const div = document.getElementById('registryList');
+      const pre = document.createElement('pre');
+      pre.textContent = ids.join('\n');
+      div.appendChild(pre);
+      logInfo('All registry IDs listed in UI');
+    }
+
+    // ── Step 4: Load model ────────────────────────────────────────────────────────
+    async function loadModel() {
+      if (!_mod) { logErr('WebLLM not imported yet. Run probe first.'); return; }
+      log('=== MODEL LOAD ===', 'log-warn');
+
+      const TARGET = 'SmolLM2-360M-Instruct-q4f16_1-MLC';
+
+      // Determine which model ID to actually use
+      // If exact ID not in registry, attempt to find a correct SmolLM2 ID
+      let modelToLoad = TARGET;
+      if (_results.registryAccessible && !_results.smolModelInRegistry) {
+        if (_results.smolPartialMatches && _results.smolPartialMatches.length > 0) {
+          // Pick the first partial match — log it clearly
+          modelToLoad = _results.smolPartialMatches[0];
+          logWarn('Exact ID not in registry. Using closest match: ' + modelToLoad);
+          _results.modelIdSubstituted = TARGET + ' → ' + modelToLoad;
+        } else {
+          logErr('No SmolLM2 model found in registry at all. Cannot proceed with SmolLM2.');
+          // Try Llama instead if available
+          if (_results.llamaPartialMatches && _results.llamaPartialMatches.length > 0) {
+            modelToLoad = _results.llamaPartialMatches[0];
+            logWarn('Falling back to Llama partial match: ' + modelToLoad);
+            _results.modelIdSubstituted = TARGET + ' → ' + modelToLoad;
+          } else if (_results.registryIds && _results.registryIds.length > 0) {
+            // Last resort: use first available model
+            modelToLoad = _results.registryIds[0];
+            logWarn('Last resort: using first available registry model: ' + modelToLoad);
+            _results.modelIdSubstituted = TARGET + ' → ' + modelToLoad;
+          }
+        }
+      }
+
+      set('rModelReq', modelToLoad);
+      _results.modelIdRequested = modelToLoad;
+      logInfo('Attempting to load: ' + modelToLoad);
+
+      // Determine correct engine creation API
+      let engineFactory = null;
+      let engineFactoryName = null;
+
+      if (typeof _mod.CreateMLCEngine === 'function') {
+        engineFactory = _mod.CreateMLCEngine;
+        engineFactoryName = 'CreateMLCEngine';
+      } else if (typeof _mod.MLCEngine === 'function') {
+        engineFactory = null; // Will use new _mod.MLCEngine()
+        engineFactoryName = 'new MLCEngine()';
+      } else {
+        logErr('No engine creation API found in WebLLM module.');
+        _results.firstFailedOperation = 'ENGINE_CREATE';
+        _results.modelState = 'FAILED';
+        set('rModelState', 'FAILED', 'err');
+        return;
+      }
+
+      logInfo('Using engine API: ' + engineFactoryName);
+      _results.engineApi = engineFactoryName;
+
+      let lastProgress = null;
+      let downloadStarted = false;
+      let downloadCompleted = false;
+
+      const progressCb = (report) => {
+        const pct = Math.round((report.progress || 0) * 100);
+        const text = report.text || '';
+        lastProgress = pct + '% — ' + text;
+        set('rDlProg', lastProgress);
+        _results.lastDownloadProgress = lastProgress;
+
+        if (pct > 0 && !downloadStarted) {
+          downloadStarted = true;
+          set('rDlStart', 'YES', 'ok');
+          _results.downloadStarted = true;
+          logOk('Download started: ' + pct + '%');
+        }
+        if (pct >= 100 && text.toLowerCase().includes('finish') || text.toLowerCase().includes('done') || text.toLowerCase().includes('loading') && pct === 100) {
+          if (!downloadCompleted) {
+            downloadCompleted = true;
+            set('rDlDone', 'YES', 'ok');
+            _results.downloadCompleted = true;
+            logOk('Download/init at 100%');
+          }
+        }
+        logInfo('Progress ' + pct + '%: ' + text.substring(0, 80));
+      };
+
+      try {
+        // Create engine
+        set('rEngineCreated', 'CREATING…', 'warn');
+        let engine;
+
+        if (typeof _mod.CreateMLCEngine === 'function') {
+          // Newer API: CreateMLCEngine(modelId, { initProgressCallback })
+          logInfo('Using CreateMLCEngine(modelId, opts) API…');
+          set('rReloadStart', 'N/A — CreateMLCEngine handles load');
+          engine = await _mod.CreateMLCEngine(modelToLoad, {
+            initProgressCallback: progressCb,
+          });
+          set('rEngineCreated', 'YES (via CreateMLCEngine)', 'ok');
+          set('rReloadStart', 'YES (implicit in CreateMLCEngine)', 'ok');
+          set('rReloadRet', 'YES (CreateMLCEngine resolved)', 'ok');
+          _results.engineCreated = true;
+          _results.reloadStarted = true;
+          _results.reloadReturned = true;
+          logOk('CreateMLCEngine() resolved');
+          downloadCompleted = true;
+          set('rDlDone', 'YES', 'ok');
+          _results.downloadCompleted = true;
+        } else {
+          // Older API: new MLCEngine(), then engine.reload(modelId)
+          logInfo('Using new MLCEngine() + reload() API…');
+          engine = new _mod.MLCEngine();
+          set('rEngineCreated', 'YES (new MLCEngine)', 'ok');
+          _results.engineCreated = true;
+          logOk('MLCEngine instance created');
+
+          if (typeof engine.setInitProgressCallback === 'function') {
+            engine.setInitProgressCallback(progressCb);
+          }
+
+          set('rReloadStart', 'YES', 'ok');
+          _results.reloadStarted = true;
+          logInfo('Calling engine.reload(' + modelToLoad + ')…');
+          await engine.reload(modelToLoad);
+          set('rReloadRet', 'YES', 'ok');
+          _results.reloadReturned = true;
+          logOk('engine.reload() returned');
+          downloadCompleted = true;
+          set('rDlDone', 'YES', 'ok');
+          _results.downloadCompleted = true;
+        }
+
+        _engine = engine;
+        _results.modelIdActuallyLoaded = modelToLoad;
+        set('rModelLoaded', modelToLoad, 'ok');
+
+        // Pipeline check
+        let pipelineOk = false;
+        let pipelineDesc = '';
+        try {
+          if (engine.getPipeline && engine.getPipeline()) {
+            pipelineOk = true;
+            pipelineDesc = 'PIPELINE_PRESENT';
+          } else if (typeof engine.runtimeStatsText === 'function') {
+            engine.runtimeStatsText();
+            pipelineOk = true;
+            pipelineDesc = 'RUNTIME_STATS_OK';
+          } else {
+            pipelineOk = true;
+            pipelineDesc = 'CHECK_SKIPPED_RELY_ON_VERIFY';
+          }
+        } catch (pe) {
+          pipelineOk = false;
+          pipelineDesc = 'FAILED: ' + pe.name + ': ' + pe.message;
+          if (pe.name === 'AbortError') _results.abortError = true;
+        }
+
+        set('rPipeline', pipelineDesc, pipelineOk ? 'ok' : 'err');
+        _results.pipelineState = pipelineDesc;
+
+        if (!pipelineOk) {
+          _results.firstFailedOperation = 'PIPELINE_CHECK';
+          _results.errorCode = 'MODEL_LOAD_ABORTED_OR_EMPTY';
+          _results.modelState = 'FAILED';
+          set('rModelState', 'FAILED — pipeline check failed', 'err');
+          logErr('Pipeline check FAILED: ' + pipelineDesc);
+          return;
+        }
+
+        logOk('Pipeline check passed: ' + pipelineDesc);
+
+        // Verify inference
+        await runVerify(engine, modelToLoad);
+
+      } catch (err) {
+        const name = err.name || 'UnknownError';
+        const msg  = err.message || String(err);
+        const stk  = err.stack ? err.stack.split('\n')[0] : '—';
+
+        _results.firstFailedOperation = _results.firstFailedOperation || 'LOAD_SEQUENCE';
+        _results.errorCode   = _results.errorCode   || (msg.includes('abort') || name === 'AbortError' ? 'MODEL_LOAD_ABORTED_OR_EMPTY' : 'LOAD_FAILED');
+        _results.errorName   = name;
+        _results.errorMsg    = msg;
+        _results.abortError  = name === 'AbortError' || msg.toLowerCase().includes('abort');
+        _results.modelNotLoadedError = name === 'ModelNotLoadedError' || msg.toLowerCase().includes('not loaded');
+        _results.modelState  = 'FAILED';
+
+        set('rModelState', 'FAILED', 'err');
+        set('rFailOp',   _results.firstFailedOperation, 'err');
+        set('rErrCode',  _results.errorCode, 'err');
+        set('rErrName',  name, 'err');
+        set('rErrMsg',   msg.substring(0, 120), 'err');
+        set('rErrStack', stk.substring(0, 100), 'err');
+        set('rAbort',    String(_results.abortError), _results.abortError ? 'err' : 'ok');
+        set('rMNLE',     String(_results.modelNotLoadedError), _results.modelNotLoadedError ? 'err' : 'ok');
+
+        logErr('Load FAILED: ' + name + ': ' + msg);
+      }
+    }
+
+    // ── Verify inference ─────────────────────────────────────────────────────────
+    async function runVerify(engine, modelId) {
+      log('=== VERIFY INFERENCE ===', 'log-warn');
+      set('rVerifyStart', 'YES', 'ok');
+      _results.verifyStarted = true;
+
+      const PROMPT = 'Reply with exactly: sky blue';
+      set('rVerifyPrompt', PROMPT);
+
+      try {
+        const result = await engine.chat.completions.create({
+          messages: [
+            { role: 'system', content: 'You are a test assistant. Be extremely brief and literal.' },
+            { role: 'user',   content: PROMPT },
+          ],
+          max_tokens: 20,
+          temperature: 0.0,
+        });
+
+        const text = result?.choices?.[0]?.message?.content || '';
+        set('rVerifyResp', text || '(empty)');
+        _results.verifyResponse = text;
+
+        if (!text || text.trim().length === 0) {
+          set('rVerifyResult', 'FAILED — empty response', 'err');
+          _results.verifyResult = 'FAILED_EMPTY';
+          _results.modelState = 'FAILED';
+          set('rModelState', 'FAILED — verify empty', 'err');
+          logErr('Verify inference returned empty response');
+        } else {
+          set('rVerifyResult', 'PASS — "' + text.trim().substring(0, 80) + '"', 'ok');
+          _results.verifyResult = 'PASS';
+          _results.modelState = 'READY';
+          set('rModelState', 'READY', 'ok');
+          logOk('Verify inference PASS: "' + text.trim().substring(0, 60) + '"');
+
+          // Enable inference tests
+          document.getElementById('btnInference').disabled = false;
+          document.getElementById('btnLoad').disabled = true;
+        }
+      } catch (err) {
+        const name = err.name || 'Error';
+        const msg  = err.message || String(err);
+        set('rVerifyResult', 'FAILED — ' + name + ': ' + msg.substring(0, 80), 'err');
+        _results.verifyResult  = 'FAILED_EXCEPTION';
+        _results.modelState    = 'FAILED';
+        _results.errorName     = name;
+        _results.errorMsg      = msg;
+        _results.errorCode     = name === 'ModelNotLoadedError' ? 'MODEL_NOT_LOADED' :
+                                  (name === 'AbortError' ? 'MODEL_LOAD_ABORTED_OR_EMPTY' : 'VERIFY_INFERENCE_FAILED');
+        _results.modelNotLoadedError = name === 'ModelNotLoadedError' || msg.toLowerCase().includes('not loaded');
+        _results.abortError    = name === 'AbortError';
+
+        set('rModelState', 'FAILED — verify exception', 'err');
+        set('rErrName',  name, 'err');
+        set('rErrMsg',   msg.substring(0, 120), 'err');
+        set('rErrCode',  _results.errorCode, 'err');
+        set('rAbort',    String(_results.abortError), _results.abortError ? 'err' : 'ok');
+        set('rMNLE',     String(_results.modelNotLoadedError), _results.modelNotLoadedError ? 'err' : 'ok');
+        logErr('Verify inference FAILED: ' + name + ': ' + msg);
+      }
+    }
+
+    // ── Inference tests (after READY) ────────────────────────────────────────────
+    async function runInferenceTests() {
+      if (!_engine) { logErr('No engine available'); return; }
+      log('=== REAL INFERENCE TESTS ===', 'log-warn');
+
+      const tests = [
+        { id: '1', prompt: 'Reply with exactly: sky blue',    sysEl: 'rInf1src', respEl: 'rInf1resp' },
+        { id: '2', prompt: 'Tell me something funny.',        sysEl: 'rInf2src', respEl: 'rInf2resp' },
+        { id: '3', prompt: 'What is a video game?',           sysEl: 'rInf3src', respEl: 'rInf3resp' },
+        { id: '4', prompt: 'My project is called Blue Wolf.', sysEl: 'rInf4src', respEl: null },
+        { id: '5', prompt: 'What project did I just tell you about?', sysEl: 'rInf5src', respEl: 'rInf5resp' },
+      ];
+
+      const history = [];
+
+      for (const t of tests) {
+        logInfo('Testing: "' + t.prompt + '"');
+        history.push({ role: 'user', content: t.prompt });
+        try {
+          const result = await _engine.chat.completions.create({
+            messages: [
+              { role: 'system', content: 'You are Shadow Reaper, a direct and helpful AI. Keep replies brief.' },
+              ...history,
+            ],
+            max_tokens: 120,
+            temperature: 0.7,
+          });
+          const text = result?.choices?.[0]?.message?.content || '';
+          history.push({ role: 'assistant', content: text });
+          set(t.sysEl, 'LOCAL_MODEL', 'ok');
+          if (t.respEl) set(t.respEl, text.trim().substring(0, 200));
+          _results['inf' + t.id + '_source']   = 'LOCAL_MODEL';
+          _results['inf' + t.id + '_response'] = text;
+          logOk('Inference ' + t.id + ' SOURCE=LOCAL_MODEL: "' + text.trim().substring(0, 60) + '"');
+        } catch (err) {
+          set(t.sysEl, 'ERROR: ' + err.name, 'err');
+          if (t.respEl) set(t.respEl, err.message.substring(0, 100));
+          _results['inf' + t.id + '_source'] = 'ERROR';
+          _results['inf' + t.id + '_error']  = err.message;
+          logErr('Inference ' + t.id + ' FAILED: ' + err.name + ': ' + err.message);
+        }
+      }
+    }
+
+    // ── Button wiring ────────────────────────────────────────────────────────────
+    document.getElementById('btnProbe').addEventListener('click', async () => {
+      document.getElementById('btnProbe').disabled = true;
+      try {
+        await probeBrowser();
+        await probeWebLLM();
+        document.getElementById('btnLoad').disabled = false;
+      } catch (e) {
+        logErr('Probe error: ' + e.message);
+      }
+      document.getElementById('btnProbe').disabled = false;
+    });
+
+    document.getElementById('btnLoad').addEventListener('click', async () => {
+      document.getElementById('btnLoad').disabled = true;
+      try {
+        await loadModel();
+      } catch (e) {
+        logErr('Load error: ' + e.message);
+        document.getElementById('btnLoad').disabled = false;
+      }
+    });
+
+    document.getElementById('btnInference').addEventListener('click', async () => {
+      document.getElementById('btnInference').disabled = true;
+      try {
+        await runInferenceTests();
+      } catch (e) {
+        logErr('Inference test error: ' + e.message);
+      }
+      document.getElementById('btnInference').disabled = false;
+    });
+
+    document.getElementById('btnCopy').addEventListener('click', () => {
+      navigator.clipboard.writeText(JSON.stringify(_results, null, 2)).then(() => {
+        logOk('Results JSON copied to clipboard.');
+      }).catch(() => {
+        logWarn('Clipboard copy failed. Results in console.');
+        console.log('PROBE RESULTS:', JSON.stringify(_results, null, 2));
+      });
+    });
+
+    // Auto-run browser probe on load
+    window.addEventListener('load', async () => {
+      logInfo('Probe loaded. Click "Run Full Probe" to start.');
+      // Pre-populate browser info immediately
+      set('rBrowser', navigator.userAgent.substring(0, 80));
+      set('rSecure', window.isSecureContext, window.isSecureContext ? 'ok' : 'err');
+      set('rGpuApi', !!(navigator.gpu), !!(navigator.gpu) ? 'ok' : 'err');
+    });
+  </script>
+</body>
+</html>

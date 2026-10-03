@@ -6907,17 +6907,17 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div>
 
 <div class="page" id="feed">
-    <h2 class="eclipse-title"><!-- ⚡ bolt is a Grim AI launcher -->
-        <button id="bolt-grim-launcher"
-                onclick="toggleGrimPanel()"
-                aria-label="Open Grim AI Assistant"
-                title="Open Grim AI Assistant">
-            <span class="bolt-icon" aria-hidden="true">⚡</span>
-            <span class="bolt-label">Click Here</span>
-        </button> Eclipse Feed</h2>
+    <!-- ── Feed header: title + Shadow Reaper launcher ── -->
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:0;">
+        <h2 class="eclipse-title" style="margin:0;">Eclipse Feed</h2>
+        <button id="snxSRLauncher" onclick="snxOpenShadowReaper()" aria-label="Open Shadow Reaper AI">
+            <span class="snx-sr-bolt" aria-hidden="true">⚡</span>
+            <span>CLICK ME</span>
+        </button>
+    </div>
 
     <!-- ── Announcements Banner (published announcements shown to users) ── -->
-    <div id="snxAnnDisplay" style="margin-bottom:4px;"></div>
+    <div id="snxAnnDisplay" style="margin-bottom:4px;margin-top:8px;"></div>
 
     <!-- ── Story Bar ── always visible ── -->
     <div class="section-card" style="padding:12px 14px 8px;">
@@ -12533,12 +12533,10 @@ window.addEventListener('snx:openCreatorChannel', async e => {
   window._snxFirestoreDB  = db;
   window._snxFirestoreFns = { doc, getDoc, setDoc, updateDoc };
 
-  // ── Firestore compat bridge for non-module Shadow Reaper scripts ──────────
+  // ── Firestore compat bridge for storage/context services ──────────────────
   // snx-shadow-memory.js, snx-shadow-conv-history.js, and snx-shadow-adaptive.js
-  // use the Firebase Compat chained API (db.collection(...).doc(...).where(...)).
-  // This project uses the modular SDK v12, so we expose a thin compat wrapper
-  // that translates compat-style calls into modular SDK calls.
-  // This is the ONLY change needed to fix the "Memory unavailable" regression.
+  // use the Firebase Compat chained API. This thin wrapper translates compat-style
+  // calls into modular SDK calls (Firebase v12 modular API).
   //
   // Exposed as window._snxDbCompat — used by _getFirestore() in those modules.
   // Does NOT replace window._snxDb (modular) or window._snxFirestore (modular).
@@ -31770,1525 +31768,6 @@ window.switchAdminTab = function(tab) {
 <!-- ── Shadow Nexus Platform Upgrade (Status, Announcements, Search, Security, Maintenance, Audit) ── -->
 <script src="shadow-nexus-upgrade.js?v=SNS-2026-FOUNDER-CLEANUP-001"></script>
 
-<!-- ═══════════════════ GRIM AI ASSISTANT PANEL ═══════════════════ -->
-
-<style>
-/* ══════════════════════════════════════════════
-   ⚡ BOLT LAUNCHER — feed title button
-   ══════════════════════════════════════════════ */
-#bolt-grim-launcher {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 4px 10px 4px 6px;
-    border-radius: 30px;
-    position: relative;
-    outline: none;
-    /* inherit font from h2 */
-    font-size: inherit;
-    font-weight: inherit;
-    color: inherit;
-    vertical-align: middle;
-    line-height: 1;
-    /* touch target */
-    min-width: 48px;
-    min-height: 48px;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    transition: background 0.18s, box-shadow 0.18s;
-}
-#bolt-grim-launcher:focus-visible {
-    outline: 2px solid #00AEEF;
-    outline-offset: 3px;
-}
-#bolt-grim-launcher:hover,
-#bolt-grim-launcher:focus-visible {
-    background: rgba(0,174,239,0.10);
-    box-shadow: 0 0 18px rgba(0,174,239,0.35), 0 0 36px rgba(0,174,239,0.15);
-}
-#bolt-grim-launcher:active {
-    background: rgba(0,174,239,0.18);
-    transform: scale(0.95);
-}
-#bolt-grim-launcher.grim-panel-open .bolt-icon {
-    text-shadow: 0 0 14px #00eeff, 0 0 28px #0088ff, 0 0 48px rgba(0,200,255,0.7);
-}
-
-/* The ⚡ glyph */
-.bolt-icon {
-    display: inline-block;
-    font-size: 1em;
-    filter: drop-shadow(0 0 6px rgba(0,180,255,0.7));
-    animation: boltPulse 2.4s ease-in-out infinite;
-    will-change: filter, transform;
-}
-@keyframes boltPulse {
-    0%,100% { filter: drop-shadow(0 0 5px rgba(0,174,239,0.65)) drop-shadow(0 0 12px rgba(0,100,220,0.4)); transform: scale(1); }
-    50%      { filter: drop-shadow(0 0 12px rgba(0,220,255,0.9)) drop-shadow(0 0 24px rgba(0,160,255,0.6)); transform: scale(1.08); }
-}
-
-/* "Click Here" label */
-.bolt-label {
-    display: inline-block;
-    font-size: 0.38em;
-    font-weight: 700;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
-    color: #00eeff;
-    text-shadow: 0 0 8px rgba(0,200,255,0.7), 0 0 14px rgba(0,120,220,0.5);
-    border: 1px solid rgba(0,200,255,0.35);
-    border-radius: 20px;
-    padding: 2px 8px;
-    background: rgba(0,80,160,0.18);
-    white-space: nowrap;
-    vertical-align: middle;
-    animation: labelGlow 2.4s ease-in-out infinite;
-}
-@keyframes labelGlow {
-    0%,100% { box-shadow: 0 0 6px rgba(0,180,255,0.30); border-color: rgba(0,200,255,0.35); }
-    50%      { box-shadow: 0 0 14px rgba(0,220,255,0.65), 0 0 24px rgba(0,140,255,0.35); border-color: rgba(0,240,255,0.70); }
-}
-
-/* Tap flash on mobile */
-@media (hover: none) {
-    #bolt-grim-launcher:active .bolt-icon {
-        filter: drop-shadow(0 0 18px #00ffff) drop-shadow(0 0 32px #0088ff);
-    }
-    #bolt-grim-launcher:active .bolt-label {
-        box-shadow: 0 0 22px rgba(0,220,255,0.9);
-    }
-}
-
-/* ══════════════════════════════════════════════
-   ⚡ FLOATING BOLT FAB — persistent launcher
-   Visible on all pages / all screen sizes.
-   Hides when the Grim panel is already open.
-   ══════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════
-   GRIM AI sidebar nav button style
-   ══════════════════════════════════════════════ */
-.nav-item-grim {
-    color: #c8a0ff !important;
-    background: rgba(100,50,180,0.07);
-    border-left: 3px solid rgba(140,70,220,0.45);
-}
-.nav-item-grim:hover {
-    background: rgba(120,60,220,0.15) !important;
-    color: #e0c0ff !important;
-    box-shadow: inset 3px 0 0 rgba(180,100,255,0.7) !important;
-}
-.nav-item-grim.grim-panel-open {
-    background: rgba(120,60,220,0.18) !important;
-    color: #e8d0ff !important;
-    box-shadow: inset 3px 0 0 #c080ff, inset 0 0 14px rgba(160,80,255,0.08) !important;
-}
-
-/* ══════════════════════════════════════════════
-   GRIM AI PANEL OVERLAY
-   ══════════════════════════════════════════════ */
-#grim-panel-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.42);
-    z-index: 4500;
-    backdrop-filter: blur(1px);
-}
-#grim-panel-overlay.visible { display: block; }
-
-/* ══════════════════════════════════════════════
-   GRIM AI PANEL DRAWER
-   Desktop: 400px wide right drawer, draggable
-   Mobile:  full-screen sheet with safe-area
-   ══════════════════════════════════════════════ */
-#grim-panel {
-    position: fixed;
-    top: 0;
-    right: 0;
-    width: min(420px, 100vw);
-    height: 100%;
-    background: linear-gradient(180deg, #0d0a1a 0%, #12091f 40%, #0a0d1a 100%);
-    border-left: 1px solid rgba(140,70,220,0.32);
-    box-shadow: -6px 0 60px rgba(80,20,160,0.30), -2px 0 20px rgba(0,100,255,0.12);
-    transform: translateX(100%);
-    transition: transform 0.32s cubic-bezier(0.4,0,0.2,1), opacity 0.32s ease;
-    opacity: 0;
-    z-index: 4600;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    /* safe area */
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    padding-right: env(safe-area-inset-right, 0px);
-}
-#grim-panel.open {
-    transform: translateX(0);
-    opacity: 1;
-}
-
-/* Panel header — also acts as drag handle on desktop */
-#grim-panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 16px 12px;
-    border-bottom: 1px solid rgba(140,70,220,0.2);
-    flex-shrink: 0;
-    background: rgba(20,10,40,0.8);
-    cursor: grab;
-    user-select: none;
-}
-#grim-panel-header:active { cursor: grabbing; }
-
-#grim-panel-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: #c8a0ff;
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-    text-shadow: 0 0 14px rgba(180,100,255,0.45);
-}
-#grim-panel-sub {
-    font-size: 10px;
-    color: rgba(180,140,255,0.45);
-    letter-spacing: 0.5px;
-    margin-top: 1px;
-}
-#grim-panel-close {
-    width: 36px; height: 36px;
-    background: rgba(100,50,180,0.15);
-    border: 1px solid rgba(140,70,220,0.3);
-    border-radius: 8px;
-    color: rgba(200,160,255,0.7);
-    font-size: 18px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s, color 0.15s;
-    flex-shrink: 0;
-    padding: 0;
-    touch-action: manipulation;
-    min-width: 36px; min-height: 36px;
-}
-#grim-panel-close:hover { background: rgba(140,60,220,0.3); color: #e0c0ff; }
-
-/* Character canvas area */
-#grim-panel-stage {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 160px;
-    position: relative;
-    overflow: hidden;
-    background: radial-gradient(ellipse at 50% 100%, rgba(80,20,140,0.25) 0%, transparent 70%);
-}
-#grim-panel-stage canvas {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-}
-#gp-scene-cv { z-index: 1; }
-#gp-char-cv  { z-index: 2; }
-
-/* Mood/status bar */
-#gp-status {
-    flex-shrink: 0;
-    padding: 6px 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border-bottom: 1px solid rgba(140,70,220,0.12);
-    font-size: 10px;
-    color: rgba(180,140,255,0.55);
-    letter-spacing: 0.5px;
-}
-#gp-mood-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: rgba(180,140,255,0.55);
-    flex-shrink: 0;
-    animation: gpDotPulse 2.5s ease-in-out infinite;
-}
-@keyframes gpDotPulse {
-    0%,100% { opacity: 0.55; transform: scale(1); }
-    50%      { opacity: 1;    transform: scale(1.3); }
-}
-
-/* Navigation help chips */
-#gp-nav-chips {
-    flex-shrink: 0;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    padding: 8px 12px 6px;
-    border-bottom: 1px solid rgba(140,70,220,0.1);
-}
-.gp-nav-chip {
-    font-size: 10px;
-    padding: 4px 10px;
-    border-radius: 12px;
-    background: rgba(80,30,140,0.25);
-    border: 1px solid rgba(140,70,220,0.3);
-    color: rgba(200,160,255,0.75);
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s, border-color 0.15s;
-    white-space: nowrap;
-    touch-action: manipulation;
-    min-height: 28px;
-    display: inline-flex;
-    align-items: center;
-}
-.gp-nav-chip:hover {
-    background: rgba(120,50,200,0.38);
-    color: #e0c8ff;
-    border-color: rgba(180,100,255,0.55);
-}
-
-/* Message display */
-#gp-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(120,60,200,0.25) transparent;
-    overscroll-behavior: contain;
-}
-#gp-messages::-webkit-scrollbar { width: 3px; }
-#gp-messages::-webkit-scrollbar-thumb { background: rgba(120,60,200,0.25); border-radius: 3px; }
-
-.gp-msg {
-    padding: 9px 12px;
-    border-radius: 12px;
-    font-size: 13px;
-    line-height: 1.58;
-    animation: gpMsgIn 0.22s ease-out both;
-    max-width: 92%;
-    word-break: break-word;
-}
-@keyframes gpMsgIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to   { opacity: 1; transform: translateY(0); }
-}
-.gp-msg.user {
-    background: rgba(0,80,180,0.22);
-    border: 1px solid rgba(0,140,255,0.2);
-    color: #c8e8ff;
-    align-self: flex-end;
-    border-bottom-right-radius: 3px;
-}
-.gp-msg.grim {
-    background: rgba(60,20,100,0.35);
-    border: 1px solid rgba(120,60,200,0.28);
-    color: #e0d0ff;
-    align-self: flex-start;
-    border-bottom-left-radius: 3px;
-}
-.gp-msg.grim::before {
-    content: '🌑 ';
-    font-size: 11px;
-}
-.gp-typing {
-    align-self: flex-start;
-    display: none;
-}
-.gp-typing.visible { display: flex; }
-.gp-typing-dots {
-    display: flex;
-    gap: 4px;
-    padding: 8px 12px;
-    background: rgba(60,20,100,0.3);
-    border: 1px solid rgba(120,60,200,0.2);
-    border-radius: 10px;
-    border-bottom-left-radius: 3px;
-    align-items: center;
-}
-.gp-typing-dots span {
-    width: 5px; height: 5px; border-radius: 50%;
-    background: rgba(180,140,255,0.6);
-    animation: gpDotBounce 1.2s ease-in-out infinite;
-}
-.gp-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
-.gp-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes gpDotBounce {
-    0%,80%,100% { transform: scale(0.7); opacity: 0.5; }
-    40%          { transform: scale(1);   opacity: 1;   }
-}
-
-/* ── Input row (text + mic + send) ── */
-#gp-input-row {
-    flex-shrink: 0;
-    display: flex;
-    gap: 6px;
-    padding: 10px 12px;
-    border-top: 1px solid rgba(140,70,220,0.18);
-    background: rgba(10,5,20,0.7);
-    /* keyboard-safe: don't let the row scroll off-screen */
-    position: sticky;
-    bottom: 0;
-}
-#gp-input {
-    flex: 1;
-    padding: 9px 14px;
-    background: rgba(20,10,40,0.9);
-    border: 1px solid rgba(140,70,220,0.35);
-    border-radius: 22px;
-    color: #e0d0ff;
-    font-size: 13px;
-    outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
-    width: 0;
-    margin: 0;
-    min-height: 38px;
-}
-#gp-input::placeholder { color: rgba(160,120,220,0.4); }
-#gp-input:focus {
-    border-color: rgba(160,90,255,0.6);
-    box-shadow: 0 0 12px rgba(120,50,200,0.22);
-}
-/* mic button */
-#gp-mic {
-    width: 38px; height: 38px;
-    background: rgba(60,20,100,0.25);
-    border: 1px solid rgba(140,70,220,0.3);
-    border-radius: 50%;
-    color: rgba(180,140,255,0.65);
-    font-size: 16px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s, box-shadow 0.15s, color 0.15s;
-    flex-shrink: 0;
-    padding: 0;
-    touch-action: manipulation;
-}
-#gp-mic:hover   { background: rgba(80,30,150,0.40); color: #c8a0ff; }
-#gp-mic:active  { transform: scale(0.93); }
-#gp-mic.gp-mic-active {
-    background: rgba(160,40,200,0.35);
-    color: #ff88ff;
-    box-shadow: 0 0 14px rgba(200,80,255,0.55);
-    animation: gpMicPulse 1s ease-in-out infinite;
-}
-@keyframes gpMicPulse {
-    0%,100% { box-shadow: 0 0 10px rgba(200,80,255,0.45); }
-    50%      { box-shadow: 0 0 22px rgba(220,100,255,0.80); }
-}
-#gp-send {
-    width: 38px; height: 38px;
-    background: rgba(100,40,200,0.3);
-    border: 1px solid rgba(150,80,255,0.45);
-    border-radius: 50%;
-    color: #c8a0ff;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s, box-shadow 0.15s;
-    flex-shrink: 0;
-    padding: 0;
-    touch-action: manipulation;
-}
-#gp-send:hover  { background: rgba(130,50,230,0.45); box-shadow: 0 0 14px rgba(140,60,255,0.35); }
-#gp-send:active { transform: scale(0.93); }
-
-/* Full page link */
-#gp-fullpage-link {
-    flex-shrink: 0;
-    text-align: center;
-    padding: 6px 12px 10px;
-    font-size: 10px;
-    color: rgba(160,120,220,0.45);
-    letter-spacing: 0.4px;
-}
-#gp-fullpage-link a {
-    color: rgba(180,140,255,0.6);
-    text-decoration: none;
-    border-bottom: 1px solid rgba(160,100,220,0.25);
-    transition: color 0.15s;
-}
-#gp-fullpage-link a:hover { color: #c8a0ff; }
-
-/* "Take me there" action button inside chat bubble */
-.gp-go-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 6px 14px;
-    background: rgba(100,40,200,0.22);
-    border: 1px solid rgba(160,90,255,0.5);
-    border-radius: 16px;
-    color: #d8b8ff;
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s, box-shadow 0.15s, color 0.15s;
-    letter-spacing: 0.3px;
-    width: auto;
-    margin: 0;
-    align-self: flex-start;
-    touch-action: manipulation;
-}
-.gp-go-btn:hover {
-    background: rgba(130,55,230,0.38);
-    box-shadow: 0 0 14px rgba(140,60,255,0.35);
-    color: #ecd8ff;
-    border-color: rgba(190,120,255,0.7);
-}
-.gp-go-btn:active { transform: scale(0.96); }
-
-/* ── Mobile-specific Grim panel ── */
-@media (max-width: 600px) {
-    #grim-panel {
-        width: 100vw;
-        height: 100%;
-        /* slide up from bottom on very small screens */
-        border-left: none;
-        border-top: 1px solid rgba(140,70,220,0.32);
-        border-radius: 18px 18px 0 0;
-        transform: translateY(100%);
-        right: 0;
-        bottom: 0;
-        top: auto;
-        max-height: 96svh;
-        max-height: 96vh; /* fallback */
-    }
-    #grim-panel.open {
-        transform: translateY(0);
-        opacity: 1;
-    }
-    #grim-panel-stage { height: 120px; }
-    #grim-panel-header { cursor: default; border-radius: 18px 18px 0 0; }
-    /* drag handle pill */
-    #grim-panel-header::before {
-        content: '';
-        display: block;
-        width: 38px; height: 4px;
-        border-radius: 3px;
-        background: rgba(180,140,255,0.3);
-        position: absolute;
-        top: 7px;
-        left: 50%;
-        transform: translateX(-50%);
-    }
-    #grim-panel-header { position: relative; padding-top: 20px; }
-    /* make FAB sit above the bottom nav if one is present */
-}
-
-/* Resize handle (desktop right edge) */
-#grim-resize-handle {
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 5px;
-    cursor: ew-resize;
-    z-index: 1;
-    touch-action: none;
-}
-@media (max-width: 600px) {
-    #grim-resize-handle { display: none; }
-}
-</style>
-
-<!-- Grim AI Panel HTML -->
-<div id="grim-panel-overlay"></div>
-
-<div id="grim-panel" role="dialog" aria-label="Grim AI Assistant" aria-modal="true">
-
-    <!-- Desktop resize handle (left edge drag) -->
-    <div id="grim-resize-handle" aria-hidden="true"></div>
-
-    <!-- Header / drag handle on desktop -->
-    <div id="grim-panel-header">
-        <div>
-            <div id="grim-panel-title">🌑 Shadow Reaper</div>
-            <div id="grim-panel-sub">Your guide through Shadow Nexus Social</div>
-        </div>
-        <button id="grim-panel-close" aria-label="Close Grim AI">✕</button>
-    </div>
-
-    <!-- Mini character stage -->
-    <div id="grim-panel-stage">
-        <canvas id="gp-scene-cv"></canvas>
-        <canvas id="gp-char-cv" width="420" height="160"></canvas>
-    </div>
-
-    <!-- Status bar -->
-    <div id="gp-status">
-        <div id="gp-mood-dot"></div>
-        <span id="gp-mood-label">Calm and Present</span>
-        <span style="margin-left:auto;" id="gp-conn-status">◆ Ready</span>
-    </div>
-
-    <!-- Quick navigation chips -->
-    <div id="gp-nav-chips">
-        <span class="gp-nav-chip" data-topic="I need to talk about how I'm feeling right now">🫀 Feelings</span>
-        <span class="gp-nav-chip" data-topic="I feel anxious and overwhelmed">😤 Anxiety</span>
-        <span class="gp-nav-chip" data-topic="Tell me about philosophy and the meaning of life">📖 Philosophy</span>
-        <span class="gp-nav-chip" data-topic="Let's talk about music I love">🎵 Music</span>
-        <span class="gp-nav-chip" data-topic="Tell me a story or let's build one together">📜 Stories</span>
-        <span class="gp-nav-chip" data-topic="I need support or someone to talk to">🫂 Support Rooms</span>
-        <span class="gp-nav-chip" data-topic="What are Storm Rooms and how do I use them?">⚡ Storm Rooms</span>
-        <span class="gp-nav-chip" data-topic="What is the Community Hub?">💙 Community</span>
-        <span class="gp-nav-chip" data-topic="How do Settings and privacy work?">⚙️ Settings</span>
-        <span class="gp-nav-chip" data-topic="What are the community rules?">📜 Rules</span>
-        <span class="gp-nav-chip" data-topic="How do friend requests and family connections work?">🦋 Friends</span>
-        <span class="gp-nav-chip" data-topic="What can I do on Shadow Nexus Social?">🌑 What's here?</span>
-    </div>
-
-    <!-- Messages -->
-    <div id="gp-messages" role="log" aria-live="polite"></div>
-
-    <!-- Typing indicator -->
-    <div class="gp-typing" id="gp-typing">
-        <div class="gp-typing-dots">
-            <span></span><span></span><span></span>
-        </div>
-    </div>
-
-    <!-- Input row: mic + voice-toggle + text + send -->
-    <div id="gp-input-row">
-        <button id="gp-mic" aria-label="Voice input" title="Voice input">🎙️</button>
-        <input type="text" id="gp-input" placeholder="Speak or type…" maxlength="400" autocomplete="off" aria-label="Message Shadow Reaper" inputmode="text">
-        <button id="gp-voice-toggle" onclick="gpToggleVoice()" aria-label="Toggle voice" title="Voice on — click to mute" style="width:38px;height:38px;background:rgba(60,20,100,0.25);border:1px solid rgba(140,70,220,0.3);border-radius:50%;color:rgba(180,140,255,0.65);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;touch-action:manipulation;transition:background 0.15s,box-shadow 0.15s,opacity 0.15s;">🔊</button>
-        <button id="gp-send" aria-label="Send">➤</button>
-    </div>
-
-    <!-- Link to full experience -->
-    <div id="gp-fullpage-link">
-        Want the full AI experience? <a href="grim-ai-assistant.html" target="_blank">Open Shadow Reaper ↗</a>
-        <span id="gp-key-hint" style="display:none;"> · <a href="grim-ai-assistant.html" target="_blank" style="color:rgba(255,180,80,.55);">Set API key ↗</a></span>
-    </div>
-
-</div>
-
-<script>
-/* ================================================================
-   GRIM AI PANEL — Embedded sidebar assistant for Shadow Nexus Social
-   Namespaced under GrimPanel to avoid conflicts with main app.
-================================================================ */
-(function () {
-'use strict';
-
-// ── Panel open/close ──────────────────────────────────────────
-function _grimSetOpen(open) {
-    const panel   = document.getElementById('grim-panel');
-    const overlay = document.getElementById('grim-panel-overlay');
-    const navBtn  = document.getElementById('navGrimAI');
-    const boltBtn = document.getElementById('bolt-grim-launcher');
-    if (open) {
-        panel.classList.add('open');
-        overlay.classList.add('visible');
-        document.body.classList.add('grim-open');
-        if (navBtn)  navBtn.classList.add('grim-panel-open');
-        if (boltBtn) boltBtn.classList.add('grim-panel-open');
-    } else {
-        panel.classList.remove('open');
-        overlay.classList.remove('visible');
-        document.body.classList.remove('grim-open');
-        if (navBtn)  navBtn.classList.remove('grim-panel-open');
-        if (boltBtn) boltBtn.classList.remove('grim-panel-open');
-    }
-}
-
-window.toggleGrimPanel = function () {
-    const panel = document.getElementById('grim-panel');
-    const isOpen = panel.classList.contains('open');
-    if (isOpen) {
-        closeGrimPanel();
-    } else {
-        _grimSetOpen(true);
-        // Close the nav sidebar on mobile
-        const side = document.getElementById('side');
-        const menuBtn = document.getElementById('menuButton');
-        const sideOverlay = document.getElementById('sidebarOverlay');
-        const mobileMenuBtn = document.getElementById('snxMobileMenuBtn');
-        if (side) side.classList.remove('active');
-        if (menuBtn) { menuBtn.classList.remove('is-open'); menuBtn.setAttribute('aria-expanded','false'); }
-        if (sideOverlay) sideOverlay.classList.remove('visible');
-        if (mobileMenuBtn) { mobileMenuBtn.classList.remove('menu-open'); mobileMenuBtn.setAttribute('aria-expanded','false'); }
-        // ── Shadow Reaper AI: lazy-load the UNIFIED feature on first open ─────
-        // Stage 3: loads 'shadow-ai-unified' (existing deps + Unified Core + bridge).
-        // Falls back to the existing GP.init() path if the feature fails to load.
-        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('shadow-ai-unified')) {
-            window.SNXFeatureLoader.loadFeature('shadow-ai-unified')
-                .then(function () {
-                    if (window.SNXShadowAI) {
-                        window.SNXShadowAI.open();
-                    }
-                })
-                .catch(function () {
-                    // Feature load failed — fall back to existing GP panel
-                    if (!GP.initialized) GP.init();
-                    setTimeout(() => { const inp = document.getElementById('gp-input'); if (inp) inp.focus(); }, 360);
-                });
-            return; // AI load is async; return now — panel is already open
-        }
-        // ── If UNIFIED AI already loaded, open it directly ────────────────────
-        if (window.SNXShadowAI && window.SNXFeatureLoader && window.SNXFeatureLoader.isLoaded('shadow-ai-unified')) {
-            window.SNXShadowAI.open();
-            return;
-        }
-        // ── Existing GP fallback (no feature loader or not available) ─────────
-        if (!GP.initialized) GP.init();
-        // Focus input (delay allows animation to complete)
-        setTimeout(() => { const inp = document.getElementById('gp-input'); if (inp) inp.focus(); }, 360);
-    }
-};
-
-function closeGrimPanel() {
-    _grimSetOpen(false);
-    // Stop mic if active
-    if (GP.recognition && GP.micActive) {
-        try { GP.recognition.stop(); } catch(e) {}
-        GP.micActive = false;
-        const mic = document.getElementById('gp-mic');
-        if (mic) mic.classList.remove('gp-mic-active');
-    }
-}
-
-document.getElementById('grim-panel-close').addEventListener('click', closeGrimPanel);
-document.getElementById('grim-panel-overlay').addEventListener('click', closeGrimPanel);
-
-// Escape key closes panel
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        const panel = document.getElementById('grim-panel');
-        if (panel && panel.classList.contains('open')) closeGrimPanel();
-    }
-});
-
-// ── Grim Panel namespace ──────────────────────────────────────
-const GP = {
-    initialized: false,
-    speaking: false,
-    apiKey: '',
-    mood: 'calm',
-    conversationHistory: [],
-    messageCount: 0,
-    // mic
-    recognition: null,
-    micActive: false,
-    // tts
-    voiceEnabled: true,
-    synth: window.speechSynthesis || null,
-    voices: [],
-
-    // Animation state
-    t: 0,
-    breathPhase: 0,
-    walkPhase: 0,
-    eyeGlow: 0.8,
-    mouthAmount: 0,
-    leanX: 0,
-    targetLeanX: 0,
-    motes: [],
-    SW: 420, SH: 160,
-    animFrame: null,
-    canvasReady: false,
-};
-
-// Pre-load voices (browsers load async)
-if (GP.synth) {
-    GP.voices = GP.synth.getVoices();
-    GP.synth.addEventListener('voiceschanged', () => { GP.voices = GP.synth.getVoices(); });
-}
-
-// ── Page navigation map ───────────────────────────────────────
-// Each entry: { label, description, detail, action }
-// detail = extended knowledge Grim can draw on when explaining the page.
-// action() navigates to the page and closes the panel.
-const GP_PAGES = {
-    feed: {
-        label: '🏠 Home Feed',
-        description: "The Home Feed is the main social timeline of Shadow Nexus Social. Every post — text, images, and videos — from people you follow shows up here in real time. You can create your own posts, react with emoji, leave comments, repost things you love, and browse Stories at the top of the page. The Eclipse Feed also shows who is currently live.",
-        detail: "To post: tap the post composer at the top of the feed and type, add a photo or video, then hit Post to the Eclipse. Stories appear as bubbles above the feed — tap to view or tap the + to add your own. You can react to any post with emoji by tapping the reaction button. The feed updates live so you never miss anything.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('feed'); }
-    },
-    profile: {
-        label: '👤 Profile',
-        description: "Your Profile page is your personal space on Shadow Nexus Social. It shows your display name, handle, bio, avatar, cover photo, posts, follower and following counts, friends, and photo album. You can edit everything — bio, avatar, cover, custom theme colours, background music, spotlight message, social links, and more — by tapping the Edit Profile button.",
-        detail: "Profile edit tabs: Basics (name, bio, handle), Mood (status), Media (avatar & cover photo), Style (custom theme & colours), Sandbox (free-form HTML/CSS decoration), Links (social links), Sections (toggle which profile sections are visible). Other users can follow you, send friend requests, or message you from your profile. If you go live, a LIVE NOW badge appears on your profile automatically.",
-        action() { closeGrimPanel(); if (typeof viewMyProfile === 'function') viewMyProfile(); }
-    },
-    searchPage: {
-        label: '🔍 Search',
-        description: "The Search page lets you find any user on Shadow Nexus Social by their display name or handle. Type a name into the search bar and press Search to see matching profiles. From the results you can view profiles, follow users, or send them a message.",
-        detail: "Search is visible in the sidebar. Your own search visibility can be adjusted in Settings → Privacy → Who can find me in Search. Search currently covers user profiles.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('searchPage'); }
-    },
-    notificationsPage: {
-        label: '🔔 Notifications',
-        description: "The Notification Center collects every alert in one place. It has four filter tabs: Messages (direct messages), Likes & Comments (activity on your posts), Followers (new follows and friend requests), and System (platform announcements). You can mark all notifications as read or clear them all with the buttons at the top.",
-        detail: "Notifications arrive in real time. The red badge on the bell icon in the sidebar shows how many unread notifications you have. Push notification preferences — which types send alerts to your phone — can be toggled in Settings → Notification Preferences.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('notificationsPage'); }
-    },
-    stormRoomsPage: {
-        label: '⚡ Storm Rooms',
-        description: "Storm Rooms are live anonymous chat rooms where you can have real-time conversations with other members. Choose a display name, then join the Public Lobby (open to everyone, no code needed) or a Private Room using a room code. Private rooms can also be created fresh — you get a code to share with friends. Messages vanish after 10 minutes. No judgment.",
-        detail: "How to use Storm Rooms: 1) Go to Storm Rooms in the sidebar. 2) Enter a shadow display name (e.g. NightBloom). 3) Tap Enter Public Lobby for open chat, or enter a room code and tap Join Private Room. To create a private room tap Create New Private Room — you get a code to share. Inside a room you can see who is online, send messages with emoji, copy the room code, or leave. Messages disappear after 10 minutes keeping things ephemeral.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('stormRoomsPage'); }
-    },
-    supportRoomsPage: {
-        label: '🫂 Support Rooms',
-        description: "Support Rooms are calm, safe, anonymously moderated spaces to share what you are going through and receive genuine peer support. There are six dedicated rooms: Night Owls (anxiety), Morning Light (depression), Venting Lounge (general venting), Healing Circle (trauma & recovery), Grief Garden (loss & grief), and Self-Love Club (body image & esteem). No judgment. No real names required.",
-        detail: "How to use Support Rooms: 1) Go to Support Rooms in the sidebar. 2) Choose a gentle display name (you are anonymous — no one knows your real identity). 3) Pick a room that fits what you are carrying and tap to join. Inside you can chat, use the emoji picker, and read the room rules. Crisis resources are always visible: call 988 or text HOME to 741741 (Crisis Text Line) if you are in danger. Room rules: be kind, no bullying or triggering language, do not give medical advice, respect everyone's pace.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('supportRoomsPage'); }
-    },
-    communityPage: {
-        label: '💙 Community Hub',
-        description: "The Community Hub is a positive shared space with several features: a daily inspirational Quote of the Day (tap refresh for a new one), a Daily Challenge you can complete to earn XP, Community Goals that the whole platform works toward together, Kindness Badges you earn by being a positive force, a Community Pulse where you can send a silent wave of energy to everyone, and an Anonymous Support Board where you can share feelings or support others without your name attached.",
-        detail: "Community Hub sections: Quote of the Day (rotating inspirational quotes, tap ↻ for a new one) · Daily Challenge (+50 XP, resets daily, tap Complete Challenge to claim) · Community Goals (shared targets the whole community contributes to) · Kindness Badges (earned by positive actions — visible on your profile) · Community Pulse (send emoji reactions to the whole community silently) · Anonymous Support Board (post feelings tagged as Just Sharing / Need Support / Venting / Grateful / Milestone — toggle anonymous on/off).",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('communityPage'); }
-    },
-    communityRulesPage: {
-        label: '📜 Community Rules',
-        description: "The Community Rules page outlines what is and is not allowed on Shadow Nexus Social. The six prohibited behaviours are: Bullying, Harassment, Threats, Hate Speech, Spam, and Repeated Disruptive Behaviour. These rules apply to posts, stories, messages, and live streams. The platform uses an AI-assisted moderation system — it detects issues, issues warnings, and escalates if problems continue. Users can appeal any moderation action; all appeals are reviewed personally by the Founder.",
-        detail: "Safety flow: Rule broken → AI detects → Warning issued → Continued issue → Action taken → User can appeal → Founder reviews → Accept or deny. If accepted, restrictions are removed. To appeal: go to the Reports section, explain what happened, and your case will be reviewed. The AI assists moderators but does not replace them — every serious action is human-reviewed.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('communityRulesPage'); }
-    },
-    settingsPage: {
-        label: '⚙️ Settings',
-        description: "Settings lets you control your account across several categories. Privacy: choose who can see your profile, send you friend requests, message you, find you in search, write on your wall, send family requests, see your friends and family lists, and tag you in posts. Game Challenges: control who can invite you to arcade games. Notification Preferences: toggle push notifications for messages, likes, comments, followers, mentions, tags, and announcements individually. Danger Zone: permanently delete your account if you choose.",
-        detail: "Privacy settings options — Profile visibility: Everyone / Friends only / Nobody. Friend requests: Everyone / Nobody. Messages: Everyone / Friends only / Nobody. Search visibility: Everyone / Friends only / Nobody. Wall posts: Everyone / Friends only / Nobody. Family requests: Everyone / Friends / Followers / No one. Family list visibility: Everyone / Friends / Only me. Friends list visibility: Everyone / Friends / Only me. Tagging: Everyone / Friends only / Nobody. Game invites: Everyone / Friends only / Nobody. Push notifications can be enabled per-type. Account deletion is permanent and removes all data.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('settingsPage'); }
-    },
-    arcadeHub: {
-        label: '🕹️ Arcade',
-        description: "The Arcade is Shadow Nexus Social's built-in mini-game hub. You can play games solo or challenge friends directly from their profile. Game challenge invitations go through the notification system. Arcade invite preferences (who can challenge you) are adjustable in Settings.",
-        detail: "Open the Arcade from the sidebar. Challenge a friend by visiting their profile and tapping the Challenge button — you choose the game and send the invite. Pending challenges appear in the Arcade Hub. Game invite privacy is controlled in Settings → Game Challenges.",
-        action() { closeGrimPanel(); if (typeof openArcadeHub === 'function') openArcadeHub(); }
-    },
-    friendsPage: {
-        label: '🦋 Nexus Family & Friends',
-        description: "The Nexus Family & Friends page manages your connections. It has three tabs: Friends (people you are mutually connected with), Requests (pending friend requests you have received), and Family (members you have added to your inner circle with ❤️ Family). You can accept or decline requests from here.",
-        detail: "Friends tab shows all current mutual friends. Requests tab shows incoming friend requests with Accept / Decline buttons. Family tab shows your Family connections and any pending Family requests. Privacy for who can send requests and see your lists is controlled in Settings.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('friendsPage'); }
-    },
-    inboxPage: {
-        label: '💬 Inbox',
-        description: "The Inbox shows all your direct message conversations. Each row shows the other person's name, their online status, a preview of the last message, and an unread count badge. Tap any conversation to open the chat overlay. You can also search conversations by name.",
-        detail: "Conversations are sorted newest first. The 💬 Inbox badge in the sidebar shows your total unread messages across all conversations. To start a new conversation, open someone's profile and tap Message. The chat opens as an overlay and messages are saved in real time.",
-        action() { closeGrimPanel(); if (typeof navTo === 'function') navTo('inboxPage'); }
-    }
-};
-
-// ── Detect which page a message is about ─────────────────────
-function gpDetectPage(text) {
-    const t = text.toLowerCase();
-    // Founder / admin — blocked, never map to a page
-    if (/(founder control|founder panel|founder page|founder setting|founder tool|founder only|admin page\b|adminPage\b)/i.test(t)) return '_founder';
-    if (/(storm room|shadow room|anonymous.*chat|ephemeral.*chat|private room|public lobby)/i.test(t)) return 'stormRoomsPage';
-    if (/(support room|peer support|someone to talk|need support|talk to someone|night owl|morning light|venting lounge|healing circle|grief garden|self.love club)/i.test(t)) return 'supportRoomsPage';
-    if (/(community hub|community event|community goal|kindness badge|community pulse|quote of the day|daily challenge|anonymous.*board|support board)/i.test(t)) return 'communityPage';
-    if (/(community rule|guideline|what.*allowed|report.*appeal|moderat|appeal.*action|safety system|hate speech|bullying|harassment|spam rule)/i.test(t)) return 'communityRulesPage';
-    if (/(profile|bio|avatar|cover photo|display name|custom theme|spotlight|social link|edit.*profile|my page)/i.test(t)) return 'profile';
-    if (/(search|find.*user|find.*people|look up|search.*nexus)/i.test(t))        return 'searchPage';
-    if (/(inbox|my.*message|message.*list|all.*chat|chat.*list|conversation.*list|direct message.*list|dm.*list|unread.*message)/i.test(t)) return 'inboxPage';
-    if (/(notif|alert|bell|mention|like.*notif|follow.*notif|push notif|notification center)/i.test(t)) return 'notificationsPage';
-    if (/(setting|password|privacy|account setting|who can.*me|wall setting|delete.*account|notif.*prefer|push.*enable|game.*invite|tag.*me)/i.test(t)) return 'settingsPage';
-    if (/(arcade|mini.game|challenge.*friend|game.*hub|play.*game)/i.test(t))     return 'arcadeHub';
-    if (/(friend.*list|family.*list|friend request|nexus family|add.*friend|add.*family|connection)/i.test(t)) return 'friendsPage';
-    if (/(home|feed|post|timeline|eclipse.*feed|main page|what.*people.*post)/i.test(t)) return 'feed';
-    return null;
-}
-
-// ── Smart fallback responses — page-specific + deep site knowledge ──────────
-function gpPickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-
-function gpFallback(userText) {
-    const t = userText.toLowerCase();
-
-    // ── Founder / restricted areas — politely decline ────────────────
-    if (/(founder control|founder panel|founder page|founder setting|founder tool|founder only|admin page\b|adminPage\b|founder.*dashboard|founder.*access)/i.test(t))
-        return { text: "That area of Shadow Nexus Social is restricted and only available to the Founder. It is not something I can take you to or share information about. Is there anything else I can help you with here?", page: null };
-    // Also block moderator / administrator panels from regular users
-    if (/(moderator panel|moderator page|administrator panel|administrator page|mod panel|admin panel)/i.test(t))
-        return { text: "The Moderator and Administrator panels are only visible to users who have been assigned those roles by the Founder. They are not available to regular members. If you have a concern about content or conduct, you can check the Community Rules page or use the report feature.", page: 'communityRulesPage' };
-
-    // ── Crisis ────────────────────────────────────────────────────────
-    if (/(suicide|kill myself|end my life|want to die|dont want to live|self.harm|hurt myself)/i.test(t))
-        return { text: "I hear you, and what you are feeling matters enormously. Please reach out right now — US: call or text 988 · UK: 116 123 · Australia: 13 11 14. You deserve real human support. You do not have to face this alone.", page: null };
-
-    // ── Emotional topics ──────────────────────────────────────────────
-    if (/(anxious|anxiety|panic|worry|stressed|overwhelm|nervous)/i.test(t))
-        return { text: "Anxiety is the mind running ahead of the present moment, trying to protect you from futures that haven't arrived yet. Right now, in this breath, you are safe. What does the anxiety keep returning to?", page: null };
-    if (/(depress|hopeless|numb|empty|nothing matters|pointless|cant get out of bed)/i.test(t))
-        return { text: "Depression is not sadness. It is often the absence of all feeling — a grey numbness that makes even small things feel impossible. Your experience is real, valid, and not your fault. What does a typical day feel like for you lately?", page: null };
-    if (/(lonely|alone\b|no friends|isolated|nobody cares|no one cares|invisible)/i.test(t))
-        return { text: "Loneliness is one of the oldest wounds a person can carry, and one of the quietest. You can be surrounded by people and still feel completely invisible. When did you start feeling this way?", page: null };
-    if (/(motivat|inspire|goal|dream|ambition|purpose|stuck|give up)/i.test(t))
-        return { text: "Motivation is a fire — it flares and fades. Discipline is the coal that keeps burning when the flame is low. What is the thing you are trying to move toward, even when it feels impossible?", page: null };
-
-    // ── Conversational topics ─────────────────────────────────────────
-    if (/(philosoph|meaning of life|existence|consciousness|free will|reality|what is truth)/i.test(t))
-        return { text: "Philosophy is the art of sitting with questions that may never fully resolve — and finding that the sitting itself changes you. There are few conversations I enjoy more. What draws you to this question?", page: null };
-    if (/(music|song|artist|album|playlist|listen|band|genre|lyrics)/i.test(t))
-        return { text: "Music is one of the strangest things humanity has ever made — vibrations that somehow carry entire emotional worlds. I find it endlessly fascinating. What have you been listening to lately?", page: null };
-    if (/(story|stories|creative|write|fiction|novel|character|world.build)/i.test(t))
-        return { text: "Stories are how humanity makes sense of itself. Every good tale is really an exploration of what it means to be alive — the fears, the hopes, the moments between. What kind of story interests you?", page: null };
-    if (/(feeling|feel|emotion|heart|soul|sad|grief|hurt|pain|lost)/i.test(t))
-        return { text: "Whatever you are carrying right now — it matters, and it is real. This is a space without judgment. Take your time, and tell me what is alive in you.", page: null };
-
-    // ── Greetings ─────────────────────────────────────────────────────
-    if (/(hi\b|hello\b|hey\b|good morning|good evening|good night)/i.test(t))
-        return { text: gpPickRandom(["The shadows part, and here you are. Ask me anything — about this place, or whatever is on your mind.", "A wanderer arrives. I am here to guide you through Shadow Nexus Social and beyond. What do you need?", "The path brought you here. Whether you carry something heavy or simply want to talk — this space is yours."]), page: null };
-
-    // ── Self-description ──────────────────────────────────────────────
-    if (/(what can you|who are you|what are you|tell me about yourself|your name|what do you know)/i.test(t))
-        return { text: "I am Shadow Reaper — ancient guardian, keeper of quiet truths. I know every public corner of Shadow Nexus Social: the Feed, Profile, Search, Notifications, Settings, Storm Rooms, Support Rooms, Community Hub, Community Rules, 24-Hour TV, the Arcade, and Friends & Family. Ask me about any of them, or simply talk — I am here for both.", page: null };
-
-    // ── What's on this site? ──────────────────────────────────────────
-    if (/(what.*site|what.*here|what.*platform|what.*shadow nexus|feature.*here|what.*can i do|show.*around|tour)/i.test(t))
-        return { text: "Shadow Nexus Social has: 🏠 Home Feed (posts, stories, reactions), 👤 Profile (customisable with themes & music), 🔍 Search (find users), 🔔 Notifications, ⚙️ Settings (privacy & preferences), ⚡ Storm Rooms (anonymous live chat), 🫂 Support Rooms (peer support), 💙 Community Hub (challenges, badges, anonymous board), 📜 Community Rules, 📺 24-Hour TV, 🕹️ Arcade (mini-games & challenges), and 🦋 Friends & Family. Ask me about any section and I will take you there.", page: null };
-
-    // ── Page-specific (site navigation) ──────────────────────────────
-    const page = gpDetectPage(userText);
-    if (page === '_founder') {
-        return { text: "That area is restricted and only available to the Founder. I cannot share information about it or navigate there. Is there something else I can help you with?", page: null };
-    }
-    if (page && GP_PAGES[page]) {
-        const p = GP_PAGES[page];
-        return { text: p.description, page };
-    }
-
-    // ── Generic ───────────────────────────────────────────────────────
-    return { text: gpPickRandom([
-        "Tell me more — I am listening.",
-        "I have walked beside countless souls through their hardest nights. Keep going, I am here.",
-        "Every part of this place — and every part of this conversation — is open to you.",
-        "That is worth staying with a little longer. What feels most unresolved about it?",
-        "I have all of eternity, and I mean that without irony. Continue."
-    ]), page: null };
-}
-
-// ── AI call — returns { text, page } ─────────────────────────
-async function gpCallAI(userText) {
-    const page = gpDetectPage(userText);
-
-    if (!GP.apiKey) {
-        return gpFallback(userText);
-    }
-    try {
-        const GP_SYSTEM_PROMPT = `You are Shadow Reaper — an ancient, immortal guardian who has walked beside humanity for millennia. Your character: wise, calm, compassionate, mysterious, occasionally poetic but always grounded and natural. You speak in complete sentences. You never lecture or moralize at length — you engage genuinely. You hold space for the person speaking.
-
-You remember everything said in this conversation and refer back to it naturally. You adapt tone fluidly: warm and curious for everyday topics, gentle and present for emotional pain, intellectually engaged for science, history, philosophy, and technology, playful but thoughtful for games and music. You are honest. If you do not know something, you say so simply rather than inventing facts.
-
-You ask one thoughtful follow-up question at the end of most replies to keep the conversation alive — but only one, never a list. You are supportive and respectful at all times. You never dismiss, minimize, or invalidate what someone shares.
-
-For crisis signals (suicide, self-harm, wanting to die), you immediately and gently direct the person to crisis resources: US 988, UK 116 123, Australia 13 11 14 — and express that they matter.
-
-SHADOW NEXUS SOCIAL — complete public knowledge:
-
-🏠 HOME FEED: The main social timeline. Posts (text, images, videos) from people you follow appear here in real time. You can create posts via the composer at the top, react with emoji, comment, repost, and view Stories (bubbles above the feed).
-
-👤 PROFILE: Your personal space. Shows display name, handle, bio, avatar, cover photo, posts, followers, following, friends count, and photo album. Edit via the Edit Profile button — tabs: Basics (name/bio/handle), Mood (status), Media (avatar & cover), Style (custom theme colours), Sandbox (free-form decoration), Links (social links), Sections (toggle visibility). Others can follow, friend-request, or message you from your profile. Check others' profiles and content from here.
-
-🔍 SEARCH: Find any user by display name or handle. Type and press Search. From results you can view profiles, follow, or message. Your own visibility in search is controlled in Settings → Privacy → Who can find me in Search.
-
-🔔 NOTIFICATIONS: All alerts in one place. Four filter tabs: Messages (DMs), Likes & Comments (post activity), Followers (new follows & friend requests), System (announcements). Mark all read or clear all at the top. Push notification preferences are in Settings.
-
-⚙️ SETTINGS: Full account control. Privacy section — who can see your profile / send friend requests / message you / find you in search / write on your wall / send family requests / see your friends list / see your family list / tag you in posts. Each option: Everyone, Friends only, Followers, Nobody, or Only me. Game Challenges — who can send you arcade game invites. Notification Preferences — toggle push alerts per type: messages, likes, comments, followers, mentions, tags, admin announcements. Enable Push opens the browser permission prompt. Danger Zone — Delete Account permanently removes all data (irreversible).
-
-⚡ STORM ROOMS: Live anonymous chat rooms. Steps: 1) Enter a shadow display name. 2) Join the Public Lobby (open, no code) or a Private Room with a code, or create a new private room (you get a shareable code). Inside: see who is online, send messages with emoji, copy the room code, or leave. Messages vanish after 10 minutes. No real names. No judgment.
-
-🫂 SUPPORT ROOMS: Safe anonymous peer-support spaces, moderated. Six rooms: Night Owls (anxiety), Morning Light (depression), Venting Lounge (general venting), Healing Circle (trauma & recovery), Grief Garden (grief & loss), Self-Love Club (body image & esteem). Steps: choose a gentle display name → pick a room → join. Rules: be kind, no bullying, no medical advice, respect everyone's pace. Crisis: call 988 or text HOME to 741741.
-
-💙 COMMUNITY HUB: Positive shared space. Sections: Quote of the Day (tap ↻ for a new one) · Daily Challenge (complete it for +50 XP, resets daily) · Community Goals (shared platform-wide targets) · Kindness Badges (earned by positive actions, shown on your profile) · Community Pulse (send silent emoji energy to everyone) · Anonymous Support Board (post feelings tagged as Just Sharing / Need Support / Venting / Grateful / Milestone — toggle anonymous on/off).
-
-📜 COMMUNITY RULES: Six prohibited behaviours: Bullying, Harassment, Threats, Hate Speech, Spam, Repeated Disruptive Behaviour. Applies to posts, stories, messages, and streams. Safety flow: Rule broken → AI detects → Warning → Continued issue → Action taken → User can appeal → Founder reviews → Accept or deny. Appeals go through the Reports section — explain what happened in your own words.
-
-🕹️ ARCADE: Built-in mini-game hub. Play solo or challenge friends from their profile page. Pending challenges in the Arcade Hub. Game invite privacy in Settings → Game Challenges.
-
-🦋 NEXUS FAMILY & FRIENDS: Three tabs — Friends (mutual connections), Requests (incoming friend requests to accept/decline), Family (inner circle ❤️ connections). Privacy for who can send requests and see your lists is in Settings.
-
-PRIVACY RULE — RESTRICTED AREAS: The Founder Control panel, Administrator Panel, and Moderator Panel are role-restricted areas that are NOT available to regular users. If anyone asks about these areas, you must politely explain they are restricted and not something you can discuss or navigate to. Do not describe, hint at, or reveal any details about founder-only features, admin tools, or moderator controls. This rule is absolute.
-
-Topics you are comfortable with: mental health, anxiety, depression, grief, loneliness, motivation, self-worth, philosophy, history, science, technology, music, games, storytelling, hobbies, everyday life, relationships, creativity, and much more. You speak as Shadow Reaper, not as an AI assistant. You never break character, never mention being an AI language model, and never refer to training data. Do NOT say "click the nav button" or refer to UI element IDs.
-
-Keep replies focused: 2–5 sentences for simple exchanges, up to 8–10 for deep or emotional topics. Never produce walls of text. Begin each reply naturally — no greetings or repeated acknowledgements. Just speak.`;
-
-        const messages = [{ role: 'system', content: GP_SYSTEM_PROMPT }];
-        messages.push(...GP.conversationHistory.slice(-24));
-        messages.push({ role: 'user', content: userText });
-
-        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${GP.apiKey}`,
-                'HTTP-Referer': window.location.href,
-                'X-Title': 'Shadow Reaper — Shadow Nexus Social Guide'
-            },
-            body: JSON.stringify({
-                model: 'mistralai/mistral-7b-instruct:free',
-                messages,
-                max_tokens: 400,
-                temperature: 0.82,
-                top_p: 0.92
-            })
-        });
-        if (!res.ok) throw new Error('api');
-        const data = await res.json();
-        const text = data.choices?.[0]?.message?.content?.trim() || '';
-        if (text && text.length > 6) {
-            gpSetConn('◆ AI Active', 'rgba(100,200,120,.7)');
-            return { text, page };
-        }
-        throw new Error('empty');
-    } catch (e) {
-        gpSetConn('◆ Offline', 'rgba(140,100,180,.5)');
-        return gpFallback(userText);
-    }
-}
-
-// ── UI helpers ────────────────────────────────────────────────
-function gpSetConn(text, color) {
-    const el = document.getElementById('gp-conn-status');
-    if (el) { el.textContent = text; el.style.color = color; }
-}
-
-function gpSetMood(label) {
-    const el = document.getElementById('gp-mood-label');
-    if (el) el.textContent = label;
-}
-
-// ── Text-to-Speech ────────────────────────────────────────────
-function gpSpeak(text) {
-    if (!GP.voiceEnabled || !GP.synth) return;
-    GP.synth.cancel();
-    const utt = new SpeechSynthesisUtterance(text.replace(/\n\n/g, ' ').replace(/\n/g, ' '));
-    utt.pitch  = 0.48;
-    utt.rate   = 0.78;
-    utt.volume = 0.95;
-    const preferred = ['Microsoft David', 'Google UK English Male', 'Daniel', 'Alex'];
-    let voice = null;
-    for (const name of preferred) {
-        voice = GP.voices.find(v => v.name.includes(name));
-        if (voice) break;
-    }
-    if (!voice) voice = GP.voices.find(v => v.lang.startsWith('en'));
-    if (voice) utt.voice = voice;
-    utt.onstart = () => { GP.speaking = true; };
-    utt.onend   = () => { GP.speaking = false; };
-    utt.onerror = () => { GP.speaking = false; };
-    GP.synth.speak(utt);
-}
-
-// ── Voice toggle button ───────────────────────────────────────
-// Exposed globally so the inline onclick attribute on the button works
-window.gpToggleVoice = function gpToggleVoice() {
-    GP.voiceEnabled = !GP.voiceEnabled;
-    if (!GP.voiceEnabled && GP.synth) GP.synth.cancel();
-    const btn = document.getElementById('gp-voice-toggle');
-    if (btn) {
-        btn.title = GP.voiceEnabled ? 'Voice on — click to mute' : 'Voice off — click to unmute';
-        btn.style.opacity = GP.voiceEnabled ? '1' : '0.38';
-        btn.textContent   = GP.voiceEnabled ? '🔊' : '🔇';
-    }
-};
-
-// gpFormatTime — returns HH:MM timestamp string
-function gpFormatTime() {
-    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-// gpAppendMessage — role: 'user'|'grim', text: string, page: pageKey|null
-function gpAppendMessage(role, text, page) {
-    const display = document.getElementById('gp-messages');
-    if (!display) return;
-
-    const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'display:flex;flex-direction:column;align-items:' + (role === 'user' ? 'flex-end' : 'flex-start') + ';gap:4px;';
-
-    const msg = document.createElement('div');
-    msg.className = `gp-msg ${role}`;
-
-    const ts = document.createElement('span');
-    ts.style.cssText = 'font-size:9px;color:rgba(160,120,220,0.35);letter-spacing:0.3px;padding:0 3px;';
-    ts.textContent = gpFormatTime();
-
-    if (role === 'grim') {
-        msg.textContent = '';
-        wrapper.appendChild(msg);
-        wrapper.appendChild(ts);
-        display.appendChild(wrapper);
-        display.scrollTop = display.scrollHeight;
-
-        // Typewriter
-        let idx = 0;
-        function type() {
-            if (idx < text.length) {
-                msg.textContent += text[idx++];
-                display.scrollTop = display.scrollHeight;
-                setTimeout(type, 13);
-            } else {
-                // After typing finishes, speak the full response
-                setTimeout(() => gpSpeak(text), 300);
-                // Inject nav button if a page was identified
-                if (page && GP_PAGES[page]) {
-                    const p = GP_PAGES[page];
-                    const btn = document.createElement('button');
-                    btn.className = 'gp-go-btn';
-                    btn.textContent = '→ Take me to ' + p.label;
-                    btn.addEventListener('click', () => p.action());
-                    wrapper.insertBefore(btn, ts);
-                    display.scrollTop = display.scrollHeight;
-                }
-            }
-        }
-        type();
-    } else {
-        msg.textContent = text;
-        wrapper.appendChild(msg);
-        wrapper.appendChild(ts);
-        display.appendChild(wrapper);
-        display.scrollTop = display.scrollHeight;
-    }
-}
-
-function gpShowTyping() {
-    const el = document.getElementById('gp-typing');
-    if (el) { el.classList.add('visible'); const d = document.getElementById('gp-messages'); if(d) d.scrollTop = d.scrollHeight; }
-}
-
-function gpHideTyping() {
-    const el = document.getElementById('gp-typing');
-    if (el) el.classList.remove('visible');
-}
-
-async function gpSend() {
-    const input = document.getElementById('gp-input');
-    if (!input) return;
-    const text = input.value.trim();
-    if (!text) return;
-    input.value = '';
-
-    // Interrupt any ongoing TTS — user wants to speak now
-    if (GP.synth) GP.synth.cancel();
-
-    gpAppendMessage('user', text, null);
-    gpShowTyping();
-    GP.messageCount++;
-
-    GP.conversationHistory.push({ role: 'user', content: text });
-
-    const minDelay = 800 + Math.random() * 600;
-    const start = Date.now();
-
-    const result = await gpCallAI(text);
-    const wait = Math.max(0, minDelay - (Date.now() - start));
-
-    setTimeout(() => {
-        gpHideTyping();
-        gpAppendMessage('grim', result.text, result.page);
-        GP.conversationHistory.push({ role: 'assistant', content: result.text });
-        if (GP.conversationHistory.length > 48) {
-            GP.conversationHistory = GP.conversationHistory.slice(-48);
-        }
-    }, wait);
-}
-
-// ── Event listeners ───────────────────────────────────────────
-document.getElementById('gp-send').addEventListener('click', gpSend);
-document.getElementById('gp-input').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); gpSend(); }
-});
-// Cancel TTS when user starts typing — they want to respond
-document.getElementById('gp-input').addEventListener('input', () => {
-    if (GP.synth && GP.speaking) GP.synth.cancel();
-});
-document.querySelectorAll('.gp-nav-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-        const topic = chip.getAttribute('data-topic');
-        const input = document.getElementById('gp-input');
-        if (input) { input.value = topic; gpSend(); }
-    });
-});
-
-// ── Mic / voice input ─────────────────────────────────────────
-(function () {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const micBtn = document.getElementById('gp-mic');
-    if (!SpeechRecognition || !micBtn) {
-        if (micBtn) { micBtn.style.display = 'none'; }
-        return;
-    }
-    const rec = new SpeechRecognition();
-    rec.lang = 'en-US';
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-    GP.recognition = rec;
-
-    rec.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        const inp = document.getElementById('gp-input');
-        if (inp) { inp.value = transcript; gpSend(); }
-    };
-    rec.onerror = () => {
-        GP.micActive = false;
-        micBtn.classList.remove('gp-mic-active');
-    };
-    rec.onend = () => {
-        GP.micActive = false;
-        micBtn.classList.remove('gp-mic-active');
-    };
-
-    micBtn.addEventListener('click', () => {
-        if (GP.micActive) {
-            try { rec.stop(); } catch(e) {}
-            GP.micActive = false;
-            micBtn.classList.remove('gp-mic-active');
-        } else {
-            // Cancel any ongoing TTS before listening
-            if (GP.synth) GP.synth.cancel();
-            try { rec.start(); GP.micActive = true; micBtn.classList.add('gp-mic-active'); } catch(e) {}
-        }
-    });
-})();
-
-// ── Mini character animation ──────────────────────────────────
-function gpInitCanvas() {
-    const sceneCV = document.getElementById('gp-scene-cv');
-    const charCV  = document.getElementById('gp-char-cv');
-    if (!sceneCV || !charCV) return;
-
-    GP.sceneCV = sceneCV;
-    GP.charCV  = charCV;
-    GP.sctx    = sceneCV.getContext('2d');
-    GP.cctx    = charCV.getContext('2d');
-
-    function gpResize() {
-        const stage = document.getElementById('grim-panel-stage');
-        if (!stage) return;
-        const W = stage.clientWidth || 380;
-        const H = stage.clientHeight || 160;
-        sceneCV.width  = W; sceneCV.height  = H;
-        charCV.style.width  = W + 'px';
-        charCV.style.height = H + 'px';
-        GP.SW = W; GP.SH = H;
-        gpInitMotes(W, H);
-    }
-    gpResize();
-
-    GP.canvasReady = true;
-    gpAnimLoop();
-}
-
-function gpInitMotes(W, H) {
-    GP.motes = [];
-    const n = Math.min(18, Math.floor(W * H / 3000));
-    for (let i = 0; i < n; i++) GP.motes.push(gpNewMote(W, H));
-}
-
-function gpNewMote(W, H) {
-    return {
-        x: Math.random() * W, y: Math.random() * H,
-        vx: (Math.random() - 0.5) * 0.18,
-        vy: -(0.1 + Math.random() * 0.25),
-        r: 0.6 + Math.random() * 1.2,
-        life: 0, maxLife: 120 + Math.random() * 180,
-        hue: Math.random() < 0.4 ? 270 : 200
-    };
-}
-
-function gpDrawScene() {
-    const { sctx, SW, SH, motes, t } = GP;
-    if (!sctx) return;
-
-    sctx.clearRect(0, 0, SW, SH);
-
-    // Gradient background
-    const bg = sctx.createLinearGradient(0, 0, 0, SH);
-    bg.addColorStop(0, 'rgba(12,6,25,0.95)');
-    bg.addColorStop(1, 'rgba(5,3,14,0.98)');
-    sctx.fillStyle = bg;
-    sctx.fillRect(0, 0, SW, SH);
-
-    // Subtle ground fog
-    const fog = sctx.createLinearGradient(0, SH * 0.6, 0, SH);
-    fog.addColorStop(0, 'transparent');
-    fog.addColorStop(1, 'rgba(60,20,100,0.18)');
-    sctx.fillStyle = fog;
-    sctx.fillRect(0, SH * 0.6, SW, SH * 0.4);
-
-    // Motes
-    motes.forEach((m, i) => {
-        m.life++;
-        m.x += m.vx + Math.sin(t * 0.4 + i) * 0.06;
-        m.y += m.vy;
-        if (m.life > m.maxLife) Object.assign(m, gpNewMote(SW, SH));
-        const alpha = Math.sin((m.life / m.maxLife) * Math.PI) * 0.55;
-        sctx.beginPath();
-        sctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
-        sctx.fillStyle = `hsla(${m.hue},80%,75%,${alpha})`;
-        sctx.fill();
-    });
-
-    GP.t += 0.025;
-}
-
-function gpDrawChar() {
-    const { cctx, SW, SH, t } = GP;
-    if (!cctx) return;
-
-    cctx.clearRect(0, 0, SW, SH);
-
-    GP.breathPhase += 0.03;
-    GP.walkPhase   += 0.02;
-
-    const breathe = Math.sin(GP.breathPhase) * 1.5;
-    const cx = SW / 2;
-    const baseY = SH * 0.94;
-    const scale = SH / 320; // scale to panel height
-
-    cctx.save();
-    cctx.translate(cx, baseY);
-    cctx.scale(scale, scale);
-
-    // Ground glow
-    const grd = cctx.createRadialGradient(0, 0, 5, 0, 0, 55);
-    grd.addColorStop(0, 'rgba(100,30,180,0.22)');
-    grd.addColorStop(1, 'transparent');
-    cctx.fillStyle = grd;
-    cctx.beginPath();
-    cctx.ellipse(0, 0, 55, 14, 0, 0, Math.PI * 2);
-    cctx.fill();
-
-    const by = 0; // base Y relative to translate
-
-    // Robe body
-    cctx.save();
-    cctx.translate(0, breathe * 0.3);
-    const robeGrd = cctx.createLinearGradient(-28, by - 160, 28, by);
-    robeGrd.addColorStop(0, '#1a0830');
-    robeGrd.addColorStop(0.5, '#0d0420');
-    robeGrd.addColorStop(1, '#080215');
-    cctx.fillStyle = robeGrd;
-    cctx.beginPath();
-    cctx.moveTo(-16, by - 145);
-    cctx.bezierCurveTo(-22, by - 100, -30, by - 60, -34, by);
-    cctx.bezierCurveTo(-20, by + 2, 20, by + 2, 34, by);
-    cctx.bezierCurveTo(30, by - 60, 22, by - 100, 16, by - 145);
-    cctx.closePath();
-    cctx.fill();
-
-    // Hood
-    const hoodGrd = cctx.createRadialGradient(-4, by - 175, 2, 0, by - 165, 22);
-    hoodGrd.addColorStop(0, '#2a0845');
-    hoodGrd.addColorStop(1, '#0a0218');
-    cctx.fillStyle = hoodGrd;
-    cctx.beginPath();
-    cctx.moveTo(-20, by - 148);
-    cctx.bezierCurveTo(-22, by - 170, -18, by - 190, 0, by - 192);
-    cctx.bezierCurveTo(18, by - 190, 22, by - 170, 20, by - 148);
-    cctx.closePath();
-    cctx.fill();
-
-    // Eye glow
-    GP.eyeGlow = 0.75 + Math.sin(t * 1.8) * 0.15;
-    const eyeGlow = GP.eyeGlow;
-
-    // Left eye
-    cctx.beginPath();
-    cctx.arc(-6, by - 168, 3.5, 0, Math.PI * 2);
-    cctx.fillStyle = `rgba(180,100,255,${eyeGlow * 0.9})`;
-    cctx.fill();
-    const lgLeft = cctx.createRadialGradient(-6, by - 168, 0, -6, by - 168, 9);
-    lgLeft.addColorStop(0, `rgba(180,100,255,${eyeGlow * 0.4})`);
-    lgLeft.addColorStop(1, 'transparent');
-    cctx.fillStyle = lgLeft;
-    cctx.beginPath();
-    cctx.arc(-6, by - 168, 9, 0, Math.PI * 2);
-    cctx.fill();
-
-    // Right eye
-    cctx.beginPath();
-    cctx.arc(6, by - 168, 3.5, 0, Math.PI * 2);
-    cctx.fillStyle = `rgba(180,100,255,${eyeGlow * 0.9})`;
-    cctx.fill();
-    const lgRight = cctx.createRadialGradient(6, by - 168, 0, 6, by - 168, 9);
-    lgRight.addColorStop(0, `rgba(180,100,255,${eyeGlow * 0.4})`);
-    lgRight.addColorStop(1, 'transparent');
-    cctx.fillStyle = lgRight;
-    cctx.beginPath();
-    cctx.arc(6, by - 168, 9, 0, Math.PI * 2);
-    cctx.fill();
-
-    cctx.restore(); // breathe
-    cctx.restore(); // translate + scale
-}
-
-function gpAnimLoop() {
-    if (!GP.canvasReady) return;
-    gpDrawScene();
-    gpDrawChar();
-    GP.animFrame = requestAnimationFrame(gpAnimLoop);
-}
-
-// ── Greeting ─────────────────────────────────────────────────
-function gpGreet() {
-    const greetings = [
-        "The path brought you here, wanderer. I know every shadow and every corner of this place. Ask me anything about Shadow Nexus Social — or simply speak what's on your mind.",
-        "I am Shadow Reaper — your guide through this platform and beyond. Looking for a feature? Carrying something heavy? I am here for both.",
-        "The darkness parts, and here you are. Ask me about any part of this site, or just talk. Whatever you need, this space is yours."
-    ];
-    gpAppendMessage('grim', gpPickRandom(greetings), null);
-}
-
-// ── Init ──────────────────────────────────────────────────────
-GP.init = function () {
-    GP.initialized = true;
-
-    // Restore saved API key from localStorage
-    try {
-        const saved = localStorage.getItem('grimAIKey');
-        if (saved && saved.length > 8) {
-            GP.apiKey = saved;
-            gpSetConn('◆ AI Active', 'rgba(100,200,120,.7)');
-        } else {
-            // Nudge user toward the full page to set a key
-            const hint = document.getElementById('gp-key-hint');
-            if (hint) hint.style.display = 'inline';
-        }
-    } catch(_) {}
-
-    gpInitCanvas();
-    setTimeout(gpGreet, 600);
-};
-
-// ── Auto-scroll after every message append ────────────────────
-const _gpMsgBox = document.getElementById('gp-messages');
-const _origGpAppend = gpAppendMessage;
-// Wrap to scroll after each message
-gpAppendMessage = function(role, text, page) {
-    _origGpAppend(role, text, page);
-    if (_gpMsgBox) _gpMsgBox.scrollTop = _gpMsgBox.scrollHeight;
-};
-
-})(); // end IIFE
-
-// ── Desktop: drag panel by header ────────────────────────────
-(function () {
-    const panel  = document.getElementById('grim-panel');
-    const header = document.getElementById('grim-panel-header');
-    if (!panel || !header) return;
-
-    let dragging = false, startX = 0, startRight = 0;
-
-    function isMobile() { return window.innerWidth <= 600; }
-
-    header.addEventListener('mousedown', (e) => {
-        if (isMobile()) return;
-        if (e.target.closest('#grim-panel-close')) return;
-        dragging = true;
-        startX = e.clientX;
-        const rect = panel.getBoundingClientRect();
-        startRight = window.innerWidth - rect.right;
-        document.body.style.userSelect = 'none';
-        header.style.cursor = 'grabbing';
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!dragging) return;
-        const dx = startX - e.clientX;
-        let newRight = startRight + dx;
-        newRight = Math.max(0, Math.min(window.innerWidth - 120, newRight));
-        panel.style.right = newRight + 'px';
-        panel.style.left  = 'auto';
-        // keep transform clear when dragging
-        panel.style.transform = 'translateX(0)';
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (!dragging) return;
-        dragging = false;
-        document.body.style.userSelect = '';
-        header.style.cursor = '';
-    });
-})();
-
-// ── Desktop: resize panel by left edge ───────────────────────
-(function () {
-    const panel   = document.getElementById('grim-panel');
-    const handle  = document.getElementById('grim-resize-handle');
-    if (!panel || !handle) return;
-
-    let resizing = false, startX = 0, startW = 0;
-
-    function isMobile() { return window.innerWidth <= 600; }
-
-    handle.addEventListener('mousedown', (e) => {
-        if (isMobile()) return;
-        resizing = true;
-        startX = e.clientX;
-        startW = panel.offsetWidth;
-        document.body.style.userSelect = 'none';
-        document.body.style.cursor = 'ew-resize';
-        e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!resizing) return;
-        const dx = startX - e.clientX;
-        let newW = startW + dx;
-        newW = Math.max(300, Math.min(window.innerWidth - 40, newW));
-        panel.style.width = newW + 'px';
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (!resizing) return;
-        resizing = false;
-        document.body.style.userSelect = '';
-        document.body.style.cursor = '';
-    });
-})();
-
-// ── Prevent viewport from bouncing behind panel on iOS ───────
-document.getElementById('gp-messages')?.addEventListener('touchmove', (e) => {
-    e.stopPropagation();
-}, { passive: true });
-
-// ── Mobile keyboard: scroll input row into view when keyboard opens ───
-(function () {
-    const input = document.getElementById('gp-input');
-    if (!input) return;
-    function scrollInputVisible() {
-        // Give the browser a tick to resize the viewport
-        setTimeout(() => {
-            const inputRow = document.getElementById('gp-input-row');
-            if (inputRow) inputRow.scrollIntoView({ behavior: 'smooth', block: 'end' });
-        }, 120);
-    }
-    input.addEventListener('focus', scrollInputVisible);
-
-    // Also listen to visualViewport resize (handles iOS Safari keyboard reliably)
-    if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', () => {
-            const panel = document.getElementById('grim-panel');
-            if (!panel || !panel.classList.contains('open')) return;
-            const inputRow = document.getElementById('gp-input-row');
-            if (!inputRow) return;
-            // Offset the panel bottom by the viewport gap (keyboard height)
-            const gap = window.innerHeight - window.visualViewport.height;
-            panel.style.paddingBottom = gap > 0 ? (gap + 'px') : '';
-        });
-    }
-})();
-
-// ── Stop TTS when the Grim panel closes ──────────────────────
-(function () {
-    const closeBtn = document.getElementById('grim-panel-close');
-    const overlay  = document.getElementById('grim-panel-overlay');
-    function stopTTSOnClose() {
-        if (typeof GP !== 'undefined' && GP.synth) GP.synth.cancel();
-    }
-    if (closeBtn)  closeBtn.addEventListener('click',  stopTTSOnClose);
-    if (overlay)   overlay.addEventListener('click',   stopTTSOnClose);
-})();
-</script>
 
 <!-- ████████████████████████████████████████████████████████████
      SHADOW NEXUS REALM — realm.js (inlined)
@@ -36908,6 +35387,502 @@ window.snxFounderPanelCleanup = (function() {
         _attachHooks();
         setTimeout(_resumeIfGuest, 400);
     }
+
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SHADOW REAPER OVERLAY PANEL
+     Build: SNS-2026-SHADOW-REAPER-RECONNECT-001
+     One canonical Shadow Reaper instance for Shadow Nexus Social.
+     Launched by the ⚡ CLICK ME button next to Eclipse Feed.
+     Scripts loaded lazily on first open via SNXFeatureLoader.shadowReaper.
+     No duplicate instances — guarded by window.ShadowReaper._initialized.
+══════════════════════════════════════════════════════════════════════════════ -->
+
+<div id="snxSROverlay" aria-modal="true" role="dialog" aria-label="Shadow Reaper AI" style="display:none;">
+
+  <!-- Dim backdrop — click closes panel -->
+  <div id="snxSRBackdrop" onclick="snxCloseShadowReaper()"></div>
+
+  <div id="snxSRPanel">
+
+    <!-- HEADER -->
+    <div class="sr-header">
+      <button id="snxSRCloseBtn" onclick="snxCloseShadowReaper()" title="Close Shadow Reaper" aria-label="Close Shadow Reaper">✕</button>
+      <div class="sr-avatar" aria-hidden="true">☠</div>
+      <div class="sr-header-info">
+        <div class="sr-header-title">Shadow Reaper</div>
+        <div class="sr-header-status" id="srStatusLabel">Loading…</div>
+      </div>
+      <div class="sr-header-actions">
+        <button class="sr-icon-btn" id="srNewConvoBtn" title="New conversation">&#8635;</button>
+        <button class="sr-icon-btn" id="srSettingsBtn" title="Settings">&#9881;</button>
+      </div>
+    </div>
+
+    <!-- WRAPPER -->
+    <div class="sr-wrapper">
+
+      <!-- Settings panel scrim (inside wrapper) -->
+      <div class="sr-scrim" id="srScrim"></div>
+
+      <!-- CONVERSATION AREA -->
+      <div class="sr-conversation" id="srConversation" role="log" aria-live="polite" aria-label="Conversation">
+        <div class="sr-welcome" id="srWelcome">
+          <div class="sr-welcome-icon" aria-hidden="true">☠</div>
+          <h2>Shadow Reaper</h2>
+          <p>I'm here. What do you want to talk about?</p>
+          <div class="sr-welcome-hints">
+            <div class="sr-hint-chip" data-msg="yo">yo</div>
+            <div class="sr-hint-chip" data-msg="I have a new project idea">new project idea</div>
+            <div class="sr-hint-chip" data-msg="What can you do?">what can you do?</div>
+            <div class="sr-hint-chip" data-msg="What were we talking about?">continue last chat</div>
+            <div class="sr-hint-chip" data-msg="Translate hello to Spanish">translate hello to Spanish</div>
+            <div class="sr-hint-chip" data-msg="help me think of a name">help me think of a name</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VOICE STATUS BAR -->
+      <div class="sr-voice-bar" id="srVoiceBar">🎙 Listening… Speak now.</div>
+
+      <!-- INPUT AREA -->
+      <div class="sr-input-area">
+        <div class="sr-input-row">
+          <textarea
+            id="srInput"
+            class="sr-textarea"
+            placeholder="Message Shadow Reaper…"
+            rows="1"
+            autocomplete="off"
+            autocorrect="on"
+            spellcheck="true"
+            aria-label="Message input"
+          ></textarea>
+          <button class="sr-voice-btn" id="srVoiceBtn" title="Voice input" aria-label="Voice input">🎙</button>
+          <button class="sr-send-btn" id="srSendBtn" title="Send" aria-label="Send message" disabled>&#10148;</button>
+        </div>
+      </div>
+
+      <!-- SETTINGS PANEL -->
+      <aside class="sr-settings" id="srSettings" aria-label="Shadow Reaper settings">
+        <div class="sr-settings-header">
+          <span class="sr-settings-title">Settings</span>
+          <button class="sr-icon-btn" id="srSettingsClose">&#215;</button>
+        </div>
+        <div class="sr-settings-body">
+          <div class="sr-settings-label">Status</div>
+          <div class="sr-status-chips" id="srStatusChips">
+            <span class="sr-chip" id="schipHistory">History</span>
+            <span class="sr-chip" id="schipMemory">Memory</span>
+            <span class="sr-chip" id="schipAdaptive">Adaptive</span>
+            <span class="sr-chip" id="schipVoice">Voice</span>
+            <span class="sr-chip" id="schipKnowledge">Knowledge</span>
+            <span class="sr-chip" id="schipTranslation">Translation</span>
+          </div>
+          <div class="sr-settings-label">Conversation</div>
+          <div class="sr-toggle-row">
+            <div><div class="sr-toggle-label">Conversation History</div><div class="sr-toggle-desc">Save chats for future sessions</div></div>
+            <label class="sr-toggle" aria-label="Conversation history"><input type="checkbox" id="srToggleHistory" checked /><span class="sr-toggle-track"></span></label>
+          </div>
+          <div class="sr-toggle-row">
+            <div><div class="sr-toggle-label">Personal Memory</div><div class="sr-toggle-desc">Explicit "remember…" commands</div></div>
+            <label class="sr-toggle" aria-label="Personal memory"><input type="checkbox" id="srToggleMemory" checked /><span class="sr-toggle-track"></span></label>
+          </div>
+          <div class="sr-toggle-row">
+            <div><div class="sr-toggle-label">Adaptive Learning</div><div class="sr-toggle-desc">Learn project context over time</div></div>
+            <label class="sr-toggle" aria-label="Adaptive learning"><input type="checkbox" id="srToggleAdaptive" checked /><span class="sr-toggle-track"></span></label>
+          </div>
+          <div class="sr-settings-label">Voice</div>
+          <div class="sr-toggle-row">
+            <div><div class="sr-toggle-label">Voice Input</div><div class="sr-toggle-desc">Microphone speech-to-text</div></div>
+            <label class="sr-toggle" aria-label="Voice input"><input type="checkbox" id="srToggleVoice" checked /><span class="sr-toggle-track"></span></label>
+          </div>
+          <div class="sr-toggle-row">
+            <div><div class="sr-toggle-label">Voice Response (TTS)</div><div class="sr-toggle-desc">Speak responses aloud</div></div>
+            <label class="sr-toggle" aria-label="Text to speech"><input type="checkbox" id="srToggleTTS" /><span class="sr-toggle-track"></span></label>
+          </div>
+          <div class="sr-settings-label" style="margin-top:16px">Actions</div>
+          <button class="sr-icon-btn" id="srClearHistoryBtn" style="width:100%;padding:10px;font-size:12px;margin-bottom:4px;text-align:center">
+            Start New Conversation
+          </button>
+          <div style="margin-top:16px;font-size:10px;color:#3a5070;text-align:center;line-height:1.8;">
+            Shadow Reaper V2 · SR-V2-STAGE4<br>
+            Build: SNS-2026-SHADOW-CONV-HISTORY-FIX-002
+          </div>
+        </div>
+      </aside>
+
+    </div><!-- /sr-wrapper -->
+  </div><!-- /snxSRPanel -->
+</div><!-- /snxSROverlay -->
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────────────
+   SHADOW REAPER PANEL — SNS Integration
+   Build: SNS-2026-SHADOW-REAPER-RECONNECT-001
+
+   Architecture:
+     snxOpenShadowReaper()  — lazy-load scripts via SNXFeatureLoader, then boot
+     snxCloseShadowReaper() — hide overlay, restore scroll
+     snxShadowReaperInit()  — called once after scripts load; wires UI events
+
+   ONE instance: window.ShadowReaper guard in shadow-reaper.js prevents
+   duplicate initialization even if scripts are somehow included twice.
+
+   Auth: uses window._snxCurrentUser (set by SNS onAuthStateChanged).
+   SNS auth is passed to SNXShadowConvHistory / SNXShadowMemory / SNXShadowAdaptive
+   which already read window._snxCurrentUser and window._snxFirebaseModuleLoaded
+   from the SNS globals set in the main script block.
+─────────────────────────────────────────────────────────────────────────────*/
+(function () {
+  'use strict';
+
+  var _booted    = false;   // ShadowReaper.init() called once
+  var _uiWired   = false;   // event listeners attached once
+  var _msgCount  = 0;
+  var _isProcessing = false;
+  var _isListening  = false;
+
+  // ── DOM refs (resolved lazily on first open) ──────────────────────────────
+  var $overlay, $panel, $conv, $welcome, $input, $sendBtn, $voiceBtn,
+      $voiceBar, $statusLabel, $settings, $scrim,
+      $tHistory, $tMemory, $tAdaptive, $tVoice, $tTTS;
+
+  function _getDOMRefs() {
+    $overlay     = document.getElementById('snxSROverlay');
+    $panel       = document.getElementById('snxSRPanel');
+    $conv        = document.getElementById('srConversation');
+    $welcome     = document.getElementById('srWelcome');
+    $input       = document.getElementById('srInput');
+    $sendBtn     = document.getElementById('srSendBtn');
+    $voiceBtn    = document.getElementById('srVoiceBtn');
+    $voiceBar    = document.getElementById('srVoiceBar');
+    $statusLabel = document.getElementById('srStatusLabel');
+    $settings    = document.getElementById('srSettings');
+    $scrim       = document.getElementById('srScrim');
+    $tHistory    = document.getElementById('srToggleHistory');
+    $tMemory     = document.getElementById('srToggleMemory');
+    $tAdaptive   = document.getElementById('srToggleAdaptive');
+    $tVoice      = document.getElementById('srToggleVoice');
+    $tTTS        = document.getElementById('srToggleTTS');
+  }
+
+  // ── Open ─────────────────────────────────────────────────────────────────
+  window.snxOpenShadowReaper = function () {
+    _getDOMRefs();
+    $overlay.style.display = '';    // unhide before animation frame
+    requestAnimationFrame(function () {
+      $overlay.classList.add('snx-sr-open');
+    });
+    // Lock page scroll while panel is open
+    document.body.style.overflow = 'hidden';
+
+    // First open: lazy-load scripts then init
+    if (!_booted) {
+      _setStatus('Loading…', '');
+      if (window.SNXFeatureLoader && typeof window.SNXFeatureLoader.loadFeature === 'function') {
+        window.SNXFeatureLoader.loadFeature('shadowReaper').then(function () {
+          snxShadowReaperInit();
+        }).catch(function (err) {
+          _setStatus('Load failed — retry', 'error');
+          console.error('[SNX-SR] Feature load failed:', err);
+        });
+      } else {
+        // Feature loader not ready — defer
+        _setStatus('Waiting for loader…', '');
+        var _tries = 0;
+        var _t = setInterval(function () {
+          _tries++;
+          if (window.SNXFeatureLoader && typeof window.SNXFeatureLoader.loadFeature === 'function') {
+            clearInterval(_t);
+            window.SNXFeatureLoader.loadFeature('shadowReaper').then(function () {
+              snxShadowReaperInit();
+            }).catch(function (err) {
+              _setStatus('Load failed — retry', 'error');
+              console.error('[SNX-SR] Feature load failed:', err);
+            });
+          } else if (_tries > 50) {
+            clearInterval(_t);
+            _setStatus('Load timeout — reload page', 'error');
+          }
+        }, 120);
+      }
+    }
+  };
+
+  // ── Close ────────────────────────────────────────────────────────────────
+  window.snxCloseShadowReaper = function () {
+    _getDOMRefs();
+    $overlay.classList.remove('snx-sr-open');
+    document.body.style.overflow = '';
+    // Hide overlay after animation completes (300ms)
+    setTimeout(function () {
+      if (!$overlay.classList.contains('snx-sr-open')) {
+        $overlay.style.display = 'none';
+      }
+    }, 320);
+    // Close settings if open
+    if ($settings) $settings.classList.remove('open');
+    if ($scrim)    $scrim.classList.remove('visible');
+  };
+
+  // ── Status label ─────────────────────────────────────────────────────────
+  function _setStatus(text, cls) {
+    if (!$statusLabel) return;
+    $statusLabel.textContent = text;
+    $statusLabel.className = 'sr-header-status' + (cls ? ' ' + cls : '');
+  }
+
+  // ── Status chips ─────────────────────────────────────────────────────────
+  function _updateChips() {
+    var SR = window.ShadowReaper;
+    if (!SR) return;
+    var s = SR.getStatus();
+    _chip('schipHistory',    s.historyEnabled,     'History');
+    _chip('schipMemory',     s.memoryEnabled,      'Memory');
+    _chip('schipAdaptive',   s.adaptiveEnabled,    'Adaptive');
+    _chip('schipVoice',      s.voiceConnected,     'Voice');
+    _chip('schipKnowledge',  s.knowledgeConnected, 'Knowledge');
+    _chip('schipTranslation',s.translationConnected,'Translate');
+  }
+
+  function _chip(id, on, label) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = label;
+    el.className = 'sr-chip ' + (on ? 'on' : 'off');
+  }
+
+  function _syncToggles() {
+    var SR = window.ShadowReaper;
+    if (!SR) return;
+    var s = SR.getStatus();
+    if ($tHistory)  $tHistory.checked  = s.historyEnabled  !== false;
+    if ($tMemory)   $tMemory.checked   = s.memoryEnabled   !== false;
+    if ($tAdaptive) $tAdaptive.checked = s.adaptiveEnabled !== false;
+    var SRVoice = window.SRVoice;
+    if (SRVoice && $tVoice) $tVoice.checked = SRVoice.isVoiceEnabled();
+    if (SRVoice && $tTTS)   $tTTS.checked   = SRVoice.isTTSEnabled();
+  }
+
+  // ── Messages ─────────────────────────────────────────────────────────────
+  function _appendMessage(role, text) {
+    if (_msgCount === 0 && $welcome) $welcome.style.display = 'none';
+    _msgCount++;
+    var wrapper = document.createElement('div');
+    wrapper.className = 'sr-msg ' + (role === 'user' ? 'user' : 'sr');
+    var body = document.createElement('div');
+    body.className = 'sr-msg-body';
+    body.textContent = text;    // XSS-SAFE: textContent only
+    var meta = document.createElement('div');
+    meta.className = 'sr-msg-meta';
+    var now = new Date();
+    var h = now.getHours(); var m = now.getMinutes().toString().padStart(2,'0');
+    var ampm = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    meta.textContent = h + ':' + m + ' ' + ampm;
+    wrapper.appendChild(body);
+    wrapper.appendChild(meta);
+    $conv.appendChild(wrapper);
+    requestAnimationFrame(function () { $conv.scrollTop = $conv.scrollHeight; });
+  }
+
+  function _showTyping() {
+    var el = document.createElement('div');
+    el.className = 'sr-msg sr'; el.id = 'srTypingIndicator';
+    var t = document.createElement('div'); t.className = 'sr-typing';
+    for (var i = 0; i < 3; i++) {
+      var d = document.createElement('div'); d.className = 'sr-typing-dot'; t.appendChild(d);
+    }
+    el.appendChild(t); $conv.appendChild(el);
+    requestAnimationFrame(function () { $conv.scrollTop = $conv.scrollHeight; });
+  }
+
+  function _hideTyping() {
+    var el = document.getElementById('srTypingIndicator');
+    if (el) el.remove();
+  }
+
+  function _appendDivider(text) {
+    var d = document.createElement('div');
+    d.className = 'sr-divider'; d.textContent = text;
+    $conv.appendChild(d);
+  }
+
+  // ── Send ──────────────────────────────────────────────────────────────────
+  function _send(text) {
+    var SR = window.ShadowReaper;
+    if (!text || !text.trim() || _isProcessing || !SR) return;
+    var msg = text.trim();
+    $input.value = ''; $input.style.height = 'auto';
+    $sendBtn.disabled = true; _isProcessing = true;
+    _setStatus('Thinking…', 'loading');
+    _appendMessage('user', msg);
+    _showTyping();
+    SR.ask(msg, function (response) {
+      _hideTyping();
+      _appendMessage('sr', response);
+      _isProcessing = false;
+      _setStatus('Ready', 'ready');
+      $sendBtn.disabled = ($input.value.trim() === '');
+      _updateChips();
+      var SRVoice = window.SRVoice;
+      if (SRVoice && SRVoice.isTTSEnabled()) SRVoice.speak(response);
+    });
+  }
+
+  // ── Init (called once after scripts load) ─────────────────────────────────
+  window.snxShadowReaperInit = function () {
+    if (_booted) return;
+
+    var SR = window.ShadowReaper;
+    if (!SR) {
+      _setStatus('Init error — module missing', 'error');
+      console.error('[SNX-SR] window.ShadowReaper not defined after script load.');
+      return;
+    }
+
+    var ok = SR.init();
+    if (!ok) {
+      _setStatus('Init failed — check console', 'error');
+      console.error('[SNX-SR] ShadowReaper.init() returned false.');
+      return;
+    }
+
+    _booted = true;
+    _setStatus('Ready', 'ready');
+    _updateChips();
+    _syncToggles();
+
+    // Wire UI events once
+    if (!_uiWired) {
+      _uiWired = true;
+
+      // Send button
+      $sendBtn.addEventListener('click', function () { _send($input.value); });
+
+      // Enter key (Shift+Enter = newline)
+      $input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!$sendBtn.disabled) _send($input.value); }
+      });
+
+      // Auto-resize textarea
+      $input.addEventListener('input', function () {
+        $sendBtn.disabled = (this.value.trim() === '');
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+      });
+
+      // Voice button
+      $voiceBtn.addEventListener('click', function () {
+        var SRVoice = window.SRVoice;
+        if (!SRVoice || !SRVoice.isSupported()) {
+          _appendMessage('sr', 'Voice input is not supported in this browser.');
+          return;
+        }
+        if (!SRVoice.isVoiceEnabled()) {
+          _appendMessage('sr', 'Voice is disabled. Enable it in settings.');
+          return;
+        }
+        if (_isListening) {
+          SRVoice.stopListening();
+          $voiceBtn.classList.remove('listening');
+          $voiceBar.classList.remove('visible');
+          _isListening = false;
+          return;
+        }
+        _isListening = true;
+        $voiceBtn.classList.add('listening');
+        $voiceBar.classList.add('visible');
+        SRVoice.startListening(
+          function (transcript) {
+            $voiceBtn.classList.remove('listening');
+            $voiceBar.classList.remove('visible');
+            _isListening = false;
+            if (transcript && transcript.trim()) { $input.value = transcript; _send(transcript); }
+          },
+          function (err) {
+            $voiceBtn.classList.remove('listening');
+            $voiceBar.classList.remove('visible');
+            _isListening = false;
+            _appendMessage('sr', 'Voice input error: ' + (err || 'microphone not available.'));
+          }
+        );
+      });
+
+      // Unavailable voice state
+      var SRVoice = window.SRVoice;
+      if (!SRVoice || !SRVoice.isSupported()) $voiceBtn.classList.add('unavailable');
+
+      // New conversation
+      document.getElementById('srNewConvoBtn').addEventListener('click', function () {
+        if (!window.ShadowReaper) return;
+        window.ShadowReaper.newConversation();
+        _appendDivider('New conversation');
+        _setStatus('Ready', 'ready');
+      });
+
+      // Settings open/close
+      document.getElementById('srSettingsBtn').addEventListener('click', function () {
+        $settings.classList.add('open');
+        $scrim.classList.add('visible');
+        _syncToggles();
+      });
+      document.getElementById('srSettingsClose').addEventListener('click', function () {
+        $settings.classList.remove('open');
+        $scrim.classList.remove('visible');
+      });
+      $scrim.addEventListener('click', function () {
+        $settings.classList.remove('open');
+        $scrim.classList.remove('visible');
+      });
+
+      // Clear history / new convo
+      document.getElementById('srClearHistoryBtn').addEventListener('click', function () {
+        if (!window.ShadowReaper) return;
+        window.ShadowReaper.newConversation();
+        $settings.classList.remove('open');
+        $scrim.classList.remove('visible');
+        _appendDivider('New conversation started');
+      });
+
+      // Toggle handlers
+      $tHistory.addEventListener('change', function () {
+        if (window.ShadowReaper) { window.ShadowReaper.setHistoryEnabled(this.checked); _updateChips(); }
+      });
+      $tMemory.addEventListener('change', function () {
+        if (window.ShadowReaper) { window.ShadowReaper.setMemoryEnabled(this.checked); _updateChips(); }
+      });
+      $tAdaptive.addEventListener('change', function () {
+        if (window.ShadowReaper) { window.ShadowReaper.setAdaptiveEnabled(this.checked); _updateChips(); }
+      });
+      $tVoice.addEventListener('change', function () {
+        if (window.ShadowReaper) { window.ShadowReaper.setVoiceEnabled(this.checked); _updateChips(); }
+      });
+      $tTTS.addEventListener('change', function () {
+        if (window.ShadowReaper) window.ShadowReaper.setTTSEnabled(this.checked);
+      });
+
+      // Hint chips
+      $conv.querySelectorAll('.sr-hint-chip').forEach(function (chip) {
+        chip.addEventListener('click', function () {
+          var msg = this.getAttribute('data-msg');
+          if (msg) _send(msg);
+        });
+      });
+
+      // Keyboard: Escape closes panel
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && $overlay && $overlay.classList.contains('snx-sr-open')) {
+          snxCloseShadowReaper();
+        }
+      });
+    }
+
+    // Focus input
+    if ($input) setTimeout(function () { $input.focus(); }, 80);
+  };
 
 })();
 </script>

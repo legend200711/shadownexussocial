@@ -678,20 +678,6 @@ canvas:not(#bg-canvas) {
 }
 
 /* ═══════════════════════════════════════════════════════════
-   GRIM AI ASSISTANT PANEL — ensure it doesn't overflow
-   ═══════════════════════════════════════════════════════════ */
-@media (max-width: 640px) {
-
-  #grim-panel {
-    width: calc(100vw - 20px) !important;
-    right: 10px !important;
-    left: 10px !important;
-    bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
-    max-height: 70dvh !important;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════
    LIGHTNING BOLT WIDGET
    ═══════════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
@@ -762,8 +748,6 @@ canvas:not(#bg-canvas) {
   #nexusCoreMenu,
   #pwa-install-banner,
   #notification-toast,
-  #grim-panel,
-  #grim-panel-overlay,
   #snxPortalTransition,
   #snxEnterOverlay,
   .rain-drop,
