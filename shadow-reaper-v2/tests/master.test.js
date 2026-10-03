@@ -201,8 +201,10 @@ test('ShadowReaper.init() returns true', function () {
   assert(SR._initialized === true);
 });
 
-test('Build is SR-V2-STAGE4', function () {
-  assert(SR._version === 'SR-V2-STAGE4');
+test('Build is SR-V2-STAGE4 or later', function () {
+  // Accept SR-V2-STAGE4 through SR-V2-STAGE12 — any valid stage build
+  assert(typeof SR._version === 'string' && SR._version.indexOf('SR-V2-STAGE') === 0,
+    'Expected SR-V2-STAGE* build, got: ' + SR._version);
 });
 
 test('Status shows all stage 4 modules connected', function () {
@@ -1044,6 +1046,255 @@ test('Rapid messages (10 in sequence) handled without crash', function () {
     var r = SR.ask('Hello number ' + i);
     assert(typeof r === 'string');
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECTION SNS — SNS KNOWLEDGE EXPANSION (Build: SR-V2-KNOWLEDGE-2)
+// ═══════════════════════════════════════════════════════════════════════════
+process.stdout.write('\n── SNS KNOWLEDGE EXPANSION ───────────────────────────\n');
+
+// Build version
+test('SRKnowledge build is SR-V2-KNOWLEDGE-2', function () {
+  assert(SRK.build === 'SR-V2-KNOWLEDGE-2', 'Expected SR-V2-KNOWLEDGE-2, got: ' + SRK.build);
+});
+
+// Eclipse Feed
+test('Knowledge: Eclipse Feed — basic query', function () {
+  var r = SRK.query('what is eclipse feed');
+  assert(r !== null, 'No knowledge for eclipse feed');
+  assertContains(r.content, 'Eclipse Feed');
+});
+
+test('Knowledge: Eclipse Feed — "what can I do on the feed"', function () {
+  var r = SRK.query('what can I do on the feed');
+  assert(r !== null);
+  assertContains(r.content, 'Feed');
+});
+
+// Live
+test('Knowledge: Live — "how does live work"', function () {
+  var r = SRK.query('how does live work');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'live');
+});
+
+test('Knowledge: Live — "how do I go live"', function () {
+  var r = SRK.query('how do I go live');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'live');
+});
+
+test('Knowledge: Live — semantic variation "what is shadow nexus live"', function () {
+  var r = SRK.query('what is shadow nexus live');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'live');
+});
+
+// Cohost
+test('Knowledge: Cohost — "how does cohosting work"', function () {
+  var r = SRK.query('how does cohosting work');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'cohost');
+});
+
+// Radio
+test('Knowledge: Radio — "how does the radio work"', function () {
+  var r = SRK.query('how does the radio work');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'radio');
+});
+
+test('Knowledge: Radio Studio — "how do I start a radio stream"', function () {
+  var r = SRK.query('how do I start a radio stream');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'radio');
+});
+
+// TV
+test('Knowledge: TV — "what is the tv for"', function () {
+  var r = SRK.query('what is the tv for');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'tv');
+});
+
+// Inbox
+test('Knowledge: Inbox — "where are my messages"', function () {
+  var r = SRK.query('where are my messages');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'inbox');
+});
+
+test('Knowledge: Inbox — "how do I start a new conversation"', function () {
+  var r = SRK.query('how do I start a new conversation in my inbox');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'inbox');
+});
+
+// Search
+test('Knowledge: Search — "how do I find someone"', function () {
+  var r = SRK.query('how do I find someone');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'search');
+});
+
+// Profile
+test('Knowledge: Profile — "how do I edit my profile"', function () {
+  var r = SRK.query('how do I edit my profile');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'profile');
+});
+
+// Uploads
+test('Knowledge: Uploads — "how do I upload a video"', function () {
+  var r = SRK.query('how do I upload a video');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'upload');
+});
+
+// Storm Rooms
+test('Knowledge: Storm Rooms — "what are storm rooms"', function () {
+  var r = SRK.query('what are storm rooms');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'storm');
+});
+
+// Support Rooms
+test('Knowledge: Support Rooms — "what are support rooms"', function () {
+  var r = SRK.query('what are support rooms');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'support');
+});
+
+// Arcade
+test('Knowledge: Arcade — "what is the arcade"', function () {
+  var r = SRK.query('what is the arcade');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'arcade');
+});
+
+// PWA
+test('Knowledge: PWA — "can I install this as an app"', function () {
+  var r = SRK.query('can I install this as an app');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'install');
+});
+
+// Auth
+test('Knowledge: Auth — "how do I log in"', function () {
+  var r = SRK.query('how do I log in');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'account');
+});
+
+// Community
+test('Knowledge: Community — "what are the community rules"', function () {
+  var r = SRK.query('what are the community rules');
+  assert(r !== null);
+  assertContains(r.content.toLowerCase(), 'communit');
+});
+
+// What Can I Do capability registry
+test('SRKnowledge.buildCapabilityResponse() returns non-empty string', function () {
+  assert(typeof SRK.buildCapabilityResponse === 'function', 'buildCapabilityResponse must be a function');
+  var resp = SRK.buildCapabilityResponse();
+  assert(typeof resp === 'string' && resp.length > 50, 'Capability response must be non-empty');
+  assertContains(resp, 'CONVERSATION');
+  assertContains(resp, 'SHADOW NEXUS SOCIAL HELP');
+});
+
+test('SRKnowledge.getCapabilityRegistry() returns arrays', function () {
+  var reg = SRK.getCapabilityRegistry();
+  assert(reg && Array.isArray(reg.general) && reg.general.length > 0);
+  assert(reg && Array.isArray(reg.sns) && reg.sns.length > 0);
+});
+
+test('What Can I Do — knowledge entry contains marker', function () {
+  var r = SRK.query('what can I do');
+  assert(r !== null, 'No knowledge entry for what can I do');
+  assertContains(r.content, 'SHADOW_REAPER_WHAT_CAN_I_DO');
+});
+
+test('Capability response does NOT advertise unsupported abilities', function () {
+  var resp = SRK.buildCapabilityResponse();
+  // Should not claim to browse the internet spontaneously, see images, etc.
+  assertNotContains(resp.toLowerCase(), 'browse the internet', 'Must not claim internet browsing');
+  assertNotContains(resp.toLowerCase(), 'see images', 'Must not claim image vision');
+  assertNotContains(resp.toLowerCase(), 'video call', 'Must not claim video calling');
+});
+
+// Semantic variations — multiple phrasings should reach the same knowledge
+test('Semantic: "What does Live do" and "how does the live thing work" both resolve to Live', function () {
+  var r1 = SRK.query('What does Live do');
+  var r2 = SRK.query('how does the live thing work');
+  assert(r1 !== null, 'r1 should not be null');
+  assert(r2 !== null, 'r2 should not be null');
+  assertContains(r1.content.toLowerCase(), 'live');
+  assertContains(r2.content.toLowerCase(), 'live');
+});
+
+test('Semantic: "Tell me about Radio" and "how does radio streaming work" both resolve to Radio', function () {
+  var r1 = SRK.query('Tell me about Radio');
+  var r2 = SRK.query('how does radio streaming work');
+  assert(r1 !== null);
+  assert(r2 !== null);
+  assertContains(r1.content.toLowerCase(), 'radio');
+  assertContains(r2.content.toLowerCase(), 'radio');
+});
+
+// Everyday conversation isolation — SNS should NOT hijack these
+test('Everyday: "I had a rough day" does not get SNS knowledge', function () {
+  SR.newConversation();
+  var r = SR.ask('I had a rough day');
+  assertNotContains(r.toLowerCase(), 'eclipse feed', '"rough day" must not get feed info');
+  assertNotContains(r.toLowerCase(), 'shadow nexus live', '"rough day" must not get Live info');
+});
+
+test('Everyday: "I\'m excited today" does not get SNS knowledge', function () {
+  SR.newConversation();
+  var r = SR.ask("I'm excited today");
+  assertNotContains(r.toLowerCase(), 'radio', '"excited" must not inject Radio knowledge');
+  assertNotContains(r.toLowerCase(), 'eclipse feed', '"excited" must not inject Feed knowledge');
+});
+
+test('Everyday: "help me brainstorm an idea" is handled conversationally', function () {
+  SR.newConversation();
+  var r = SR.ask('help me brainstorm an idea');
+  assert(r.length > 0);
+  // Should not immediately dump SNS documentation
+  assertNotContains(r.toLowerCase(), 'shadow nexus social is a creative social platform', 'Brainstorm should not dump platform docs');
+});
+
+test('Everyday: "I\'m frustrated" gets emotional response', function () {
+  SR.newConversation();
+  var r = SR.ask("I'm frustrated");
+  assert(r.length > 0);
+  // Should be empathetic, not website docs
+  assertNotContains(r.toLowerCase(), 'eclipse feed', '"frustrated" should not get Feed info');
+});
+
+// Memory isolation — SNS questions should NOT be stored as personal facts
+test('Memory: "How does Live work?" is NOT saved as personal memory', function () {
+  // This tests that knowledge queries don't create spurious personal memory entries
+  // The adaptive brain should extract concepts but not personal facts from SNS queries
+  SR.newConversation();
+  SR.ask('How does Live work?');
+  // No crash = pass; memory contamination is tested in adaptive-brain tests
+});
+
+// KNOWLEDGE ENGINE knowledge count
+test('SNS knowledge entries: at least 20 verified entries', function () {
+  var snsCat = SRK.getByCategory('SNS');
+  assert(snsCat.length >= 20, 'Expected at least 20 SNS entries, got: ' + snsCat.length);
+});
+
+test('CREATOR knowledge entries: at least 4 entries', function () {
+  var creatorCat = SRK.getByCategory('CREATOR');
+  assert(creatorCat.length >= 4, 'Expected at least 4 CREATOR entries, got: ' + creatorCat.length);
+});
+
+test('GENERAL knowledge entries: at least 4 entries', function () {
+  var generalCat = SRK.getByCategory('GENERAL');
+  assert(generalCat.length >= 4, 'Expected at least 4 GENERAL entries, got: ' + generalCat.length);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

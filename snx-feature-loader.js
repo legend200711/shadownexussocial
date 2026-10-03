@@ -149,11 +149,15 @@
     },
 
     // ── Shadow Reaper V2 — updated AI panel
+    // Build: SR-V2-STAGE12 (personality, number intelligence, research router,
+    //        diagnostics, enhanced knowledge, language foundation hooks)
     // Script load order is critical — matches shadow-reaper-v2/shadow-reaper.js
     // dependency list exactly.  CSS loaded first so panel renders before init.
     // snx-shadow-conv-history.js, snx-shadow-memory.js, snx-shadow-adaptive.js
-    // are the persistence modules from the deployed checkpoint (v101 / FIX-002).
-    // No Workers AI calls — fully local/deterministic.
+    // are the SNS-native persistence modules — DO NOT replace with standalone
+    // versions from the shadow-reaper-v2 workspace.
+    // Stage 12 optional modules (personality, capability-state, inference-runtime)
+    // are all guarded with 'if (global.X)' in shadow-reaper.js — safe to include.
     shadowReaper: {
       label: 'SHADOW REAPER',
       css:  ['snx-shadow-reaper-panel.css?v=SNS-2026-SHADOW-REAPER-RECONNECT-001'],
@@ -161,19 +165,22 @@
         'snx-shadow-conv-history.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
         'snx-shadow-memory.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
         'snx-shadow-adaptive.js?v=SNS-2026-SHADOW-CONV-HISTORY-FIX-002',
-        'shadow-reaper-v2/core/adaptive-brain.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/core/understanding-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/core/context-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/core/conversation-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/core/response-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/core/persistence-bridge.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/core/local-model.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/knowledge/knowledge-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/knowledge/sr-knowledge-learner.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/translation/translation-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/voice/voice-engine.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/adapters/founder-controls.js?v=SR-V2-STAGE4',
-        'shadow-reaper-v2/shadow-reaper.js?v=SR-V2-STAGE4'
+        'shadow-reaper-v2/core/adaptive-brain.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/understanding-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/context-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/conversation-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/response-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/persistence-bridge.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/local-model.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/personality-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/sr-capability-state.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/core/sr-inference-runtime.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/knowledge/knowledge-engine.js?v=SR-V2-KNOWLEDGE-2',
+        'shadow-reaper-v2/knowledge/sr-knowledge-learner.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/translation/translation-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/voice/voice-engine.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/adapters/founder-controls.js?v=SR-V2-STAGE12',
+        'shadow-reaper-v2/shadow-reaper.js?v=SR-V2-STAGE12'
       ],
       esModules: [],
       init: null   // boot handled by snxShadowReaperInit() in index.html inline script

@@ -445,7 +445,12 @@
           /what(\'?s| is) my project/i.test(raw) ||
           /what (is|was) (the |my )?project (called|named|name)/i.test(raw)) {
         if (context.projectName) {
-          return fill(pickVaried(POOLS.whatProject), ctx);
+          var _pResp = fill(pickVaried(POOLS.whatProject), ctx);
+          // If the query also asks about color/design AND we have a tracked color, append it.
+          if (/color|colour|design/.test(lower) && context.designColor) {
+            _pResp += ' You said it uses a ' + context.designColor + ' design.';
+          }
+          return _pResp;
         }
         return pickVaried(POOLS.whatProjectNone);
       }

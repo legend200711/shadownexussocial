@@ -306,20 +306,40 @@
   function _runNormalPipeline(message, p, callback) {
     // ── Reset per-request diagnostics ────────────────────────────────────────
     _lastDiag = {
+      // Language Foundation
       LANGUAGE_FOUNDATION:   'UNKNOWN',
       TOKEN_COUNT:           0,
       LEMMA_MATCHES:         0,
       CONCEPTS:              0,
+      // Intent / understanding
+      INTENT:                'UNKNOWN',
+      NEGATION_DETECTED:     false,
+      // Knowledge
       KNOWLEDGE_QUERY:       'NO',
       KNOWLEDGE_CATEGORY:    null,
       KNOWLEDGE_MATCHES:     0,
       TOP_KNOWLEDGE_SCORE:   0,
       KNOWLEDGE_USED:        'NO',
+      // Memory / adaptive
       ADAPTIVE_CONTEXT_USED: 'NO',
       PERSONAL_MEMORY_USED:  'NO',
+      MEMORY_USED:           'NO',
+      // Response
       RESPONSE_SOURCE:       'UNKNOWN',
-      NEGATION_DETECTED:     false,
-      INTENT:                'UNKNOWN',
+      // Possible RESPONSE_SOURCE values:
+      //   LOCAL_MODEL          — WebGPU or CPU inference
+      //   SHADOW_API           — hosted Shadow API
+      //   KNOWLEDGE_ASSISTED   — static knowledge snippet provided the answer
+      //   MEMORY_ASSISTED      — personal memory drove the response
+      //   DETERMINISTIC        — deterministic response pools (compose())
+      //   DEGRADED             — all inference failed, deterministic fallback
+      //   ERROR_FALLBACK       — unexpected error path
+      //   HISTORY              — persistent conversation history
+      //   TRANSLATION          — translation engine
+      //   CALCULATION          — local calculation result
+      //   LEARNED              — adaptive brain / knowledge learner
+      //   MEMORY               — memory command handler
+      CONVERSATION_CONTEXT_USED: 'NO',
       // Internet routing diagnostics (SR-CLOUD-INTERNET-1)
       INTERNET_ROUTE:            'NONE',
       INTERNET_FETCH:            'NO',
@@ -435,6 +455,13 @@
           knowledgeSnippet = kEntries[0].content;
         }
       }
+      // Resolve special capability marker immediately so composeAsync
+      // and the model both see the real text, not the sentinel token.
+      if (knowledgeSnippet && knowledgeSnippet.indexOf('SHADOW_REAPER_WHAT_CAN_I_DO') !== -1) {
+        if (typeof k.buildCapabilityResponse === 'function') {
+          knowledgeSnippet = k.buildCapabilityResponse();
+        }
+      }
     } else {
       _lastDiag.KNOWLEDGE_QUERY = 'NO';
     }
@@ -473,6 +500,7 @@
 
     _lastDiag.INTENT = understood.intent || 'UNKNOWN';
     _lastDiag.ADAPTIVE_CONTEXT_USED = (adaptiveSnippets && adaptiveSnippets.length > 0) ? 'YES' : 'NO';
+    _lastDiag.CONVERSATION_CONTEXT_USED = (global.SRConversation && global.SRConversation.getTurnCount() > 0) ? 'YES' : 'NO';
 
     // ── NUMBER INTELLIGENCE — attach to understood for downstream use ──────────
     // Run SRNumberIntelligence.analyze() on every message; attach result to
@@ -575,11 +603,18 @@
         //   ERROR         — local model failed; knowledge can still provide an answer
         //   LOCAL_MODEL   — model is not ready; knowledge fills the gap
         //
-        // Does NOT apply when the response is already a substantive answer.
+        // ALWAYS applies when knowledge snippet is a capability registry response
+        // (starts with "Here's what you can do") — ensures "What Can I Do?"
+        // always returns the capability response regardless of model state.
         if (knowledgeSnippet &&
             (understood.intent === 'QUESTION' || understood.intent === 'GENERAL_CONVERSATION' ||
              understood.intent === 'UNKNOWN')) {
           var _shouldSubstitute = false;
+
+          // Always substitute when it is the capability registry response
+          if (knowledgeSnippet.indexOf("Here's what you can do") === 0) {
+            _shouldSubstitute = true;
+          }
 
           // Check for generic/fallback phrases from response pools
           var _genericPhrases = [
@@ -591,18 +626,20 @@
             "Based on what you've told me:", "Here's what I have from our conversations",
             "Based on what you've shared with me:",
           ];
-          _shouldSubstitute = _genericPhrases.some(function (f) {
-            return response.indexOf(f) !== -1;
-          });
+          if (!_shouldSubstitute) {
+            _shouldSubstitute = _genericPhrases.some(function (f) {
+              return response.indexOf(f) !== -1;
+            });
+          }
 
           if (_shouldSubstitute) {
             response = knowledgeSnippet;
-            _lastResponseSource = 'KNOWLEDGE';
+            _lastResponseSource = 'KNOWLEDGE_ASSISTED';
           }
         }
 
         // ── Finalize diagnostics ─────────────────────────────────────────────────
-        _lastDiag.KNOWLEDGE_USED  = (_lastResponseSource === 'KNOWLEDGE') ? 'YES' : 'NO';
+        _lastDiag.KNOWLEDGE_USED  = (_lastResponseSource === 'KNOWLEDGE' || _lastResponseSource === 'KNOWLEDGE_ASSISTED') ? 'YES' : 'NO';
         _lastDiag.RESPONSE_SOURCE = _lastResponseSource;
 
         global.SRConversation.addTurn('assistant', response, null, null);

@@ -35435,11 +35435,11 @@ window.snxFounderPanelCleanup = (function() {
           <p>I'm here. What do you want to talk about?</p>
           <div class="sr-welcome-hints">
             <div class="sr-hint-chip" data-msg="yo">yo</div>
-            <div class="sr-hint-chip" data-msg="I have a new project idea">new project idea</div>
-            <div class="sr-hint-chip" data-msg="What can you do?">what can you do?</div>
+            <div class="sr-hint-chip" data-msg="What can I do?">What Can I Do?</div>
+            <div class="sr-hint-chip" data-msg="I had a rough day">rough day</div>
             <div class="sr-hint-chip" data-msg="What were we talking about?">continue last chat</div>
-            <div class="sr-hint-chip" data-msg="Translate hello to Spanish">translate hello to Spanish</div>
-            <div class="sr-hint-chip" data-msg="help me think of a name">help me think of a name</div>
+            <div class="sr-hint-chip" data-msg="help me brainstorm an idea">brainstorm</div>
+            <div class="sr-hint-chip" data-msg="What is Shadow Nexus Social?">about this site</div>
           </div>
         </div>
       </div>
@@ -35508,8 +35508,8 @@ window.snxFounderPanelCleanup = (function() {
             Start New Conversation
           </button>
           <div style="margin-top:16px;font-size:10px;color:#3a5070;text-align:center;line-height:1.8;">
-            Shadow Reaper V2 · SR-V2-STAGE4<br>
-            Build: SNS-2026-SHADOW-CONV-HISTORY-FIX-002
+            Shadow Reaper V2 · SR-V2-STAGE12<br>
+            Build: SNS-2026-SHADOW-REAPER-STAGE12-001
           </div>
         </div>
       </aside>
@@ -35710,15 +35710,53 @@ window.snxFounderPanelCleanup = (function() {
     $conv.appendChild(d);
   }
 
+  // ── Current SNS page context ─────────────────────────────────────────────
+  // Returns the name of the currently active SNS section, or null.
+  // This is read-only, temporary, and never stored as persistent memory.
+  function _getCurrentPageLabel() {
+    try {
+      // Active page is tracked by SNS via the last-active page element
+      var activePage = document.querySelector('.page.active');
+      if (!activePage) return null;
+      var id = activePage.id;
+      var PAGE_LABELS = {
+        'feed':            'Eclipse Feed',
+        'inboxPage':       'Inbox',
+        'notificationsPage': 'Notifications',
+        'searchPage':      'Search',
+        'radioPage':       'Radio',
+        'livePage':        'Live',
+        'tvPage':          'TV',
+        'settingsPage':    'Settings',
+        'communityPage':   'Community Hub',
+        'communityRulesPage': 'Community Rules',
+        'stormRoomsPage':  'Storm Rooms',
+        'supportRoomsPage': 'Support Rooms',
+      };
+      return PAGE_LABELS[id] || null;
+    } catch (_) { return null; }
+  }
+
   // ── Send ──────────────────────────────────────────────────────────────────
   function _send(text) {
     var SR = window.ShadowReaper;
     if (!text || !text.trim() || _isProcessing || !SR) return;
     var msg = text.trim();
+
+    // Optionally prepend non-invasive page context for SNS-relevant questions.
+    // Only adds context when: user is asking a question (contains '?' or starts
+    // with how/what/where/can/is) AND a page label is available.
+    // Never stored as permanent memory. Never sent for casual/emotional messages.
+    var _pageLabel = _getCurrentPageLabel();
+    if (_pageLabel && /^(how|what|where|can|is|does|do|why|who)\b|\?/i.test(msg)) {
+      msg = msg + ' [currently viewing: ' + _pageLabel + ']';
+    }
+    // Display the original message to the user (without context tag)
+    var _displayMsg = text.trim();
     $input.value = ''; $input.style.height = 'auto';
     $sendBtn.disabled = true; _isProcessing = true;
     _setStatus('Thinking…', 'loading');
-    _appendMessage('user', msg);
+    _appendMessage('user', _displayMsg);
     _showTyping();
     SR.ask(msg, function (response) {
       _hideTyping();
