@@ -41,7 +41,7 @@
    CONSTANTS
 ════════════════════════════════════════════════════════════ */
 
-const STUDIO_VERSION        = 'SNS-2026-TV-STAGE5-001';
+const STUDIO_VERSION        = 'SNS-2026-TV-STAGE5-002';
 const R2_WORKER_URL         = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 const COLL_TV_MEDIA         = 'tv_media';
 const COLL_TV_PLAYLISTS     = 'tv_playlists';
@@ -758,13 +758,22 @@ function _renderUploadForm() {
 <div class="snxtv-upload-form" id="snxtvUploadForm">
   <p class="snxtv-upload-note">Files are uploaded to SNS storage (R2) using the standard SNS pipeline and immediately added to the TV Media Library.</p>
   <div class="snxtv-form-row">
-    <label for="snxtvUploadFile">Audio File (.mp3, .aac, .flac, .wav, .ogg, .m4a)</label>
-    <input type="file" id="snxtvUploadFile" accept=".mp3,.aac,.flac,.wav,.ogg,.m4a,audio/*">
+    <label for="snxtvUploadFile">Video or Audio File (.mp4, .webm, .mov, .m4v, .mp3, .aac, .flac, .wav, .ogg, .m4a)</label>
+    <input type="file" id="snxtvUploadFile" accept=".mp4,.webm,.mov,.m4v,.avi,.mkv,.mp3,.aac,.flac,.wav,.ogg,.m4a,video/*,audio/*">
   </div>
   <div class="snxtv-form-row">
     <label for="snxtvUploadTitle">Title</label>
-    <input type="text" id="snxtvUploadTitle" placeholder="Track title" maxlength="200">
+    <input type="text" id="snxtvUploadTitle" placeholder="Title" maxlength="200">
   </div>
+  <div class="snxtv-form-row">
+    <label for="snxtvUploadDesc">Description (optional)</label>
+    <input type="text" id="snxtvUploadDesc" placeholder="Description" maxlength="400">
+  </div>
+  <div class="snxtv-form-row" id="snxtvUploadThumbRow" style="display:none;">
+    <label for="snxtvUploadThumb">Thumbnail Image (optional, .jpg/.png/.webp)</label>
+    <input type="file" id="snxtvUploadThumb" accept=".jpg,.jpeg,.png,.webp,image/*">
+  </div>
+  <div class="snxtv-upload-type-badge" id="snxtvUploadTypeBadge" style="display:none;margin-bottom:8px;font-size:11px;padding:4px 10px;border-radius:20px;display:inline-block;"></div>
   <div class="snxtv-progress-bar-wrap" id="snxtvUploadProgressWrap" style="display:none;">
     <div class="snxtv-progress-bar" id="snxtvUploadProgressBar"></div>
     <span id="snxtvUploadProgressLabel">0%</span>
@@ -792,19 +801,50 @@ function _bindUploadFormEvents(panelEl) {
   const btn = panelEl.querySelector('#snxtvBtnDoUpload');
   if (!btn) return;
   btn.addEventListener('click', _doUpload);
+
+  // Show/hide thumbnail field and type badge when file is chosen
+  const fileInput = panelEl.querySelector('#snxtvUploadFile');
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files && fileInput.files[0];
+      const thumbRow  = panelEl.querySelector('#snxtvUploadThumbRow');
+      const typeBadge = panelEl.querySelector('#snxtvUploadTypeBadge');
+      if (!f) {
+        if (thumbRow)  thumbRow.style.display  = 'none';
+        if (typeBadge) typeBadge.style.display = 'none';
+        return;
+      }
+      const isVideo = f.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(f.name);
+      if (thumbRow)  thumbRow.style.display  = isVideo ? '' : 'none';
+      if (typeBadge) {
+        typeBadge.textContent = isVideo ? '🎬 Video file detected' : '🎵 Audio file detected';
+        typeBadge.style.cssText = isVideo
+          ? 'display:inline-block;margin-bottom:8px;font-size:11px;padding:4px 10px;border-radius:20px;background:rgba(0,180,120,0.15);border:1px solid rgba(0,180,120,0.35);color:#00c878;'
+          : 'display:inline-block;margin-bottom:8px;font-size:11px;padding:4px 10px;border-radius:20px;background:rgba(0,120,255,0.12);border:1px solid rgba(0,120,255,0.3);color:#6baaff;';
+      }
+    });
+  }
 }
 
 async function _doUpload() {
-  const fileInput  = _container && _container.querySelector('#snxtvUploadFile');
-  const titleInput = _container && _container.querySelector('#snxtvUploadTitle');
-  const statusEl   = _container && _container.querySelector('#snxtvUploadStatus');
+  const fileInput    = _container && _container.querySelector('#snxtvUploadFile');
+  const titleInput   = _container && _container.querySelector('#snxtvUploadTitle');
+  const descInput    = _container && _container.querySelector('#snxtvUploadDesc');
+  const thumbInput   = _container && _container.querySelector('#snxtvUploadThumb');
+  const statusEl     = _container && _container.querySelector('#snxtvUploadStatus');
   const progressWrap = _container && _container.querySelector('#snxtvUploadProgressWrap');
   const progressBar  = _container && _container.querySelector('#snxtvUploadProgressBar');
   const progressLabel= _container && _container.querySelector('#snxtvUploadProgressLabel');
 
   if (!fileInput || !fileInput.files.length) { _toast('Choose a file first.'); return; }
-  const file = fileInput.files[0];
-  const title = (titleInput && titleInput.value.trim()) || file.name.replace(/\.[^.]+$/, '');
+  const file      = fileInput.files[0];
+  const title     = (titleInput && titleInput.value.trim()) || file.name.replace(/\.[^.]+$/, '');
+  const desc      = (descInput  && descInput.value.trim())  || '';
+  const thumbFile = (thumbInput && thumbInput.files && thumbInput.files[0]) || null;
+
+  // Detect media type from MIME or extension
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(file.name);
+  const mediaType = isVideo ? 'video' : 'audio';
 
   const cu = _cu();
   if (!cu) { _toast('Not signed in.'); return; }
@@ -813,9 +853,9 @@ async function _doUpload() {
   try { idToken = await _getIdToken(); }
   catch (e) { _toast('Auth failed: ' + e.message); return; }
 
-  // R2 key in tv/{uid}/ namespace (already in upload-worker allowedPrefixes)
-  const ext    = (file.name.split('.').pop() || 'mp3').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const r2Key  = `tv/${cu.uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+  // R2 key in tv/{uid}/ namespace (allowed by upload-worker for both audio and video)
+  const ext   = (file.name.split('.').pop() || (isVideo ? 'mp4' : 'mp3')).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const r2Key = `tv/${cu.uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
 
   if (statusEl) statusEl.textContent = 'Uploading…';
   if (progressWrap) progressWrap.style.display = 'flex';
@@ -824,9 +864,9 @@ async function _doUpload() {
   formData.append('file', file, file.name);
   formData.append('path', r2Key);
 
-  return new Promise((resolve) => {
+  return new Promise((resolveOuter) => {
     const xhr = new XMLHttpRequest();
-    xhr.timeout = 10 * 60 * 1000;
+    xhr.timeout = 30 * 60 * 1000; // 30 min for large video files
 
     xhr.upload.onprogress = e => {
       if (!e.lengthComputable) return;
@@ -842,67 +882,124 @@ async function _doUpload() {
 
       if (xhr.status >= 200 && xhr.status < 300 && resp.url) {
         if (statusEl) statusEl.textContent = '✓ Uploaded. Adding to TV library…';
-        // Store Firestore metadata in profileMusic (same as SNS standard upload)
+
         const { addDoc, collection, serverTimestamp } = _fs();
         const db = _db();
         let firestoreId = null;
-        if (db) {
+        let artworkUrl  = '';
+
+        // ── Upload thumbnail if provided (image upload via same endpoint) ──
+        if (thumbFile && db) {
           try {
-            const docRef = await addDoc(collection(db, COLL_PROFILE_MUSIC), {
-              ownerUid:   cu.uid,
-              ownerId:    cu.uid,
-              userId:     cu.uid,
-              title,
-              artist:     (global._snxUserData && global._snxUserData.displayName) || '',
-              musicUrl:   resp.url,
-              downloadURL:resp.url,
-              r2Key,
-              duration:   0,
-              visibility: 'public',
-              isPublic:   true,
-              uploadedAt: serverTimestamp(),
-              source:     'tv-studio',
+            const thumbExt  = (thumbFile.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const thumbKey  = `tv/${cu.uid}/thumb-${Date.now()}-${Math.random().toString(16).slice(2)}.${thumbExt}`;
+            const thumbForm = new FormData();
+            thumbForm.append('file', thumbFile, thumbFile.name);
+            thumbForm.append('path', thumbKey);
+            const thumbXhr = new XMLHttpRequest();
+            await new Promise((res) => {
+              thumbXhr.onload = () => {
+                try {
+                  const tr = JSON.parse(thumbXhr.responseText);
+                  if (thumbXhr.status >= 200 && thumbXhr.status < 300 && tr.url) artworkUrl = tr.url;
+                } catch {}
+                res();
+              };
+              thumbXhr.onerror = () => res();
+              thumbXhr.open('POST', R2_WORKER_URL + '/upload-music');
+              thumbXhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
+              thumbXhr.send(thumbForm);
             });
-            firestoreId = docRef.id;
-          } catch (fe) {
-            console.warn('[SNX-TV-STUDIO] profileMusic write failed:', fe.message);
+          } catch (te) {
+            console.warn('[SNX-TV-STUDIO] thumb upload failed:', te);
           }
         }
-        // Add to tv_media immediately
+
+        // ── Store Firestore source record ──
+        // Videos go into COLL_VIDEOS; audio goes into profileMusic.
+        if (db) {
+          try {
+            if (isVideo) {
+              const docRef = await addDoc(collection(db, COLL_VIDEOS), {
+                ownerUid:     cu.uid,
+                userId:       cu.uid,
+                title,
+                description:  desc,
+                videoUrl:     resp.url,
+                r2Url:        resp.url,
+                thumbnailUrl: artworkUrl,
+                r2Key,
+                duration:     0,
+                visibility:   'public',
+                isPublic:     true,
+                uploadedAt:   serverTimestamp(),
+                source:       'tv-studio',
+              });
+              firestoreId = docRef.id;
+            } else {
+              const docRef = await addDoc(collection(db, COLL_PROFILE_MUSIC), {
+                ownerUid:    cu.uid,
+                ownerId:     cu.uid,
+                userId:      cu.uid,
+                title,
+                description: desc,
+                artist:      (global._snxUserData && global._snxUserData.displayName) || '',
+                musicUrl:    resp.url,
+                downloadURL: resp.url,
+                artUrl:      artworkUrl,
+                r2Key,
+                duration:    0,
+                visibility:  'public',
+                isPublic:    true,
+                uploadedAt:  serverTimestamp(),
+                source:      'tv-studio',
+              });
+              firestoreId = docRef.id;
+            }
+          } catch (fe) {
+            console.warn('[SNX-TV-STUDIO] source doc write failed:', fe.message);
+          }
+        }
+
+        // ── Add to tv_media ──
         if (db) {
           try {
             await addDoc(collection(db, COLL_TV_MEDIA), {
               title,
-              mediaType:   'audio',
-              mediaUrl:    resp.url,
-              artworkUrl:  '',
-              duration:    0,
-              sourceId:    firestoreId || r2Key,
-              sourceCollection: COLL_PROFILE_MUSIC,
-              sourceType:  'music',
+              description:      desc,
+              mediaType,
+              mediaUrl:         resp.url,
+              artworkUrl,
+              duration:         0,
+              sourceId:         firestoreId || r2Key,
+              sourceCollection: isVideo ? COLL_VIDEOS : COLL_PROFILE_MUSIC,
+              sourceType:       isVideo ? 'video' : 'music',
               r2Key,
-              addedBy:     cu.uid,
-              createdAt:   serverTimestamp()
+              addedBy:          cu.uid,
+              createdAt:        serverTimestamp()
             });
           } catch (te) {
             console.warn('[SNX-TV-STUDIO] tv_media write failed:', te.message);
           }
         }
-        if (statusEl) statusEl.textContent = '✓ Added to TV Media Library!';
+
+        if (statusEl) statusEl.textContent = `✓ ${isVideo ? 'Video' : 'Audio'} added to TV Media Library!`;
         if (fileInput) fileInput.value = '';
         if (titleInput) titleInput.value = '';
-        _toast('✓ Upload complete and added to TV.');
+        if (descInput)  descInput.value  = '';
+        if (thumbInput) thumbInput.value = '';
+        _toast(`✓ ${isVideo ? 'Video' : 'Audio'} upload complete and added to TV.`);
         _closeUploadSection();
-        resolve();
+        resolveOuter();
       } else {
         if (statusEl) statusEl.textContent = '✗ Upload failed: ' + (resp.error || `HTTP ${xhr.status}`);
-        _toast('Upload failed.');
-        resolve();
+        _toast('Upload failed: ' + (resp.error || `HTTP ${xhr.status}`));
+        resolveOuter();
       }
     };
 
-    xhr.onerror  = () => { if (statusEl) statusEl.textContent = '✗ Network error.'; _toast('Upload error.'); resolve(); };
-    xhr.ontimeout= () => { if (statusEl) statusEl.textContent = '✗ Upload timed out.'; resolve(); };
+    xhr.onerror   = () => { if (statusEl) statusEl.textContent = '✗ Network error.'; _toast('Upload error.'); resolveOuter(); };
+    xhr.ontimeout = () => { if (statusEl) statusEl.textContent = '✗ Upload timed out.'; _toast('Upload timed out.'); resolveOuter(); };
 
     xhr.open('POST', R2_WORKER_URL + '/upload-music');
     xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
@@ -1562,6 +1659,20 @@ function _tsMs(v) {
   return 0;
 }
 
+/**
+ * Resolve the effective duration for a schedule slot.
+ * Uses slot.scheduledDuration (program block duration) when explicitly set;
+ * falls back to the sum of media durations.
+ */
+function _slotEffectiveDuration(slot, prog) {
+  if (typeof slot.scheduledDuration === 'number' && slot.scheduledDuration > 0) {
+    return { duration: slot.scheduledDuration, hasUnknown: false, isScheduled: true };
+  }
+  if (!prog) return { duration: 0, hasUnknown: true, isScheduled: false };
+  const d = _calcStudioProgramDuration(prog);
+  return { ...d, isScheduled: false };
+}
+
 function _renderScheduleList(conflictEntryIds) {
   if (!_tvSchedule.length) {
     return '<div class="snxtv-empty">No schedule entries yet. Add one to begin programming.</div>';
@@ -1574,7 +1685,7 @@ function _renderScheduleList(conflictEntryIds) {
     const prog = _tvPrograms.find(p => p.id === slot.programId);
     const progName = prog ? (prog.name || 'Untitled') : '(Program missing)';
     const startMs = _tsMs(slot.startTime);
-    const dur = prog ? _calcStudioProgramDuration(prog) : { duration: 0, hasUnknown: true };
+    const dur = _slotEffectiveDuration(slot, prog);
     const endMs = startMs + (dur.duration > 0 ? dur.duration * 1000 : 0);
     const isConflict = conflictEntryIds.has(slot.id);
     const isEnabled = slot.enabled !== false;
@@ -1589,9 +1700,8 @@ function _renderScheduleList(conflictEntryIds) {
       ${isConflict ? ' <span class="snxtv-conflict-pill">CONFLICT</span>' : ''}
     </div>
     <div class="snxtv-pl-meta">
-      ${startMs ? _fmtDateTime(startMs) : '—'}
-      ${endMs > startMs ? ' → ' + _fmtDateTime(endMs) : ''}
-      · ${dur.hasUnknown ? '⚠ unknown dur' : _fmtDur(dur.duration)}
+      ${startMs ? _fmtDateTime(startMs) : '—'}${endMs > startMs ? ' – ' + _fmtDateTime(endMs) : ''}
+      · ${dur.hasUnknown ? '⚠ unknown dur' : _fmtDur(dur.duration)}${dur.isScheduled ? ' (scheduled)' : ''}
       ${!isEnabled ? ' · DISABLED' : ''}
     </div>
   </div>
@@ -1604,14 +1714,51 @@ function _renderScheduleList(conflictEntryIds) {
   }).join('');
 }
 
+/* ── Duration selector options (value = seconds, 0 = use-media-duration) ── */
+const _DURATION_PRESETS = [
+  { label: 'Auto (use media duration)',  value: 0 },
+  { label: '5 minutes',                  value: 300 },
+  { label: '10 minutes',                 value: 600 },
+  { label: '15 minutes',                 value: 900 },
+  { label: '30 minutes',                 value: 1800 },
+  { label: '45 minutes',                 value: 2700 },
+  { label: '1 hour',                     value: 3600 },
+  { label: '1 hour 30 minutes',          value: 5400 },
+  { label: '2 hours',                    value: 7200 },
+  { label: '3 hours',                    value: 10800 },
+  { label: 'Custom…',                    value: -1 },
+];
+
+/** Convert seconds to a string like "1h 30m" */
+function _fmtDurLong(secs) {
+  if (!secs || !isFinite(secs) || secs <= 0) return '—';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (h > 0 && m > 0) return h + 'h ' + m + 'm';
+  if (h > 0) return h + 'h';
+  return m + 'm';
+}
+
 function _renderSlotEditor(el, slotId) {
   const slot = _tvSchedule.find(s => s.id === slotId);
   if (!slot) { _editingSlotId = null; _renderSchedulePanel(); return; }
 
-  const startMs = _tsMs(slot.startTime);
-  const prog = _tvPrograms.find(p => p.id === slot.programId);
-  const dur = prog ? _calcStudioProgramDuration(prog) : { duration: 0, hasUnknown: true };
-  const endMs = startMs + (dur.duration > 0 ? dur.duration * 1000 : 0);
+  const startMs  = _tsMs(slot.startTime);
+  const prog     = _tvPrograms.find(p => p.id === slot.programId);
+  const dur      = _slotEffectiveDuration(slot, prog);
+  const endMs    = startMs + (dur.duration > 0 ? dur.duration * 1000 : 0);
+
+  // The stored scheduledDuration, if any (0 = auto)
+  const storedSchedDur = (typeof slot.scheduledDuration === 'number' && slot.scheduledDuration > 0)
+    ? slot.scheduledDuration : 0;
+
+  // Determine whether it matches a preset (for the select default value)
+  const isCustom     = storedSchedDur > 0 && !_DURATION_PRESETS.some(p => p.value === storedSchedDur);
+  const selectedPresetValue = isCustom ? -1 : storedSchedDur;
+
+  // Custom hours/minutes if stored
+  const customH = storedSchedDur > 0 ? Math.floor(storedSchedDur / 3600) : 0;
+  const customM = storedSchedDur > 0 ? Math.floor((storedSchedDur % 3600) / 60) : 0;
 
   // Format for datetime-local input
   const startLocal = startMs ? new Date(startMs - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : '';
@@ -1633,8 +1780,24 @@ function _renderSlotEditor(el, slotId) {
       <label class="snxtv-form-label">Start Date &amp; Time (local)</label>
       <input type="datetime-local" id="snxtvSlotStartInput" value="${_esc(startLocal)}" class="snxtv-datetime-input">
     </div>
+    <div>
+      <label class="snxtv-form-label">Program Block Duration</label>
+      <select id="snxtvSlotDurSelect" class="snxtv-select">
+        ${_DURATION_PRESETS.map(p => `<option value="${p.value}" ${p.value === selectedPresetValue ? 'selected' : ''}>${_esc(p.label)}</option>`).join('')}
+      </select>
+      <div id="snxtvSlotCustomDurRow" style="display:${isCustom ? 'flex' : 'none'};gap:8px;align-items:center;margin-top:8px;">
+        <label style="font-size:11px;color:rgba(255,255,255,0.5);">Hours:</label>
+        <input type="number" id="snxtvSlotCustomH" min="0" max="23" value="${customH}" style="width:60px;background:rgba(0,0,0,0.3);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:6px 8px;border-radius:6px;font-size:12px;">
+        <label style="font-size:11px;color:rgba(255,255,255,0.5);">Minutes:</label>
+        <input type="number" id="snxtvSlotCustomM" min="0" max="59" value="${customM}" style="width:60px;background:rgba(0,0,0,0.3);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:6px 8px;border-radius:6px;font-size:12px;">
+      </div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;">
+        Sets how long this program block occupies the schedule, independent of media length.
+        If longer than the media, the playlist will loop.
+      </div>
+    </div>
     <div id="snxtvSlotCalcEnd" class="snxtv-slot-calc-end">
-      ${endMs > startMs ? 'Ends: ' + _fmtDateTime(endMs) + ' (' + _fmtDur(dur.duration) + ')' : dur.hasUnknown ? '⚠ End time unknown — program has missing durations.' : '—'}
+      ${endMs > startMs ? 'Ends: ' + _fmtDateTime(endMs) + ' (' + _fmtDurLong(dur.duration) + ')' : dur.hasUnknown ? '⚠ End time unknown — set a program duration above.' : '—'}
     </div>
     <div>
       <button class="snxtv-btn snxtv-btn--primary" id="snxtvBtnSaveSlot">Save</button>
@@ -1643,37 +1806,93 @@ function _renderSlotEditor(el, slotId) {
 </div>
 `;
 
-  const progSel = el.querySelector('#snxtvSlotProgSelect');
+  const progSel    = el.querySelector('#snxtvSlotProgSelect');
   const startInput = el.querySelector('#snxtvSlotStartInput');
-  const calcEnd = el.querySelector('#snxtvSlotCalcEnd');
+  const durSelect  = el.querySelector('#snxtvSlotDurSelect');
+  const customRow  = el.querySelector('#snxtvSlotCustomDurRow');
+  const customH_el = el.querySelector('#snxtvSlotCustomH');
+  const customM_el = el.querySelector('#snxtvSlotCustomM');
+  const calcEnd    = el.querySelector('#snxtvSlotCalcEnd');
 
-  function _updateCalcEnd() {
-    const selProg = _tvPrograms.find(p => p.id === progSel.value);
-    const selDur = selProg ? _calcStudioProgramDuration(selProg) : { duration: 0, hasUnknown: true };
-    const inMs = startInput.value ? new Date(startInput.value).getTime() : 0;
-    const enMs = inMs && selDur.duration > 0 ? inMs + selDur.duration * 1000 : 0;
-    calcEnd.textContent = enMs > inMs
-      ? 'Ends: ' + _fmtDateTime(enMs) + ' (' + _fmtDur(selDur.duration) + ')'
-      : selDur.hasUnknown ? '⚠ End time unknown — program has missing durations.' : '—';
+  /** Return the currently selected scheduledDuration in seconds (0 = auto) */
+  function _getSelectedDur() {
+    const v = parseInt(durSelect.value, 10);
+    if (v === -1) {
+      // Custom
+      const h = parseInt(customH_el.value, 10) || 0;
+      const m = parseInt(customM_el.value, 10) || 0;
+      return h * 3600 + m * 60;
+    }
+    return v; // 0 = auto, or a preset value in seconds
   }
 
+  function _updateCalcEnd() {
+    const selProg  = _tvPrograms.find(p => p.id === progSel.value);
+    const schedSec = _getSelectedDur();
+    let effectiveDur, hasUnknown;
+    if (schedSec > 0) {
+      effectiveDur = schedSec; hasUnknown = false;
+    } else {
+      const d = selProg ? _calcStudioProgramDuration(selProg) : { duration: 0, hasUnknown: true };
+      effectiveDur = d.duration; hasUnknown = d.hasUnknown;
+    }
+    const inMs = startInput.value ? new Date(startInput.value).getTime() : 0;
+    const enMs = inMs && effectiveDur > 0 ? inMs + effectiveDur * 1000 : 0;
+    calcEnd.textContent = enMs > inMs
+      ? 'Ends: ' + _fmtDateTime(enMs) + ' (' + _fmtDurLong(effectiveDur) + ')'
+      : hasUnknown ? '⚠ End time unknown — set a duration above.' : '—';
+  }
+
+  durSelect.addEventListener('change', () => {
+    const v = parseInt(durSelect.value, 10);
+    customRow.style.display = (v === -1) ? 'flex' : 'none';
+    _updateCalcEnd();
+  });
+  customH_el.addEventListener('input', _updateCalcEnd);
+  customM_el.addEventListener('input', _updateCalcEnd);
   progSel.addEventListener('change', _updateCalcEnd);
   startInput.addEventListener('input', _updateCalcEnd);
 
   el.querySelector('#snxtvBtnBackToSched').addEventListener('click', () => { _editingSlotId = null; _renderSchedulePanel(); });
-  // Stage 4: prevent double-submit by disabling button while saving
+  // Prevent double-submit by disabling button while saving
   let _slotSaving = false;
   el.querySelector('#snxtvBtnSaveSlot').addEventListener('click', async () => {
     if (_slotSaving) return;
     const selProgId = progSel.value;
-    const rawDate = startInput.value;
+    const rawDate   = startInput.value;
     if (!selProgId || !rawDate) { _toast('Choose a program and start time.'); return; }
     const startDate = new Date(rawDate);
     if (isNaN(startDate.getTime())) { _toast('Invalid date/time.'); return; }
+    const scheduledDurationSec = _getSelectedDur();
+    if (scheduledDurationSec < 0 || (parseInt(durSelect.value,10) === -1 && scheduledDurationSec === 0)) {
+      _toast('Enter a valid custom duration (hours and/or minutes).');
+      return;
+    }
+    // Overlap check before saving
+    const startMs2 = startDate.getTime();
+    const endMs2   = scheduledDurationSec > 0 ? startMs2 + scheduledDurationSec * 1000 : 0;
+    if (endMs2 > startMs2) {
+      const overlaps = _tvSchedule.filter(s => {
+        if (s.id === slotId || s.enabled === false) return false;
+        const sMs  = _tsMs(s.startTime);
+        const sProg = _tvPrograms.find(p => p.id === s.programId);
+        const sDur  = _slotEffectiveDuration(s, sProg);
+        const eMs  = sMs + (sDur.duration > 0 ? sDur.duration * 1000 : 0);
+        if (!sMs || eMs <= sMs) return false;
+        return startMs2 < eMs && endMs2 > sMs;
+      });
+      if (overlaps.length) {
+        const names = overlaps.map(s => {
+          const p = _tvPrograms.find(x => x.id === s.programId);
+          return (p && p.name) || 'Untitled';
+        }).join(', ');
+        if (!confirm(`⚠ This schedule entry overlaps with: ${names}\n\nSave anyway?`)) return;
+      }
+    }
     const saveBtn = el.querySelector('#snxtvBtnSaveSlot');
     _slotSaving = true;
     if (saveBtn) saveBtn.disabled = true;
-    await _saveScheduleSlot(slotId, selProgId, startDate);
+    await _saveScheduleSlot(slotId, selProgId, startDate, scheduledDurationSec);
     _slotSaving = false;
     if (saveBtn) saveBtn.disabled = false;
   });
@@ -1684,7 +1903,7 @@ async function _addScheduleSlot() {
     _toast('Create a program first in the Programming tab.');
     return;
   }
-  const { addDoc, collection, serverTimestamp, Timestamp } = _fs();
+  const { addDoc, collection, serverTimestamp } = _fs();
   const db = _db();
   if (!db) return;
   const firstProg = _tvPrograms[0];
@@ -1692,12 +1911,13 @@ async function _addScheduleSlot() {
 
   try {
     const docRef = await addDoc(collection(db, COLL_TV_SCHEDULE), {
-      programId: firstProg.id,
-      startTime: startDate.getTime(),
-      enabled:   true,
-      ownerId:   (_cu() || {}).uid || '',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      programId:         firstProg.id,
+      startTime:         startDate.getTime(),
+      scheduledDuration: 0,   // 0 = auto (derived from media durations)
+      enabled:           true,
+      ownerId:           (_cu() || {}).uid || '',
+      createdAt:         serverTimestamp(),
+      updatedAt:         serverTimestamp(),
     });
     _toast('✓ Schedule entry added.');
     _editingSlotId = docRef.id;
@@ -1707,15 +1927,24 @@ async function _addScheduleSlot() {
   }
 }
 
-async function _saveScheduleSlot(slotId, programId, startDate) {
+/**
+ * @param {string} slotId
+ * @param {string} programId
+ * @param {Date}   startDate
+ * @param {number} scheduledDurationSec  — 0 = auto (use media duration)
+ */
+async function _saveScheduleSlot(slotId, programId, startDate, scheduledDurationSec) {
   const { doc, updateDoc, serverTimestamp } = _fs();
   const db = _db();
   if (!db) return;
+  const dur = (typeof scheduledDurationSec === 'number' && scheduledDurationSec > 0)
+    ? scheduledDurationSec : 0;
   try {
     await updateDoc(doc(db, COLL_TV_SCHEDULE, slotId), {
       programId,
-      startTime: startDate.getTime(),
-      updatedAt: serverTimestamp(),
+      startTime:         startDate.getTime(),
+      scheduledDuration: dur,
+      updatedAt:         serverTimestamp(),
     });
     _toast('✓ Saved.');
     _editingSlotId = null;

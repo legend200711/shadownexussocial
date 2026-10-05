@@ -35,7 +35,7 @@
    CONSTANTS
 ════════════════════════════════════════════════════════════ */
 
-const VERSION           = 'SNS-2026-TV-STAGE4-002';
+const VERSION           = 'SNS-2026-TV-STAGE5-001';
 const COLL_SCHEDULE     = 'tv_schedule';
 const COLL_PROGRAMS     = 'tv_programs';
 const COLL_PLAYLISTS    = 'tv_playlists';
@@ -196,15 +196,24 @@ function _activeSchedule() {
     if (entry.enabled === false) continue;
     const prog = _programs[entry.programId];
     if (!prog) continue;
-    const { duration } = _calcProgramDuration(prog);
     const startMs = _tsToMs(entry.startTime);
     if (!startMs) continue;
+    // scheduledDuration overrides the sum-of-media calculation.
+    // This is the PROGRAM BLOCK duration set by the studio — independent of media length.
+    const scheduledDuration = (typeof entry.scheduledDuration === 'number' && entry.scheduledDuration > 0)
+      ? entry.scheduledDuration
+      : null;
+    const { duration: mediaDuration } = _calcProgramDuration(prog);
+    // Effective duration: prefer scheduled, then fall back to media-derived.
+    const duration = scheduledDuration !== null ? scheduledDuration : mediaDuration;
     out.push({
       entry,
-      program: prog,
+      program:          prog,
       startMs,
-      endMs: startMs + duration * 1000,
+      endMs:            startMs + duration * 1000,
       duration,
+      scheduledDuration, // non-null when the studio set an explicit block duration
+      mediaDuration,
     });
   }
   // Sort by start time ascending
@@ -415,6 +424,22 @@ function _resolveActive(active, nowMs, slots) {
     return _gapState(_nextSlot(slots, nowMs), slots);
   }
 
+  // Total media duration (sum of all items with known duration)
+  let totalMediaDuration = 0;
+  let allUnknown = true;
+  for (const it of items) {
+    if (it.duration > 0) { totalMediaDuration += it.duration; allUnknown = false; }
+  }
+
+  // When the program has a fixed scheduled block duration and the media has a
+  // known total, support looping: map programElapsed onto [0, totalMediaDuration).
+  let effectiveElapsed = programElapsed;
+  let loopCount = 0;
+  if (!allUnknown && totalMediaDuration > 0 && programElapsed >= totalMediaDuration) {
+    loopCount        = Math.floor(programElapsed / totalMediaDuration);
+    effectiveElapsed = programElapsed % totalMediaDuration;
+  }
+
   // Walk items to find which one is playing and the offset within it
   let accum = 0;
   let currentItem = null;
@@ -426,26 +451,27 @@ function _resolveActive(active, nowMs, slots) {
     const dur  = item.duration > 0 ? item.duration : 0;
 
     if (dur <= 0) {
-      // Unknown duration item: play it from start if accum <= elapsed
-      if (accum <= programElapsed) {
+      // Unknown duration item: play it from start if accum <= effectiveElapsed
+      if (accum <= effectiveElapsed) {
         currentItem = item;
         itemOffset  = 0; // can't calculate
-        nextItem    = items[i + 1] || _firstItemOfNext(slots, nowMs);
+        nextItem    = items[i + 1] || (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
         break;
       }
     }
 
-    if (accum + dur > programElapsed || i === items.length - 1) {
-      // This is the item playing at programElapsed
+    if (accum + dur > effectiveElapsed || i === items.length - 1) {
+      // This is the item playing at effectiveElapsed
       currentItem = item;
-      itemOffset  = Math.max(0, programElapsed - accum);
-      nextItem    = items[i + 1] || _firstItemOfNext(slots, nowMs);
+      itemOffset  = Math.max(0, effectiveElapsed - accum);
+      // Next item wraps around on loop
+      nextItem    = items[i + 1] || (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
       break;
     }
     accum += dur;
   }
 
-  // Build queue: remaining items in program
+  // Build queue: remaining items in program (after currentItem, wrapping if looping)
   const queue = [];
   let foundCurrent = false;
   for (const it of items) {
@@ -454,6 +480,13 @@ function _resolveActive(active, nowMs, slots) {
       continue;
     }
     queue.push(it);
+  }
+  // If we're looping and at the tail, add a rotation of items for visibility
+  if (loopCount > 0 && queue.length === 0 && items.length > 1) {
+    const curIdx = items.indexOf(currentItem);
+    for (let j = 1; j < items.length; j++) {
+      queue.push(items[(curIdx + j) % items.length]);
+    }
   }
 
   // Upcoming schedule (next 8 entries after current)
@@ -474,6 +507,7 @@ function _resolveActive(active, nowMs, slots) {
     programElapsed,
     programDuration: active.duration,
     gapLabel:        '',
+    loopCount,
   };
 }
 
@@ -648,7 +682,7 @@ function getPlaylistsMap() {
 
 const SNXTVTimeline = {
   version: VERSION,
-  buildId: 'SNS-2026-TV-STAGE4-002',
+  buildId: 'SNS-2026-TV-STAGE5-001',
 
   // Lifecycle
   startListening,

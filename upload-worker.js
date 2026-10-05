@@ -2270,20 +2270,29 @@ export default {
         });
       }
 
-      // MIME validation — audio and image allowed (artwork, theme backgrounds)
+      // MIME validation — audio and image allowed for general use;
+      // video is also allowed when the key is under the tv/{uid}/ namespace.
       let mime = file.type || '';
       const extMime = mimeFromExt(file.name);
       if (!mime || mime === 'application/octet-stream') mime = extMime || mime;
       else if (extMime && mime.startsWith('video/') && extMime.startsWith('audio/')) mime = extMime;
 
-      if (!mime.startsWith('audio/') && !mime.startsWith('image/') && mime !== 'application/octet-stream') {
+      const isTvVideoPath = reqPath.startsWith(`tv/${musicUid}/`);
+      if (
+        !mime.startsWith('audio/') &&
+        !mime.startsWith('image/') &&
+        !(isTvVideoPath && mime.startsWith('video/')) &&
+        mime !== 'application/octet-stream'
+      ) {
         return new Response(JSON.stringify({ error: `Only audio or image files are allowed for this upload endpoint. Got: ${file.type}` }), {
           status: 415, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
         });
       }
 
       const buffer = await file.arrayBuffer();
-      const sizeLimit = mime.startsWith('image/') ? MAX_SIZE_IMAGE : MAX_SIZE_AUDIO;
+      const sizeLimit = mime.startsWith('image/') ? MAX_SIZE_IMAGE
+                      : mime.startsWith('video/') ? MAX_SIZE_VIDEO
+                      : MAX_SIZE_AUDIO;
       if (buffer.byteLength > sizeLimit) {
         const limitMB = Math.round(sizeLimit / 1024 / 1024);
         return new Response(JSON.stringify({ error: `File too large (max ${limitMB} MB for this type)` }), {
