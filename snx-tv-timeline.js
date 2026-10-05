@@ -443,35 +443,98 @@ function _resolveActive(active, nowMs, slots) {
     effectiveElapsed = programElapsed % totalMediaDuration;
   }
 
-  // Walk items to find which one is playing and the offset within it
+  // All-unknown-duration fast path: when no item has a known duration we cannot
+  // calculate a wall-clock position.  Return item[0] at offset 0 — the TV Core's
+  // _advanceByQueue() handles sequential advancement in this case, so the resolver
+  // is only called for initial load and join-in-progress (both of which start at
+  // item[0] anyway).
+  if (allUnknown) {
+    const firstItem = items[0];
+    return {
+      mode:            'playing',
+      scheduleEntry:   active.entry,
+      program:         active.program,
+      currentItem:     firstItem,
+      itemOffset:      0,
+      nextItem:        items[1] || null,
+      nextProgram:     slots.length > slots.indexOf(active) + 1 ? slots[slots.indexOf(active) + 1].program : null,
+      nextEntry:       slots.length > slots.indexOf(active) + 1 ? slots[slots.indexOf(active) + 1].entry   : null,
+      queue:           items.slice(1),
+      upcoming:        slots.slice(slots.indexOf(active) + 1, slots.indexOf(active) + 9),
+      programElapsed,
+      programDuration: active.duration,
+      gapLabel:        '',
+      loopCount:       0,
+    };
+  }
+
+  // Walk items to find which one is playing and the offset within it.
+  //
+  // Items with known duration are positioned by wall-clock elapsed time.
+  // Items with unknown duration (dur === 0) cannot be positioned by time, so they
+  // are treated as "play next in sequence after all positioned items" — they act as
+  // placeholders that consume their real duration only once it is discovered.
+  //
+  // Algorithm:
+  //   1. Walk items in order.
+  //   2. For items with known duration: advance accum, select when accum+dur > elapsed.
+  //   3. For items with dur=0: record as candidate but do NOT break — keep walking to
+  //      see if a later known-duration item should have already started.
+  //   4. If we run off the end of the list without a definitive match, use the last
+  //      candidate (which may be a zero-duration item or the last item in the list).
   let accum = 0;
-  let currentItem = null;
-  let itemOffset  = 0;
-  let nextItem    = null;
+  let currentItem   = null;
+  let itemOffset    = 0;
+  let nextItem      = null;
+  let currentIndex  = -1;
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const dur  = item.duration > 0 ? item.duration : 0;
 
     if (dur <= 0) {
-      // Unknown duration item: play it from start if accum <= effectiveElapsed
-      if (accum <= effectiveElapsed) {
-        currentItem = item;
-        itemOffset  = 0; // can't calculate
-        nextItem    = items[i + 1] || (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
-        break;
+      // Unknown duration — use as candidate only if we have not yet placed accum past elapsed.
+      // Do NOT break: a subsequent item with known duration might be the correct one.
+      if (currentItem === null) {
+        // First zero-duration item encountered — tentative candidate.
+        currentItem  = item;
+        itemOffset   = 0;
+        currentIndex = i;
+        nextItem     = items[i + 1] || (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
       }
+      // accum does not advance for zero-duration items (we don't know how long they ran)
+      continue;
     }
 
-    if (accum + dur > effectiveElapsed || i === items.length - 1) {
-      // This is the item playing at effectiveElapsed
-      currentItem = item;
-      itemOffset  = Math.max(0, effectiveElapsed - accum);
-      // Next item wraps around on loop
-      nextItem    = items[i + 1] || (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
+    // Known-duration item: does the elapsed time fall within [accum, accum+dur)?
+    if (accum + dur > effectiveElapsed) {
+      // This is the definitive item.
+      currentItem  = item;
+      itemOffset   = Math.max(0, effectiveElapsed - accum);
+      currentIndex = i;
+      nextItem     = items[i + 1] || (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
       break;
     }
     accum += dur;
+
+    // If elapsed has passed this item's range, clear any zero-duration candidate
+    // that was set before this item — we've moved past it.
+    if (currentItem !== null && currentItem.duration <= 0) {
+      // A zero-duration candidate was set earlier. If a known-duration item has
+      // already been exhausted (accum has advanced past it), the zero-duration item
+      // is no longer valid — clear and keep walking.
+      // Exception: keep it if no known-duration item has been found yet.
+      currentItem  = null;
+      currentIndex = -1;
+    }
+  }
+
+  // If no definitive match found, fall back to the last item in the list.
+  if (currentItem === null) {
+    currentItem  = items[items.length - 1];
+    currentIndex = items.length - 1;
+    itemOffset   = 0;
+    nextItem     = (loopCount > 0 ? items[0] : null) || _firstItemOfNext(slots, nowMs);
   }
 
   // Build queue: remaining items in program (after currentItem, wrapping if looping)

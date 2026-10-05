@@ -100,6 +100,20 @@ var _subscribers = [];
 /** Queue cursor */
 var _queueIndex = 0;
 
+/**
+ * Duration writeback: track which media IDs we have already written a real
+ * duration for so we only fire ONE Firestore update per item per session.
+ * { mediaId: true }
+ */
+var _durationWrittenFor = {};
+
+/**
+ * The last fully-resolved timeline state.
+ * Stored so onMediaEnded can advance by queue position when item durations
+ * are unknown (resolver cannot calculate position from wall clock alone).
+ */
+var _lastResolvedState = null;
+
 /** Loaded playlist queue — set by _loadPlaylistQueue() */
 var _playlistQueue = null;
 
@@ -301,27 +315,159 @@ function onTimeUpdate(elapsed, duration) {
   if (_state.status === 'playing') {
     _resetStallTimer();
   }
-  // Update duration in state if we now know it
-  if (duration > 0 && _state.duration !== duration) {
-    _state.duration = duration;
-    if (_state.current) _state.current.duration = duration;
+  // Update duration in state and write back to Firestore tv_media if newly discovered.
+  // This is the ONLY reliable moment we learn real media duration — on first timeupdate
+  // after the media element reports a finite, non-zero duration.
+  if (duration > 0) {
+    var cur = _state.current;
+    if (cur && (!cur.duration || cur.duration !== duration)) {
+      _state.duration = duration;
+      cur.duration    = duration;
+      // Write real duration back to tv_media so the timeline resolver can calculate
+      // playlist positions correctly on subsequent calls (avoids the dur=0 → always-item-0 bug).
+      _writeDurationToFirestore(cur.id, duration);
+    }
+  }
+}
+
+/**
+ * Write the real media duration back to the tv_media Firestore document.
+ * Fires at most once per media ID per browser session (guarded by _durationWrittenFor).
+ * Non-blocking — failure is non-fatal (resolver degrades gracefully).
+ */
+function _writeDurationToFirestore(mediaId, duration) {
+  if (!mediaId || !duration || _durationWrittenFor[mediaId]) return;
+  _durationWrittenFor[mediaId] = true;
+
+  // Access Firestore via the Studio module — it holds the Firebase references
+  var fs = global._snxFirestore;
+  if (!fs || !fs.db) return;
+  var db = fs.db;
+  try {
+    var docFn  = fs.doc;
+    var updFn  = fs.updateDoc;
+    if (!docFn || !updFn) return;
+    updFn(docFn(db, 'tv_media', mediaId), { duration: Math.round(duration) })
+      .catch(function (e) {
+        // Non-fatal — another viewer may not have write permission; that is fine.
+        // Duration will be correct in memory for the current session.
+        delete _durationWrittenFor[mediaId];
+        console.info('[SNX TV] duration writeback skipped (non-fatal):', e.message);
+      });
+  } catch (e) {
+    delete _durationWrittenFor[mediaId];
   }
 }
 
 /**
  * Called when media playback ends.
- * Re-resolve from timeline (Stage 3) or advance (adapter mode).
+ * Re-resolve from timeline (schedule mode) or advance (adapter mode).
+ *
+ * Strategy:
+ *   A) If the current item has a known duration (> 0): resolve with nowMs + 1 s
+ *      so the resolver steps past the just-finished item's boundary.
+ *   B) If the current item's duration is unknown (= 0, common right after upload):
+ *      the wall-clock resolver cannot determine which item is next.
+ *      Use _lastResolvedState.nextItem (pre-calculated by the resolver) to load
+ *      directly without re-resolving, bypassing the wall-clock limitation.
+ *      After this load, _writeDurationToFirestore will have stored the real
+ *      duration so future resolves work correctly.
  */
 function onMediaEnded() {
   _clearStallTimer();
   _mediaErrorCount = 0;
   _recovering = false;
+
   if (_scheduleMode && global.SNXTVTimeline) {
-    var resolved = global.SNXTVTimeline.resolve(Date.now());
-    _applyTimelineState(resolved, true);
+    var curItem  = _state.current;
+    var curDur   = curItem ? (curItem.duration || 0) : 0;
+
+    if (curDur > 0) {
+      // Known duration — re-resolve 1 s past end so resolver steps to next item.
+      var endedResolved = global.SNXTVTimeline.resolve(Date.now() + 1000);
+      _applyTimelineState(endedResolved, true);
+    } else {
+      // Unknown duration — use queue from last resolved state to advance by position.
+      // This avoids the wall-clock bug where resolver always returns item[0].
+      _advanceByQueue();
+    }
   } else {
     advance();
   }
+}
+
+/**
+ * Advance to the next item using the queue cached in _lastResolvedState.
+ * Called from onMediaEnded when the current item's duration is unknown.
+ *
+ * The queue in resolved state is [ items after currentItem in the program ].
+ * nextItem is the first element of that queue (or items[0] on loop).
+ *
+ * After loading the next item the resolver will get a fresh wall-clock position
+ * on the NEXT ended event (because _writeDurationToFirestore will have run).
+ */
+function _advanceByQueue() {
+  var resolved;
+
+  if (!_lastResolvedState) {
+    // No cached state — fall back to full re-resolve (may restart song 1, but it's
+    // the best we can do without any prior context).
+    resolved = global.SNXTVTimeline.resolve(Date.now());
+    _applyTimelineState(resolved, true);
+    return;
+  }
+
+  var last     = _lastResolvedState;
+  var nextItem = last.nextItem;
+
+  // Check if the program's schedule window has ended.
+  var nowMs = Date.now();
+  resolved = global.SNXTVTimeline.resolve(nowMs);
+
+  // If the resolved state points to a different program or a gap, let the
+  // normal timeline take over (program ended, advance to next scheduled program).
+  if (!resolved || resolved.mode === 'gap' || resolved.mode === 'noSchedule' ||
+      (resolved.scheduleEntry && last.scheduleEntry &&
+       resolved.scheduleEntry.id !== last.scheduleEntry.id)) {
+    _applyTimelineState(resolved, true);
+    return;
+  }
+
+  // Program still active. Load next item from cached queue.
+  if (!nextItem || !nextItem.mediaUrl) {
+    // Queue exhausted — re-resolve; this will loop to first item.
+    _applyTimelineState(resolved, true);
+    return;
+  }
+
+  // Build a synthetic "next" from the queue (item after nextItem).
+  var queue    = last.queue || [];
+  var nextIdx  = queue.indexOf(nextItem);
+  var afterNext = (nextIdx >= 0 && nextIdx + 1 < queue.length)
+    ? queue[nextIdx + 1]
+    : (resolved.nextItem || null);
+
+  _setState({
+    next:          afterNext || null,
+    program:       last.program || null,
+    scheduleEntry: last.scheduleEntry || null,
+    isScheduled:   true,
+    isGap:         false,
+    gapLabel:      '',
+  });
+
+  _tlMediaLoaded = nextItem.mediaUrl;
+  if (_viewerReady) loadItemAt(nextItem, 0);
+  _opened = true;
+
+  // Update _lastResolvedState so the NEXT ended event has an accurate queue.
+  // Shift the queue: nextItem becomes current, rest remains.
+  _lastResolvedState = Object.assign({}, last, {
+    currentItem: nextItem,
+    itemOffset:  0,
+    nextItem:    afterNext || null,
+    queue:       queue.slice(nextIdx + 1),
+  });
 }
 
 /**
@@ -1146,6 +1292,11 @@ function _onTimelineChange(resolved) {
 function _applyTimelineState(resolved, forceReload) {
   if (!resolved) return;
 
+  // Cache the last playing/fallback state so _advanceByQueue can use it.
+  if (resolved.mode === 'playing' || resolved.mode === 'fallback') {
+    _lastResolvedState = resolved;
+  }
+
   if (resolved.mode === 'gap' || resolved.mode === 'noSchedule') {
     if (!global.SNXTVTimeline.hasSchedule()) {
       // No schedule → fall back to adapter/playlist mode
@@ -1585,6 +1736,9 @@ if (document.readyState === 'loading') {
 global.addEventListener('snxAuthSignOut', function () {
   pageLeave();
   _clearStallTimer();
+  _lastResolvedState  = null;
+  _durationWrittenFor = {};
+
   _setState({
     status: 'idle', current: null, next: null, onAir: false,
     elapsed: 0, duration: 0, program: null, scheduleEntry: null,
