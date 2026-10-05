@@ -38,8 +38,8 @@
  *   v100
  */
 
-const CACHE_VERSION = 'v101';
-const BUILD_ID      = 'SNS-2026-SHADOW-RECONNECT-001';
+const CACHE_VERSION = 'v102';
+const BUILD_ID      = 'SNS-2026-TV-STAGE5-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -139,6 +139,13 @@ const NETWORK_FIRST_FILES_LAZY = [
   'snx-shadow-memory.js',
   'snx-shadow-conv-history.js',
   'snx-shadow-adaptive.js',
+  // Stage 4: 24-Hour TV engine files — network-first so updates are never hidden
+  // behind a stale cache.  TV files use query-string versioning (?v=...) but the
+  // SW matches on path suffix, so both versioned and bare requests are covered.
+  'snx-tv.js',
+  'snx-tv-timeline.js',
+  'snx-tv-studio.js',
+  'snx-tv.css',
 ];
 
 const PRECACHE_URLS = SHELL_FILES.map(f => BASE + f);

@@ -1,7 +1,7 @@
 {
-  "buildId": "SR-2026-UNIFIED-AI-RC-001",
-  "swVersion": "v101",
-  "deployedAt": "2026-09-25T00:00:00Z",
+  "buildId": "SNS-2026-TV-STAGE5-001",
+  "swVersion": "v102",
+  "deployedAt": "2026-10-25T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
@@ -36,5 +36,9 @@
   "shadowAIAdaptiveLearningFinalVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
   "shadowAIUnifiedRCVersion": "SR-2026-UNIFIED-AI-RC-001",
   "shadowAIUnifiedBridgeBuild": "SR-2026-STAGE2-BRIDGE-001",
-  "note": "SR-2026-UNIFIED-AI-RC-001: Shadow Reaper Unified AI Release Candidate. Stages 1-3 PASS. Unified Core (shadow-reaper/) + sr-bridge integration. Feature: shadow-ai-unified. Old shadow-ai preserved for rollback. Workers AI calls = 0. Test results: Stage1 134 PASS / 6 WARN / 0 FAIL / 1 SKIP; Stage2 58 PASS / 6 WARN / 0 FAIL. All warnings are Node.js test-context expected (browser-only systems not loaded in Node). SW: v101 (bump from v101 already active; shadow-reaper/ assets not precached — served network-first via snx-feature-loader.js, versioned via query strings). No changes to Live, WebRTC, Cohost, Radio, TV, DJ, R2, Auth, Firestore, Auth architecture. ROLLBACK: shadow-ai feature entry preserved unchanged in snx-feature-loader.js. PRIOR CHECKPOINT: SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001."
+  "tvVersion": "SNS-2026-TV-STAGE5-001",
+  "tvStudioVersion": "SNS-2026-TV-STAGE4-001",
+  "tvTimelineVersion": "SNS-2026-TV-STAGE4-001",
+  "tvCssVersion": "SNS-2026-TV-STAGE2-001",
+  "note": "SNS-2026-TV-STAGE5-001: Shadow Nexus Social 24-Hour TV — Stage 5 production deployment. New files: snx-tv.js (Stage4 reliability+recovery+mobile hardening), snx-tv-timeline.js (authoritative resolver), snx-tv-studio.js (Founder media/playlist/program/schedule management), snx-tv.css (TV UI styles). Architecture: SNS-native R2 media via Firestore tv_media → tv_playlists → tv_programs → tv_schedule. Join-in-progress seek. Offline/online recovery. Tab-sleep resync. No Supabase, no new KV, no new service accounts. SW: v102. snx-media-controller.js: Feed video controller updated. Firestore rules: TV collections (tv_media, tv_playlists, tv_programs, tv_schedule) with isFounderEmail() write guard. All existing SNS systems (Radio, Live, Feed, Profiles, DMs, Shadow Reaper AI, WebRTC) preserved unchanged. PRIOR BUILD: SR-2026-UNIFIED-AI-RC-001 (Shadow Reaper Unified AI)."
 }

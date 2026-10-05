@@ -1739,10 +1739,12 @@ service cloud.firestore {
     //
     //   /tv_state/{channelId}     — live broadcast state (current item, queue, started_at)
     //   /tv_config/{channelId}    — programming engine config (running, freq, history)
-    //   /tv_media/{mediaId}       — TV media library (references SNS R2 URLs)
-    //   /tv_playlists/{playlistId}— TV playlists
-    //   /tv_programs/{programId}  — TV programs (media or playlist references)
-    //   /tv_schedule/{slotId}     — TV schedule slots (managed via tv_state queue)
+    //   /tv_media/{mediaId}          — TV media library (references SNS R2 URLs)
+    //   /tv_playlists/{playlistId}   — TV playlists
+    //   /tv_programs/{programId}     — TV programs (media or playlist references)
+    //   /tv_schedule/{slotId}        — TV schedule slots (managed via tv_state queue)
+    //   /tv_submissions/{subId}      — User content submissions (pending/approved/rejected)
+    //   /tv_settings/{doc}           — Channel settings (Founder write, signed-in read)
     //
     // Security model:
     //   READ:  tv_state, tv_config — any signed-in user (all viewers need to read state)
@@ -1752,6 +1754,8 @@ service cloud.firestore {
     //   EXCEPTION: tv_state advancement fields can also be written by the SNS
     //              Cloudflare Worker, which authenticates via Firebase service account.
     //              The Worker only writes tv_state/{channelId} atomically.
+    //   EXCEPTION: tv_submissions — any signed-in user may CREATE (submit),
+    //              but only Founder may read all submissions or update status.
 
     // ── tv_state — live broadcast state ──────────────────────────────────────
     match /tv_state/{channelId} {
@@ -1793,6 +1797,26 @@ service cloud.firestore {
     match /tv_schedule/{slotId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── tv_submissions — user content submissions ─────────────────────────
+    //   CREATE: any signed-in user (to submit content for review)
+    //   READ:   submitter may read their own; Founder may read all
+    //   UPDATE/DELETE: Founder only (approve / reject)
+    match /tv_submissions/{subId} {
+      allow create: if isSignedIn()
+        && request.resource.data.submitterUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow read: if isFounderEmail()
+        || (isSignedIn() && resource.data.submitterUid == request.auth.uid);
+      allow update: if isFounderEmail();
+      allow delete: if isFounderEmail();
+    }
+
+    // ── tv_settings — channel settings ───────────────────────────────────
+    match /tv_settings/{doc} {
+      allow read: if isSignedIn();
+      allow write: if isFounderEmail();
     }
 
   }

@@ -1,0 +1,1304 @@
+/**
+ * snx-tv.css
+ * Shadow Nexus Social — 24-Hour TV
+ * Stage 2: TV Core + Viewer + TV Studio
+ * Build: SNS-2026-TV-STAGE2-001
+ *
+ * Scope: #tvPage, .snx-tv-* and .snxtv-* namespaced selectors only.
+ * Does NOT modify Radio, Live, Feed, or any other SNS feature.
+ */
+
+/* ══════════════════════════════════════════════════════════
+   TV PAGE CONTAINER
+   ══════════════════════════════════════════════════════════ */
+
+#tvPage {
+  box-sizing: border-box;
+  padding: 0 0 80px;
+  max-width: 700px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV HEADER
+   ══════════════════════════════════════════════════════════ */
+
+.snx-tv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 16px 14px;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.14);
+}
+
+.snx-tv-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.snx-tv-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--neon-blue, #00AEEF);
+  text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(0, 174, 239, 0.6);
+}
+
+.snx-tv-sub {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: rgba(0, 255, 136, 0.55);
+  text-transform: uppercase;
+}
+
+.snx-tv-onair-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 30, 60, 0.14);
+  border: 1px solid rgba(255, 30, 60, 0.38);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #ff3355;
+  text-transform: uppercase;
+  transition: opacity 0.3s;
+}
+
+.snx-tv-onair-badge.offline {
+  border-color: rgba(100, 120, 160, 0.3);
+  color: rgba(100, 130, 160, 0.6);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.snx-tv-onair-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff3355;
+  box-shadow: 0 0 0 0 rgba(255, 51, 85, 0.7);
+  animation: snxTvLivePulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.snx-tv-onair-badge.offline .snx-tv-onair-dot {
+  background: rgba(100, 120, 160, 0.4);
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes snxTvLivePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 51, 85, 0.7); }
+  70%  { box-shadow: 0 0 0 7px rgba(255, 51, 85, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 51, 85, 0); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAIN PLAYER AREA
+   ══════════════════════════════════════════════════════════ */
+
+.snx-tv-player-wrap {
+  position: relative;
+  width: 100%;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.12);
+}
+
+.snx-tv-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: none;
+}
+
+.snx-tv-video.visible { display: block; }
+
+.snx-tv-artwork {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: none;
+  background: #040c1a;
+}
+
+.snx-tv-artwork.visible { display: block; }
+
+/* Fallback visual when no artwork — cinematic dark gradient */
+.snx-tv-visual-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at 50% 50%, #061428 0%, #02040a 100%);
+  gap: 10px;
+}
+
+.snx-tv-visual-fallback-icon {
+  font-size: 48px;
+  opacity: 0.35;
+  animation: snxTvIconBreathe 4s ease-in-out infinite;
+}
+
+.snx-tv-visual-fallback-label {
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: rgba(0, 174, 239, 0.35);
+  text-transform: uppercase;
+}
+
+@keyframes snxTvIconBreathe {
+  0%, 100% { opacity: 0.25; transform: scale(1); }
+  50%       { opacity: 0.45; transform: scale(1.06); }
+}
+
+/* ── Tap-to-watch overlay (autoplay blocked) ── */
+.snx-tv-tap-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 4, 14, 0.75);
+  gap: 14px;
+  cursor: pointer;
+  z-index: 10;
+  backdrop-filter: blur(2px);
+}
+
+.snx-tv-tap-overlay.visible { display: flex; }
+
+.snx-tv-tap-btn {
+  background: rgba(0, 174, 239, 0.18);
+  border: 2px solid rgba(0, 174, 239, 0.6);
+  color: #00AEEF;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 12px 28px;
+  border-radius: 30px;
+  cursor: pointer;
+  box-shadow: 0 0 20px rgba(0, 174, 239, 0.3);
+  transition: background 0.2s, box-shadow 0.2s;
+  touch-action: manipulation;
+}
+
+.snx-tv-tap-btn:hover {
+  background: rgba(0, 174, 239, 0.28);
+  box-shadow: 0 0 30px rgba(0, 174, 239, 0.5);
+}
+
+.snx-tv-tap-hint {
+  font-size: 11px;
+  color: rgba(180, 210, 240, 0.55);
+  letter-spacing: 0.5px;
+}
+
+/* ── Loading overlay ── */
+.snx-tv-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 4, 14, 0.8);
+  gap: 12px;
+  z-index: 8;
+}
+
+.snx-tv-loading-overlay.visible { display: flex; }
+
+.snx-tv-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(0, 174, 239, 0.2);
+  border-top-color: #00AEEF;
+  animation: snxTvSpin 0.75s linear infinite;
+}
+
+@keyframes snxTvSpin {
+  to { transform: rotate(360deg); }
+}
+
+.snx-tv-loading-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: rgba(0, 174, 239, 0.6);
+  text-transform: uppercase;
+}
+
+/* ── Unavailable overlay ── */
+.snx-tv-unavailable-overlay {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 4, 14, 0.88);
+  gap: 10px;
+  z-index: 9;
+  padding: 20px;
+  text-align: center;
+}
+
+.snx-tv-unavailable-overlay.visible { display: flex; }
+
+.snx-tv-unavailable-icon { font-size: 32px; opacity: 0.5; }
+
+.snx-tv-unavailable-msg {
+  font-size: 12px;
+  color: rgba(140, 170, 200, 0.7);
+  letter-spacing: 0.3px;
+  line-height: 1.5;
+  max-width: 280px;
+}
+
+/* ── Fullscreen button ── */
+.snx-tv-fullscreen-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(0, 174, 239, 0.3);
+  color: rgba(0, 174, 239, 0.75);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 14px;
+  cursor: pointer;
+  z-index: 12;
+  transition: background 0.2s, color 0.2s;
+  touch-action: manipulation;
+}
+
+.snx-tv-fullscreen-btn:hover {
+  background: rgba(0, 50, 120, 0.6);
+  color: #00AEEF;
+}
+
+/* ══════════════════════════════════════════════════════════
+   NOW PLAYING
+   ══════════════════════════════════════════════════════════ */
+
+.snx-tv-now-playing {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.1);
+}
+
+.snx-tv-np-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: rgba(0, 174, 239, 0.5);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.snx-tv-np-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e8f4ff;
+  line-height: 1.3;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snx-tv-np-meta {
+  font-size: 11px;
+  color: rgba(120, 170, 210, 0.65);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.snx-tv-np-type-badge {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  background: rgba(0, 174, 239, 0.15);
+  border: 1px solid rgba(0, 174, 239, 0.3);
+  color: #00AEEF;
+}
+
+.snx-tv-np-type-badge.audio {
+  background: rgba(159, 122, 234, 0.15);
+  border-color: rgba(159, 122, 234, 0.35);
+  color: #b899f5;
+}
+
+/* ── Progress bar ── */
+.snx-tv-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.snx-tv-progress-track {
+  flex: 1;
+  height: 4px;
+  background: rgba(0, 174, 239, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.snx-tv-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00AEEF, #39FF14);
+  border-radius: 2px;
+  width: 0%;
+  transition: width 0.5s linear;
+}
+
+.snx-tv-time {
+  font-size: 10px;
+  color: rgba(120, 170, 210, 0.6);
+  white-space: nowrap;
+  min-width: 80px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════
+   UP NEXT
+   ══════════════════════════════════════════════════════════ */
+
+.snx-tv-up-next {
+  padding: 14px 16px;
+}
+
+.snx-tv-un-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: rgba(57, 255, 20, 0.45);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.snx-tv-up-next-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(11, 31, 58, 0.6);
+  border: 1px solid rgba(0, 174, 239, 0.14);
+  border-radius: 10px;
+  transition: border-color 0.2s;
+}
+
+.snx-tv-up-next-item:hover {
+  border-color: rgba(0, 174, 239, 0.28);
+}
+
+.snx-tv-un-thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(0, 40, 80, 0.6);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: rgba(0, 174, 239, 0.4);
+  border: 1px solid rgba(0, 174, 239, 0.15);
+  overflow: hidden;
+}
+
+.snx-tv-un-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.snx-tv-un-info { flex: 1; min-width: 0; }
+
+.snx-tv-un-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c8e0f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.snx-tv-un-sub {
+  font-size: 11px;
+  color: rgba(100, 150, 190, 0.6);
+}
+
+.snx-tv-un-empty {
+  font-size: 12px;
+  color: rgba(90, 130, 170, 0.45);
+  padding: 6px 0;
+  font-style: italic;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MOBILE
+   ══════════════════════════════════════════════════════════ */
+
+@media (max-width: 600px) {
+  #tvPage { padding: 0 0 100px; }
+
+  .snx-tv-header { padding: 14px 12px 10px; }
+  .snx-tv-title  { font-size: 10px; letter-spacing: 2px; }
+
+  .snx-tv-now-playing { padding: 12px 12px 8px; }
+  .snx-tv-np-title    { font-size: 14px; }
+
+  .snx-tv-up-next { padding: 12px 12px; }
+  .snx-tv-up-next-item { padding: 9px 10px; gap: 10px; }
+  .snx-tv-un-thumb { width: 38px; height: 38px; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   INSTALLED PWA — bottom nav safe area
+   ══════════════════════════════════════════════════════════ */
+
+@media (display-mode: standalone) {
+  #tvPage { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — OVERLAY + BUTTON
+   .snxtv-* namespace (Stage 2). Founder-only.
+   ══════════════════════════════════════════════════════════ */
+
+/* Studio open button — injected into .snx-tv-header by snx-tv.js */
+.snxtv-studio-open-btn {
+  background: rgba(0, 174, 239, 0.12);
+  border: 1px solid rgba(0, 174, 239, 0.35);
+  color: #00d4ff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+.snxtv-studio-open-btn:hover {
+  background: rgba(0, 174, 239, 0.22);
+  border-color: rgba(0, 174, 239, 0.6);
+}
+
+/* Studio overlay — full-screen drawer */
+.snxtv-studio-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: rgba(5, 15, 35, 0.97);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: none;
+  flex-direction: column;
+}
+.snxtv-studio-overlay--open {
+  display: flex;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — WRAP + HEADER
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-studio-wrap {
+  max-width: 780px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 0 80px;
+  box-sizing: border-box;
+}
+
+.snxtv-studio-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 16px 14px;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.18);
+  position: sticky;
+  top: 0;
+  background: rgba(5, 15, 35, 0.97);
+  z-index: 10;
+}
+
+.snxtv-studio-label {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #00d4ff;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(0,212,255,0.5);
+}
+
+.snxtv-studio-role {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: rgba(57, 255, 20, 0.08);
+  border: 1px solid rgba(57, 255, 20, 0.25);
+  color: rgba(57, 255, 20, 0.8);
+  text-transform: uppercase;
+}
+
+.snxtv-studio-close {
+  margin-left: auto;
+  background: rgba(255, 80, 80, 0.1);
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  color: rgba(255, 120, 120, 0.8);
+  font-size: 14px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+.snxtv-studio-close:hover { background: rgba(255, 80, 80, 0.22); }
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — TABS
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-studio-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.14);
+  padding: 0 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.snxtv-studio-tabs::-webkit-scrollbar { display: none; }
+
+.snxtv-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(100, 150, 190, 0.6);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+.snxtv-tab:hover { color: rgba(0, 212, 255, 0.8); }
+.snxtv-tab--active {
+  color: #00d4ff;
+  border-bottom-color: #00d4ff;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — PANELS + SECTIONS
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-panel { padding: 0 16px 24px; }
+.snxtv-panel--hidden { display: none; }
+
+.snxtv-section {
+  margin-top: 20px;
+  background: rgba(11, 28, 52, 0.6);
+  border: 1px solid rgba(0, 174, 239, 0.14);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.snxtv-section--hidden { display: none; }
+
+.snxtv-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.1);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: rgba(0, 212, 255, 0.7);
+  text-transform: uppercase;
+  flex-wrap: wrap;
+}
+
+.snxtv-section-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(0, 174, 239, 0.1);
+  padding: 0 10px;
+}
+
+.snxtv-stab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(100, 150, 190, 0.5);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 9px 14px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: color 0.2s, border-color 0.2s;
+}
+.snxtv-stab:hover { color: rgba(0,212,255,0.7); }
+.snxtv-stab--active { color: #00d4ff; border-bottom-color: #00d4ff; }
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — BUTTONS
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-btn {
+  border: none;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 7px 14px;
+  transition: background 0.2s, border-color 0.2s, opacity 0.2s;
+  white-space: nowrap;
+}
+.snxtv-btn:disabled { opacity: 0.4; cursor: default; }
+
+.snxtv-btn--primary {
+  background: rgba(0, 174, 239, 0.18);
+  border: 1px solid rgba(0, 174, 239, 0.45);
+  color: #00d4ff;
+}
+.snxtv-btn--primary:hover { background: rgba(0, 174, 239, 0.3); }
+
+.snxtv-btn--ghost {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: rgba(200, 220, 240, 0.7);
+}
+.snxtv-btn--ghost:hover { background: rgba(255,255,255,0.1); }
+
+.snxtv-btn--danger {
+  background: rgba(255, 60, 60, 0.1);
+  border: 1px solid rgba(255, 60, 60, 0.3);
+  color: rgba(255, 120, 120, 0.8);
+}
+.snxtv-btn--danger:hover { background: rgba(255, 60, 60, 0.2); }
+
+.snxtv-btn--sm { font-size: 10px; padding: 5px 10px; }
+.snxtv-btn--xs { font-size: 9px;  padding: 3px 8px;  }
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — MEDIA GRID + CARDS
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-media-grid {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.snxtv-media-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  background: rgba(11, 28, 52, 0.7);
+  border: 1px solid rgba(0, 174, 239, 0.12);
+  border-radius: 9px;
+  transition: border-color 0.2s;
+}
+.snxtv-media-card:hover { border-color: rgba(0, 174, 239, 0.28); }
+.snxtv-media-card--added { opacity: 0.6; }
+
+.snxtv-media-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: rgba(0, 40, 80, 0.6);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(0,174,239,0.12);
+}
+.snxtv-media-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.snxtv-media-info { flex: 1; min-width: 0; }
+
+.snxtv-media-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c8e0f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snxtv-media-meta {
+  font-size: 11px;
+  color: rgba(100, 150, 190, 0.5);
+  margin-top: 2px;
+}
+
+.snxtv-media-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.snxtv-badge-added {
+  font-size: 10px;
+  color: rgba(57, 255, 20, 0.7);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(57, 255, 20, 0.07);
+  border: 1px solid rgba(57, 255, 20, 0.2);
+}
+
+.snxtv-badge-unavail {
+  font-size: 10px;
+  color: rgba(255, 160, 0, 0.7);
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 160, 0, 0.08);
+  border: 1px solid rgba(255, 160, 0, 0.25);
+}
+
+/* compact card for playlist editor */
+.snxtv-media-card--compact {
+  padding: 6px 8px;
+  gap: 8px;
+}
+.snxtv-media-type-icon { font-size: 14px; flex-shrink: 0; }
+.snxtv-media-title-sm {
+  font-size: 12px;
+  color: #c8e0f4;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — PLAYLISTS
+   ══════════════════════════════════════════════════════════ */
+
+#snxtvPlaylistList { padding: 10px 12px; }
+
+.snxtv-pl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px;
+  background: rgba(11, 28, 52, 0.7);
+  border: 1px solid rgba(0, 174, 239, 0.12);
+  border-radius: 9px;
+  margin-bottom: 8px;
+  transition: border-color 0.2s;
+}
+.snxtv-pl-row:hover { border-color: rgba(0,174,239,0.28); }
+
+.snxtv-pl-info { flex: 1; min-width: 0; }
+
+.snxtv-pl-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #c8e0f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snxtv-pl-meta {
+  font-size: 11px;
+  color: rgba(100, 150, 190, 0.5);
+  margin-top: 2px;
+}
+
+.snxtv-pl-actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Playlist editor */
+.snxtv-pl-editor { padding: 12px; }
+.snxtv-pl-editor-items { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
+
+.snxtv-pl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(11, 28, 52, 0.7);
+  border: 1px solid rgba(0, 174, 239, 0.12);
+  border-radius: 8px;
+}
+.snxtv-pl-item--unavailable {
+  border-color: rgba(255, 120, 0, 0.25);
+  opacity: 0.65;
+}
+
+.snxtv-pl-item-num {
+  font-size: 10px;
+  color: rgba(0,212,255,0.4);
+  width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.snxtv-pl-item-type { font-size: 14px; flex-shrink: 0; }
+.snxtv-pl-item-title {
+  font-size: 13px;
+  color: #c8e0f4;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.snxtv-pl-item-btns { display: flex; gap: 4px; flex-shrink: 0; }
+
+.snxtv-pl-add-section { margin-top: 4px; }
+.snxtv-pl-add-grid {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — UPLOAD FORM
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-upload-form { padding: 14px; }
+
+.snxtv-upload-note {
+  font-size: 11px;
+  color: rgba(100, 150, 190, 0.6);
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.snxtv-form-row {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.snxtv-form-row label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: rgba(0,212,255,0.6);
+  text-transform: uppercase;
+}
+.snxtv-form-row input[type="text"],
+.snxtv-form-row input[type="file"] {
+  background: rgba(0, 30, 60, 0.7);
+  border: 1px solid rgba(0, 174, 239, 0.25);
+  border-radius: 8px;
+  color: #c8e0f4;
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.snxtv-form-row input[type="text"]:focus { border-color: rgba(0,212,255,0.5); }
+
+.snxtv-progress-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  background: rgba(0, 30, 60, 0.4);
+  border: 1px solid rgba(0,174,239,0.15);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.snxtv-progress-bar {
+  height: 6px;
+  background: linear-gradient(90deg, #00AEEF, #39FF14);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.3s;
+  flex: 1;
+}
+.snxtv-progress-bar-wrap span {
+  font-size: 11px;
+  color: rgba(0,212,255,0.7);
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.snxtv-form-actions { margin-top: 14px; }
+
+.snxtv-upload-status {
+  font-size: 12px;
+  color: rgba(57, 255, 20, 0.7);
+  margin-top: 10px;
+  min-height: 18px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — LOADING + EMPTY STATES
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-empty {
+  font-size: 12px;
+  color: rgba(90, 130, 170, 0.45);
+  padding: 16px 12px;
+  font-style: italic;
+  text-align: center;
+}
+
+.snxtv-loading {
+  font-size: 12px;
+  color: rgba(0, 212, 255, 0.5);
+  padding: 16px 12px;
+  text-align: center;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — ADD TO PLAYLIST MODAL
+   ══════════════════════════════════════════════════════════ */
+
+.snxtv-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 10, 30, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.snxtv-modal {
+  background: rgba(8, 22, 48, 0.98);
+  border: 1px solid rgba(0, 174, 239, 0.3);
+  border-radius: 14px;
+  max-width: 380px;
+  width: 100%;
+  overflow: hidden;
+}
+
+.snxtv-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #00d4ff;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+}
+
+.snxtv-modal-body { padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+
+.snxtv-pl-pick-btn {
+  background: rgba(0, 174, 239, 0.1);
+  border: 1px solid rgba(0, 174, 239, 0.25);
+  border-radius: 9px;
+  color: #c8e0f4;
+  font-size: 13px;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.snxtv-pl-pick-btn:hover { background: rgba(0, 174, 239, 0.22); }
+
+/* ══════════════════════════════════════════════════════════
+   TV STUDIO — MOBILE
+   ══════════════════════════════════════════════════════════ */
+
+@media (max-width: 600px) {
+  .snxtv-studio-header { padding: 14px 12px 10px; }
+  .snxtv-studio-label  { font-size: 10px; letter-spacing: 2px; }
+  .snxtv-section-header { font-size: 10px; padding: 10px 12px; flex-wrap: wrap; }
+  .snxtv-pl-actions    { gap: 5px; }
+  .snxtv-media-card    { gap: 8px; padding: 8px 8px; }
+  .snxtv-media-title   { font-size: 12px; }
+  .snxtv-btn--sm       { font-size: 9px; padding: 4px 8px; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   STAGE 3 — TV GUIDE
+   ══════════════════════════════════════════════════════════ */
+
+.snx-tv-guide {
+  background: rgba(5, 12, 30, 0.72);
+  border-top: 1px solid rgba(0, 212, 255, 0.12);
+  margin: 0;
+}
+
+.snx-tv-guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: default;
+}
+
+.snx-tv-guide-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(0, 212, 255, 0.75);
+  text-transform: uppercase;
+}
+
+.snx-tv-guide-toggle {
+  background: none;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  color: rgba(0, 212, 255, 0.6);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.snx-tv-guide-toggle:hover { background: rgba(0, 212, 255, 0.1); }
+
+.snx-tv-guide-content {
+  display: none;
+  padding: 0 0 8px;
+}
+.snx-tv-guide-content--open { display: block; }
+
+.snx-tv-guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.snx-tv-guide-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  transition: background 0.15s;
+}
+.snx-tv-guide-row:last-child { border-bottom: none; }
+.snx-tv-guide-row--onair {
+  background: rgba(0, 212, 255, 0.06);
+  border-left: 3px solid rgba(0, 212, 255, 0.6);
+}
+
+.snx-tv-guide-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  min-width: 52px;
+  line-height: 1.4;
+  padding-top: 1px;
+}
+
+.snx-tv-guide-info { flex: 1; min-width: 0; }
+
+.snx-tv-guide-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snx-tv-guide-desc {
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snx-tv-guide-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 212, 255, 0.22);
+  color: #00d4ff;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.snx-tv-guide-progress {
+  margin-top: 5px;
+  height: 2px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.snx-tv-guide-progress-fill {
+  height: 100%;
+  background: rgba(0, 212, 255, 0.7);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+.snx-tv-guide-empty {
+  padding: 14px 16px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.35);
+}
+
+@media (max-width: 600px) {
+  .snx-tv-guide-header { padding: 9px 12px; }
+  .snx-tv-guide-row    { padding: 8px 12px; gap: 10px; }
+  .snx-tv-guide-time   { min-width: 44px; font-size: 10px; }
+  .snx-tv-guide-title  { font-size: 12px; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   STAGE 3 — STUDIO: PROGRAMMING + SCHEDULE
+   ══════════════════════════════════════════════════════════ */
+
+/* Program detail rows */
+.snxtv-prog-detail-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 0;
+  font-size: 12px;
+  color: rgba(255,255,255,0.75);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.snxtv-prog-detail-label {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: rgba(0,212,255,0.6);
+  min-width: 80px;
+}
+.snxtv-dur-warn {
+  color: #f5a623;
+  font-size: 11px;
+}
+
+/* Schedule slot states */
+.snxtv-slot--conflict {
+  border-color: rgba(255, 60, 60, 0.5) !important;
+  background: rgba(255, 60, 60, 0.05);
+}
+.snxtv-slot--disabled {
+  opacity: 0.5;
+}
+
+/* ON AIR pill in schedule list */
+.snxtv-onair-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 212, 255, 0.22);
+  color: #00d4ff;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+/* CONFLICT pill */
+.snxtv-conflict-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 60, 60, 0.2);
+  color: #ff6060;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+/* Conflict banner at top of schedule panel */
+.snxtv-conflict-banner {
+  margin: 8px 12px;
+  padding: 8px 12px;
+  background: rgba(255, 60, 60, 0.1);
+  border: 1px solid rgba(255, 60, 60, 0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: #ff8080;
+}
+
+/* Schedule slot calc-end display */
+.snxtv-slot-calc-end {
+  font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  padding: 4px 0;
+}
+
+/* Form elements for schedule editor */
+.snxtv-form-label {
+  display: block;
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+.snxtv-select,
+.snxtv-datetime-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(0,212,255,0.2);
+  color: #fff;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.snxtv-select:focus,
+.snxtv-datetime-input:focus {
+  outline: none;
+  border-color: rgba(0,212,255,0.5);
+}
+.snxtv-select option { background: #0d2444; color: #fff; }
+
+@media (max-width: 600px) {
+  .snxtv-prog-detail-row { font-size: 11px; }
+  .snxtv-prog-detail-label { min-width: 70px; }
+}

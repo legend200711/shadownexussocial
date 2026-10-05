@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="snx-commit" content="SNS-2026-SHADOW-RECONNECT-001">
+<meta name="snx-commit" content="SNS-2026-TV-STAGE5-001">
 <title>Shadow Nexus Social — Stay Legendary 🌑🔥</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 
@@ -67,6 +67,8 @@
 <link rel="stylesheet" href="nexus-glass.css?v=SNS-2026-GLASS-001">
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
+<!-- ── Shadow Nexus 24-Hour TV — Stage 5 ── -->
+<link rel="stylesheet" href="snx-tv.css?v=SNS-2026-TV-STAGE5-001">
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
 <link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-STAGE2A-001">
 <!-- ── Shadow Nexus Radio — player + standalone page styles ──
@@ -6585,6 +6587,11 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">📻</span>
             <span class="sc-item-label">Radio</span>
         </button>
+        <!-- 24-Hour TV -->
+        <button class="sc-item" id="scNavTV" onclick="realmNavTo('tvPage')" aria-label="Shadow Nexus 24-Hour TV" style="color:#00d4ff;">
+            <span class="sc-item-icon">📺</span>
+            <span class="sc-item-label">24-Hour TV</span>
+        </button>
         <!-- Arcade -->
         <button class="sc-item" id="scNavArcade" onclick="openArcadeHub()" aria-label="Arcade">
             <span class="sc-item-icon">🕹️</span>
@@ -6688,6 +6695,10 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="ncm-item" id="ncmRadio" onclick="realmNavTo('radioPage');mobileNavTo('_close')" style="color:#9f7aea;">
             <div class="ncm-icon-wrap">📻</div>
             <div class="ncm-label">Radio</div>
+        </div>
+        <div class="ncm-item" id="ncmTV" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00d4ff;">
+            <div class="ncm-icon-wrap">📺</div>
+            <div class="ncm-label">24-Hour TV</div>
         </div>
         <div class="ncm-item" id="ncmArcade" onclick="mobileNavTo('_arcade')">
             <div class="ncm-icon-wrap">🕹️</div>
@@ -6805,6 +6816,9 @@ body.arcade-fs-ios body::after { display:none !important; }
         </button>
         <button class="nav-item" id="navRadio" onclick="realmNavTo('radioPage')" style="color:#9f7aea;border-left:3px solid rgba(159,122,234,0.55);">
             <span class="nav-icon">📻</span> Radio
+        </button>
+        <button class="nav-item" id="navTV" onclick="realmNavTo('tvPage')" style="color:#00d4ff;border-left:3px solid rgba(0,180,255,0.55);">
+            <span class="nav-icon">📺</span> 24-Hour TV
         </button>
         <button class="nav-item" id="navArcade" onclick="openArcadeHub()">
             <span class="nav-icon">🕹️</span> Arcade
@@ -11692,6 +11706,185 @@ body.arcade-fs-ios body::after { display:none !important; }
   <!-- Inner content injected by snx-radio-page.js on first open -->
   <div id="snxRadioPageInner" style="padding:0 0 32px;"></div>
 </div><!-- end radioPage -->
+
+<!-- ████ TV PAGE — Shadow Nexus 24-Hour TV ████ -->
+<div class="page" id="tvPage">
+
+  <!-- ── HEADER ── -->
+  <div class="snx-tv-header">
+    <div class="snx-tv-header-left">
+      <div class="snx-tv-title">📺 24-Hour TV</div>
+      <div class="snx-tv-sub">Shadow Nexus Social</div>
+    </div>
+    <div class="snx-tv-onair-badge offline" id="snxTvOnAirBadge">
+      <div class="snx-tv-onair-dot" id="snxTvOnAirDot"></div>
+      <span id="snxTvOnAirText">OFF AIR</span>
+    </div>
+  </div>
+
+  <!-- ── MAIN PLAYER AREA ── -->
+  <div class="snx-tv-player-wrap" id="snxTvPlayerWrap">
+
+    <!-- Video element — used for BOTH video and audio playback -->
+    <video class="snx-tv-video" id="snxTvVideo"
+      playsinline
+      webkit-playsinline
+      preload="auto"
+      data-snx-media-exempt
+      style="background:#000;">
+    </video>
+
+    <!-- Artwork panel — shown for audio items with artwork -->
+    <div class="snx-tv-artwork" id="snxTvArtwork">
+      <img id="snxTvArtworkImg" src="" alt="" style="width:100%;height:100%;object-fit:cover;">
+    </div>
+
+    <!-- Fallback visual — shown when no video and no artwork -->
+    <div class="snx-tv-visual-fallback" id="snxTvFallback">
+      <div class="snx-tv-visual-fallback-icon">📺</div>
+      <div class="snx-tv-visual-fallback-label" id="snxTvFallbackLabel">Shadow Nexus TV</div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="snx-tv-loading-overlay" id="snxTvLoadingOverlay">
+      <div class="snx-tv-spinner"></div>
+      <div class="snx-tv-loading-label">Loading…</div>
+    </div>
+
+    <!-- Unavailable overlay -->
+    <div class="snx-tv-unavailable-overlay" id="snxTvUnavailableOverlay">
+      <div class="snx-tv-unavailable-icon">📡</div>
+      <div class="snx-tv-unavailable-msg" id="snxTvUnavailableMsg">Shadow Nexus TV is warming up…</div>
+    </div>
+
+    <!-- Tap to watch overlay (autoplay blocked) -->
+    <div class="snx-tv-tap-overlay" id="snxTvTapOverlay">
+      <button class="snx-tv-tap-btn" id="snxTvTapBtn" type="button">▶ TAP TO WATCH</button>
+      <div class="snx-tv-tap-hint">Tap to begin playback</div>
+    </div>
+
+    <!-- Fullscreen button -->
+    <button class="snx-tv-fullscreen-btn" id="snxTvFullscreenBtn" type="button" title="Fullscreen">⛶</button>
+
+  </div><!-- end player wrap -->
+
+  <!-- ── NOW PLAYING ── -->
+  <div class="snx-tv-now-playing">
+    <div class="snx-tv-np-label">Now Playing</div>
+    <div class="snx-tv-np-title" id="snxTvNpTitle">—</div>
+    <div class="snx-tv-np-meta">
+      <span class="snx-tv-np-type-badge" id="snxTvNpTypeBadge">TV</span>
+    </div>
+    <!-- Progress bar -->
+    <div class="snx-tv-progress-wrap">
+      <div class="snx-tv-progress-track" id="snxTvProgressTrack">
+        <div class="snx-tv-progress-fill" id="snxTvProgressFill"></div>
+      </div>
+      <div class="snx-tv-time" id="snxTvTimeDisplay">0:00 / --:--</div>
+    </div>
+  </div>
+
+  <!-- ── UP NEXT ── -->
+  <div class="snx-tv-up-next">
+    <div class="snx-tv-un-label">Up Next</div>
+    <div class="snx-tv-up-next-item" id="snxTvUpNextItem">
+      <div class="snx-tv-un-thumb" id="snxTvUnThumb">📺</div>
+      <div class="snx-tv-un-info">
+        <div class="snx-tv-un-title" id="snxTvUnTitle" style="display:none;"></div>
+        <div class="snx-tv-un-sub"   id="snxTvUnSub"   style="display:none;"></div>
+        <div class="snx-tv-un-empty" id="snxTvUnEmpty">Nothing queued</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TV GUIDE PANEL — Stage 3 ── -->
+  <div class="snx-tv-guide" id="snxTvGuide">
+    <div class="snx-tv-guide-header">
+      <span class="snx-tv-guide-label">TV GUIDE</span>
+      <button class="snx-tv-guide-toggle" id="snxTvGuideToggle" type="button">▼</button>
+    </div>
+    <div class="snx-tv-guide-content" id="snxTvGuideContent">
+      <div class="snx-tv-guide-list" id="snxTvGuideList">
+        <div class="snx-tv-guide-empty">Loading schedule…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SUBMIT CONTENT — Stage 5 ── -->
+  <div id="snxTvSubmitArea" style="display:none;padding:14px 14px 4px;">
+    <button id="snxTvSubmitBtn" type="button"
+      style="width:100%;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.25);color:rgba(0,212,255,0.85);font-size:12px;letter-spacing:0.5px;padding:10px 14px;border-radius:8px;cursor:pointer;text-align:center;">
+      📤 Submit Content to Shadow Nexus TV
+    </button>
+  </div>
+
+  <!-- ── CONTENT SUBMISSION MODAL — Stage 5 ── -->
+  <div id="snxTvSubmitModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:9500;align-items:center;justify-content:center;">
+    <div style="background:#0d1a2e;border:1px solid rgba(0,212,255,0.25);border-radius:12px;width:min(480px,94vw);max-height:88vh;overflow-y:auto;padding:0 0 16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid rgba(0,212,255,0.12);">
+        <span style="font-size:12px;letter-spacing:2px;font-weight:700;color:#00d4ff;">SUBMIT CONTENT</span>
+        <button id="snxTvSubmitClose" type="button" style="background:none;border:none;color:rgba(255,255,255,0.6);font-size:18px;cursor:pointer;padding:0 2px;">✕</button>
+      </div>
+      <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;">
+        <p style="font-size:11px;color:rgba(255,255,255,0.45);margin:0 0 4px;">Submit a video or audio track for review. Approved content will appear on Shadow Nexus TV.</p>
+
+        <div>
+          <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:5px;">Title *</label>
+          <input type="text" id="snxTvSubTitle" maxlength="200" placeholder="Your content title"
+            style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.4);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:8px 10px;border-radius:6px;font-size:13px;">
+        </div>
+
+        <div>
+          <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:5px;">Category</label>
+          <select id="snxTvSubCategory"
+            style="width:100%;background:rgba(0,0,0,0.4);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:8px 10px;border-radius:6px;font-size:13px;">
+            <option value="music-video">Music Video</option>
+            <option value="funny">Funny Video</option>
+            <option value="entertainment">Entertainment</option>
+            <option value="original">Original Content</option>
+            <option value="music-audio">Music / Audio</option>
+            <option value="general">General</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:5px;">Media Type</label>
+          <select id="snxTvSubMediaType"
+            style="width:100%;background:rgba(0,0,0,0.4);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:8px 10px;border-radius:6px;font-size:13px;">
+            <option value="video">Video</option>
+            <option value="audio">Audio</option>
+          </select>
+        </div>
+
+        <div>
+          <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:5px;">Media URL *</label>
+          <input type="url" id="snxTvSubUrl" maxlength="1000" placeholder="https://… (direct link to your video/audio)"
+            style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.4);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:8px 10px;border-radius:6px;font-size:13px;">
+        </div>
+
+        <div>
+          <label style="display:block;font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:5px;">Description (optional)</label>
+          <textarea id="snxTvSubDesc" maxlength="500" rows="3" placeholder="Brief description of your content"
+            style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.4);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:8px 10px;border-radius:6px;font-size:13px;resize:vertical;"></textarea>
+        </div>
+
+        <div id="snxTvSubStatus" style="font-size:12px;color:rgba(255,255,255,0.5);display:none;"></div>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
+          <button id="snxTvSubCancelBtn" type="button"
+            style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:#fff;font-size:12px;padding:8px 16px;border-radius:6px;cursor:pointer;">
+            Cancel
+          </button>
+          <button id="snxTvSubSendBtn" type="button"
+            style="background:rgba(0,174,239,0.2);border:1px solid rgba(0,174,239,0.45);color:#00d4ff;font-size:12px;font-weight:700;padding:8px 18px;border-radius:6px;cursor:pointer;letter-spacing:0.5px;">
+            Submit for Review
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end tvPage -->
 
 <!-- ── Shadow Nexus Live — CSS + Engine ──────────────────────────────────────────
      Stage 2B DEFERRED: live.css, snx-sfu.js, live.js are NOT loaded at startup.
@@ -21527,7 +21720,8 @@ function navTo(pageId) {
         communityRulesPage:'navCommunityRules',
         inboxPage:'navInbox',
         livePage:'navLive',
-        radioPage:'navRadio'
+        radioPage:'navRadio',
+        tvPage:'navTV'
     };
     const navEl = document.getElementById(map[pageId]);
     if (navEl) navEl.classList.add('active-nav');
@@ -21668,6 +21862,17 @@ function navTo(pageId) {
     if (pageId === 'nexusPage') {
         if (typeof window.snxNexusInit === 'function') window.snxNexusInit();
         if (typeof window.snxStudioInit === 'function') window.snxStudioInit();
+    }
+    // ── Shadow Nexus 24-Hour TV — page lifecycle ──
+    if (pageId === 'tvPage') {
+        if (window.SNXTV && typeof window.SNXTV.pageOpen === 'function') {
+            window.SNXTV.pageOpen();
+        }
+    } else {
+        // Pause TV when navigating away
+        if (window.SNXTV && typeof window.SNXTV.pageLeave === 'function') {
+            window.SNXTV.pageLeave();
+        }
     }
     // Initialize Global Search when search page opens
     if (pageId === 'searchPage') {
@@ -25309,6 +25514,13 @@ function _supportStopCanvas() {
 
 <!-- ── Shadow Nexus NEXUS — channel discovery and management ── -->
 <script src="nexus.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
+
+<!-- ── Shadow Nexus 24-Hour TV — Stage 5: TV Studio + Submissions + Dashboard + Settings ── -->
+<script src="snx-tv-studio.js?v=SNS-2026-TV-STAGE5-001"></script>
+<!-- ── Shadow Nexus 24-Hour TV — Stage 4: Authoritative Timeline Resolver (hardened) ── -->
+<script src="snx-tv-timeline.js?v=SNS-2026-TV-STAGE4-001"></script>
+<!-- ── Shadow Nexus 24-Hour TV — Stage 5: TV Core + Viewer + Submit Content ── -->
+<script src="snx-tv.js?v=SNS-2026-TV-STAGE5-001"></script>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════
@@ -31240,7 +31452,8 @@ function updateShadowCoreActive(pageId) {
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
         'livePage':          ['scNavLive', 'ncmLive'],
-        'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio']
+        'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio'],
+        'tvPage':            ['navTV', 'scNavTV', 'ncmTV']
     };
 
     var ids = map[pageId] || [];
@@ -31464,8 +31677,8 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-LIVE-ANDROID-FIX-001';
-  var SW_VER   = 'v100';
+  var BUILD_ID = 'SNS-2026-TV-STAGE5-001';
+  var SW_VER   = 'v102';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
@@ -31743,10 +31956,10 @@ document.addEventListener('click', function(e) {
 
     /* ═══ BUILD ═══ */
     o += _h('BUILD');
-    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-LIVE-ANDROID-FIX-001' ? 'ok' : 'err');
+    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-TV-STAGE5-001' ? 'ok' : 'err');
     o += _r('BUILD_ID (deployed)',   remoteBuild);
     o += _r('BUILD MATCH',           buildMatch,  buildMatch === 'MATCH' ? 'ok' : 'err');
-    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v100' ? 'ok' : 'warn');
+    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v102' ? 'ok' : 'warn');
     /* SW registration note */
     o += _r('SW VERSION (active)',   _dbgSwVer   ? _dbgSwVer + ' (build=' + _dbgSwBuild + ')' : 'querying…');
     o += _r('DISPLAY MODE',          _dbgDisplayMode);
@@ -31861,9 +32074,9 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-LIVE-ANDROID-FIX-001';
-  var _SNX_SW_VER   = 'v100';
-  var _SNX_DEPLOY   = '2026-10-03T00:00:00Z';
+  var _SNX_BUILD    = 'SNS-2026-TV-STAGE5-001';
+  var _SNX_SW_VER   = 'v102';
+  var _SNX_DEPLOY   = '2026-10-25T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 
   function _dRow(label, val, ok) {

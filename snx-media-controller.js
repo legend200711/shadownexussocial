@@ -52,6 +52,7 @@
     '#ax-video',
     '#snxFilterPreviewVideo',
     '#svVid',            // story viewer
+    '#snxTvVideo',       // 24-Hour TV player
     '[data-snx-media-exempt]',
   ].join(',');
 
