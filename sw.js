@@ -4,7 +4,7 @@
  * Strategy:
  *   - Navigation (HTML page loads) → Network-first, fallback to cache → offline.html
  *   - Same-origin assets (CSS/JS/icons) → Cache-first, network fallback
- *   - TV engine JS files              → Network-first, cache as offline fallback only
+ *   - Deferred feature resources       → Network-first, cache as offline fallback only
  *   - Firebase & external CDN requests  → Network-only (always fresh)
  *
  * Path detection: base is derived from sw.js location so this works on
@@ -30,7 +30,7 @@
  *     SNS-2026-LIVE-ANDROID-FIX-001/v100.
  *   NOTE: CACHE_VERSION stays v100 — unchanged from SNS-2026-LIVE-REPAIR-001.
  *   The changed files (live.js, snx-sfu.js, snx-feature-loader.js, index.html)
- *   are all in TV_NETWORK_FIRST_FILES or SHELL_FILES and will be served fresh
+ *   are all in NETWORK_FIRST_FILES_LAZY or SHELL_FILES and will be served fresh
  *   on next load without a cache bump. No new SW bump needed.
  *   - (Previous) SNS-2026-LIVE-REPAIR-001: Live.js moved to esModules[], v99→v100.
  *   - (Previous) SNS-2026-SHADOW-AI-STAGE1-001: Shadow Reaper AI Stage 1.
@@ -95,9 +95,8 @@ const SHELL_FILES = [
   'snx-world-bg.css',
   'assets/images/shadow-nexus-world.webp',
   'assets/images/shadow-nexus-global-bg.png',
-  // Stage 2B: live.css, snx-sfu.js, live.js, snx-ch-adapter.js,
-  // snx-tv-network.css, and all snx-radio.* files intentionally
-  // NOT pre-cached — they are lazy-loaded and cached after first use.
+  // Stage 2B: live.css, snx-sfu.js, live.js, and all snx-radio.* files
+  // intentionally NOT pre-cached — they are lazy-loaded and cached after first use.
 ];
 
 /** Max entries for the media cache (CDN images / avatars). */
@@ -115,20 +114,7 @@ const NETWORK_FIRST_PATHS = [];
  * Stage 2B: deferred feature resources are added here so that when they ARE
  * eventually loaded (on first feature open), the user always gets the freshest version.
  */
-const TV_NETWORK_FIRST_FILES = [
-  // 24-Hour TV engine files (lazy-loaded by SNXFeatureLoader on first tvPage visit)
-  'snx-ch-adapter.js',
-  'snx-tv-network.js',
-  'snx-tv-network.css',
-  'snx-theater.js',
-  'snx-main-tv-feature.js',
-  'snx-ch-broadcast.js',
-  'snx-ch-control.js',
-  'snx-creator-channels.js',
-  'snx-ch-auth-bridge.js',
-  'snx-ch-firebase.js',
-  'snx-ch-engine.js',
-  'channel.html',
+const NETWORK_FIRST_FILES_LAZY = [
   // SNS Live engine files (lazy-loaded by SNXFeatureLoader on first livePage visit)
   'live.js',
   'live.css',
@@ -276,10 +262,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // TV engine JS files — network-first, cache only as offline fallback.
-  // This ensures the deployed TV code is always preferred over a stale cache.
+  // Deferred feature JS files — network-first, cache only as offline fallback.
+  // This ensures the deployed code is always preferred over a stale cache.
   if (url.origin === self.location.origin &&
-      TV_NETWORK_FIRST_FILES.some(f => pathname.endsWith('/' + f) || pathname === BASE + f || pathname.includes(f))) {
+      NETWORK_FIRST_FILES_LAZY.some(f => pathname.endsWith('/' + f) || pathname === BASE + f || pathname.includes(f))) {
     event.respondWith(
       fetch(request)
         .then((response) => {

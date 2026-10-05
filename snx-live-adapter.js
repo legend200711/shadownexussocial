@@ -29,11 +29,10 @@
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * KEY RULES
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- *  1. snx-creator-live.js does NOT start any camera/WebRTC broadcast.
- *  2. live.js is the ONLY source of truth for broadcasting.
- *  3. currentLiveId in creatorChannels = the RTDB roomId from live.js.
+ *  1. live.js is the ONLY source of truth for broadcasting.
+ *  2. currentLiveId in creatorChannels = the RTDB roomId from live.js.
  *     There is no separate liveSessions doc for the host path.
- *  4. watchBroadcast always opens live.html#watch=roomId — the proven viewer.
+ *  3. watchBroadcast always opens live.html#watch=roomId — the proven viewer.
  *  5. This file never touches Firebase Storage, recordings, music, or avatars.
  *
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -59,7 +58,7 @@ import {
   getDatabase, ref, get, update,
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-database.js';
 
-/* ── Firebase — horr-a08f4 (same project as live.js, index.html, channel.html) ── */
+/* ── Firebase — horr-a08f4 (same project as live.js, index.html) ── */
 const _CFG = {
   apiKey:            'AIzaSyByZRmp6R9HY17T2_WdJUFWeeaLNOP6y2Y',
   authDomain:        'horr-a08f4.firebaseapp.com',
@@ -159,7 +158,7 @@ export function watchBroadcast(roomId, opts = {}) {
 export async function watchLive(user, userData, channel, liveIdOrRoomId, opts = {}) {
   // liveIdOrRoomId may be:
   //   A) the RTDB roomId directly (set by live.js bridge in currentLiveId)
-  //   B) a Firestore liveSessions doc ID (legacy snx-creator-live.js path — resolve to rtdbRoomId)
+  //   B) a Firestore liveSessions doc ID (legacy path — resolve to rtdbRoomId)
 
   let roomId = liveIdOrRoomId || channel?.currentLiveId || null;
 
@@ -392,13 +391,3 @@ export async function syncCreatorChannel(uid) {
   }
 }
 
-/* ══════════════════════════════════════════════════════════════
-   SYNC LIVE NOW  (convenience)
-   Returns current subscribeLiveChannels from snx-creator-channels.
-   Live Now section already calls this directly — exposed here for
-   any future callers that only import the adapter.
-══════════════════════════════════════════════════════════════ */
-export async function subscribeActiveLives(cb, onErr) {
-  const { subscribeLiveChannels } = await import('./snx-creator-channels.js');
-  return subscribeLiveChannels(cb, onErr);
-}

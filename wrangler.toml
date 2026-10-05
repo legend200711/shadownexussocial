@@ -11,20 +11,6 @@ account_id = "f276c4406b82d3c1e35efed1ef486235"
 binding = "BUCKET"
 bucket_name = "legend"
 
-# ── KV Namespaces ─────────────────────────────────────────────────────────────
-# SNS TV idempotency lock store (for 24/7 scheduled advancement)
-# REQUIRED: npx wrangler kv namespace create SNX_TV_KV
-#           Then replace id below with returned namespace ID.
-[[kv_namespaces]]
-binding = "SNX_TV_KV"
-id      = "fb682e82606f4182bd4af6eaf7b4a5cc"
-
-# ── SNS TV 24/7 Scheduled Trigger ────────────────────────────────────────────
-# Fires every 1 minute — advances SNS TV channel ALTV when no browser is open.
-# DO NOT activate until authorized. See DEPLOY.md / wrangler.jsonc for steps.
-[triggers]
-crons = ["* * * * *"]
-
 # ── LiveKit credentials (stored as encrypted Worker secrets, not in this file) ─
 # Provisioned via: wrangler secret put LIVEKIT_API_KEY / LIVEKIT_API_SECRET
 [vars]

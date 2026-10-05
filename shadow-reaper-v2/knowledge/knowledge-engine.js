@@ -63,7 +63,7 @@
         'what is this site', 'what is this platform', 'what does shadow nexus do',
         'features of shadow nexus', 'what does this website have',
       ],
-      content: 'Shadow Nexus Social is a creative social platform built by Chris (Legend of Shadows). It includes: Eclipse Feed (social posts), Live video streaming with Cohost, 24-Hour TV channels and TV Studio, Radio and Radio Studio for DJ streaming, Inbox for direct messages, Notifications, Search, Profiles, Friends/follow system, Community Hub, Storm Rooms (live chat), Support Rooms (moderated safe spaces), Arcade games, and PWA install support. You need an account for most features; some browsing is available as a guest.',
+      content: 'Shadow Nexus Social is a creative social platform built by Chris (Legend of Shadows). It includes: Eclipse Feed (social posts), Live video streaming with Cohost, 24-Hour Radio and Radio Studio for DJ streaming, Inbox for direct messages, Notifications, Search, Profiles, Friends/follow system, Community Hub, Storm Rooms (live chat), Support Rooms (moderated safe spaces), Arcade games, and PWA install support. You need an account for most features; some browsing is available as a guest.',
     },
 
     /* ══════════════════════════════════════════════════════════
@@ -390,7 +390,7 @@
         'how to get to', 'where is', 'how do i find', 'how do i open',
         'nav bar', 'menu', 'how to access',
       ],
-      content: 'Shadow Nexus Social has a navigation sidebar (on desktop) and a mobile menu (on mobile). The sidebar has icons for: Eclipse Feed, Search, Inbox, Notifications, Community Hub, Community Rules, Storm Rooms, Support Rooms, Live, 24-Hour TV, Radio, Settings, and role-specific panels for Moderators, Admins, and Founders. On mobile, tap the menu icon to open the navigation drawer.',
+      content: 'Shadow Nexus Social has a navigation sidebar (on desktop) and a mobile menu (on mobile). The sidebar has icons for: Eclipse Feed, Search, Inbox, Notifications, Community Hub, Community Rules, Storm Rooms, Support Rooms, Live, Radio, Settings, and role-specific panels for Moderators, Admins, and Founders. On mobile, tap the menu icon to open the navigation drawer.',
     },
 
     /* ══════════════════════════════════════════════════════════

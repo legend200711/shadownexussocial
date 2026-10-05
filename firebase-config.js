@@ -16,7 +16,7 @@
  *   import { app, auth, db, liveDB } from './firebase-config.js';
  *
  * Pages that already initialise their own Firebase (index.html, live.js,
- * live-hub.html, live-room.html, channel.html) use the same getApps() guard
+ * live-hub.html, live-room.html) use the same getApps() guard
  * and will automatically share this same app instance — no conflict.
  */
 

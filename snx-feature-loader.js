@@ -23,7 +23,6 @@
  *  • Never touches Radio timeline, epoch, or synchronisation.
  *  • Never alters Live signalling paths or WebRTC architecture.
  *  • Never activates mediasoup.
- *  • Never modifies the TV backend or broadcast engine.
  *
  * FEATURE MANIFEST
  * ────────────────
@@ -115,21 +114,6 @@
       ],
       esModules: [
         'live.js?v=SNS-2026-LIVE-010'
-      ],
-      init: null
-    },
-
-    // ── 24-Hour TV viewer (adapter + network UI)
-    // snx-ch-adapter.js is a type="module" so we preserve that via a
-    // dynamic import() rather than a classic script tag.
-    tv: {
-      label: 'TV',
-      css:  ['snx-tv-network.css?v=SHADOW-TV-2026-GLOBAL-UPDATE-01'],
-      scripts: [],          // loaded via esModules below
-      esModules: [
-        'snx-ch-adapter.js',
-        // snx-tv-network.js is lazily imported inside the inline module already;
-        // we do NOT duplicate that import here.
       ],
       init: null
     },

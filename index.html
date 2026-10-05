@@ -6580,11 +6580,6 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">🔴</span>
             <span class="sc-item-label">Live</span>
         </button>
-        <!-- 24-HOUR TV — native SNS page -->
-        <button class="sc-item" id="scNavNexus" onclick="realmNavTo('tvPage')" aria-label="24-Hour TV" style="color:#00AEEF;">
-            <span class="sc-item-icon">📺</span>
-            <span class="sc-item-label">24-Hour TV</span>
-        </button>
         <!-- Radio -->
         <button class="sc-item" id="scNavRadio" onclick="realmNavTo('radioPage')" aria-label="Shadow Nexus Radio" style="color:#9f7aea;">
             <span class="sc-item-icon">📻</span>
@@ -6683,16 +6678,12 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="ncm-divider"></div>
 
-        <!-- ── CREATOR / TV ── -->
+        <!-- ── CREATOR ── -->
         <span class="ncm-section-label">Creator</span>
 
         <div class="ncm-item" id="ncmLive" onclick="realmNavTo('livePage');mobileNavTo('_close')" style="color:#ff3355;">
             <div class="ncm-icon-wrap">🔴</div>
             <div class="ncm-label">Live</div>
-        </div>
-        <div class="ncm-item" id="ncmNexus" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
-            <div class="ncm-icon-wrap">📺</div>
-            <div class="ncm-label">24-Hour TV</div>
         </div>
         <div class="ncm-item" id="ncmRadio" onclick="realmNavTo('radioPage');mobileNavTo('_close')" style="color:#9f7aea;">
             <div class="ncm-icon-wrap">📻</div>
@@ -6811,9 +6802,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <button class="nav-item" id="navLive" onclick="realmNavTo('livePage')" style="color:#ff3355;border-left:3px solid rgba(255,51,85,0.55);">
             <span class="nav-icon">🔴</span> Live
-        </button>
-        <button class="nav-item" id="navNexus" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
-            <span class="nav-icon">📺</span> 24-Hour TV
         </button>
         <button class="nav-item" id="navRadio" onclick="realmNavTo('radioPage')" style="color:#9f7aea;border-left:3px solid rgba(159,122,234,0.55);">
             <span class="nav-icon">📻</span> Radio
@@ -10870,9 +10858,7 @@ body.arcade-fs-ios body::after { display:none !important; }
 </div><!-- end administratorPage -->
 
 
-<!-- studioPage retained as a non-visible redirect stub.
-     Old bookmarks/deep-links that call realmNavTo('studioPage') are
-     safely redirected to tvPage by the routing logic below. -->
+<!-- studioPage: legacy dead page stub — hidden, never rendered. Old deep links are ignored. -->
 <div class="page" id="studioPage" style="display:none;">
   <div style="display:none;">
 
@@ -11685,387 +11671,6 @@ body.arcade-fs-ios body::after { display:none !important; }
 
 </div><!-- end nexusPage -->
 
-<!-- ████████████████████████████████████████████████████████████
-     📺  SHADOW NEXUS — 24-HOUR TV
-     Native channel viewer + founder studio.
-     Auth: reads window._snxCurrentUser (SNS session).
-     No second login. No separate page.
-     ████████████████████████████████████████████████████████ -->
-
-<!-- ── 24-Hour TV: SNS-native page styles ── -->
-<style>
-/* ── TV Page wrapper ── */
-#tvPage.page { max-width: 100% !important; padding: 0 !important; }
-
-/* ── TV header bar ── */
-.snx-tv-header {
-  display: flex; align-items: center;
-  padding: 10px 16px 8px;
-  border-bottom: 1px solid rgba(0,174,239,0.11);
-  flex-wrap: wrap; gap: 10px;
-}
-.snx-tv-title-wrap { display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
-.snx-tv-title {
-  font-size: 15px; font-weight: 900;
-  letter-spacing: 2.5px; color: #c8d0e8; text-transform: uppercase;
-  white-space: nowrap;
-}
-/* Live status indicator — reactive */
-.snx-tv-status {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 10px; font-weight: 700; letter-spacing: 1.5px;
-  color: #39FF14; text-transform: uppercase; flex-shrink: 0;
-  transition: color 0.4s;
-}
-.snx-tv-status-dot {
-  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-  background: #5a80a8;
-  transition: background 0.4s, box-shadow 0.4s;
-}
-.snx-tv-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: #ff3344;
-  animation: snxTvDot 2s ease-in-out infinite;
-}
-@keyframes snxTvDot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
-
-/* ── Founder-only tabs (Watch / Studio) ── */
-.snx-tv-tabs { display: flex; gap: 6px; flex-shrink: 0; }
-.snx-tv-tab {
-  padding: 5px 14px; border-radius: 6px;
-  background: none; border: 1px solid rgba(0,174,239,0.18);
-  color: #5a80a8; font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
-  cursor: pointer; transition: background 0.15s, color 0.15s, border-color 0.15s;
-  white-space: nowrap;
-}
-.snx-tv-tab:hover { background: rgba(0,174,239,0.09); color: #00AEEF; border-color: rgba(0,174,239,0.30); }
-.snx-tv-tab.active { background: rgba(0,174,239,0.09); border-color: rgba(0,174,239,0.35); color: #00AEEF; }
-
-/* ── Founder bar ── */
-#snx-tv-founder-bar {
-  background: rgba(57,255,20,0.03);
-  border-bottom: 1px solid rgba(57,255,20,0.14);
-}
-
-/* ── Main layout ── */
-.snx-tv-panel { padding: 0; }
-
-/* Player: inherits ax-player-shell + adds width constraint */
-.snx-tv-player-shell { width: 100%; }
-
-/* Channel badge */
-.ax-channel-badge {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 5px 14px; border-radius: 4px 4px 0 0;
-  background: #0090cc; color: #fff;
-  font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase;
-}
-.ax-badge-dot { opacity: 0.6; }
-.ax-live-indicator { display: flex; align-items: center; gap: 5px; color: #39FF14; }
-.ax-live-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: #ff3344;
-  box-shadow: 0 0 8px rgba(255,51,68,0.6);
-  animation: snxTvDot 2s ease-in-out infinite;
-}
-
-/* Media area */
-.ax-player-shell {
-  background: #071428; border: 1px solid rgba(0,174,239,0.22);
-  border-radius: 0 12px 12px 12px; overflow: hidden;
-}
-.ax-media-area {
-  position: relative; background: #000; aspect-ratio: 16/9; overflow: hidden; cursor: pointer;
-}
-.ax-media-area video, .ax-media-area audio { display: none; }
-/* video: when JS shows it, fill the player box with proper aspect ratio */
-#ax-video { width: 100%; height: 100%; object-fit: contain; }
-.ax-media-thumbnail {
-  position: absolute; inset: 0; background: #000;
-  display: flex; align-items: center; justify-content: center;
-}
-.ax-media-overlay {
-  position: absolute; inset: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 50%);
-  pointer-events: none;
-}
-
-/* Now Playing overlay */
-.ax-np-overlay {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  padding: 12px 14px; z-index: 5; pointer-events: none;
-}
-.ax-np-label { font-size: 9px; font-weight: 800; letter-spacing: 2px; color: rgba(255,255,255,0.6); margin-bottom: 2px; }
-.ax-np-title { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 6px rgba(0,0,0,0.8); }
-.ax-np-artist { font-size: 11px; color: rgba(255,255,255,0.65); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* Autoplay gate — starts hidden; only shown as last resort when even muted autoplay fails */
-.ax-autoplay-gate {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
-  background: rgba(2,4,10,0.88); backdrop-filter: blur(8px); z-index: 10;
-}
-.ax-gate-logo { font-size: 48px; }
-.ax-gate-title { font-size: 18px; font-weight: 900; letter-spacing: 0.15em; color: #c8d0e8; }
-.ax-gate-sub { font-size: 12px; color: #5a80a8; }
-.ax-gate-btn {
-  padding: 12px 32px; background: #0090cc; color: #fff; border: none; border-radius: 8px;
-  font-size: 14px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
-  transition: background 0.18s;
-}
-.ax-gate-btn:hover { background: #00AEEF; }
-
-/* Fullscreen overlay */
-.ax-fs-overlay {
-  position: absolute; inset: 0; z-index: 20;
-  opacity: 0; pointer-events: none;
-  transition: opacity 0.2s;
-}
-.ax-fs-overlay.visible { opacity: 1; pointer-events: auto; }
-.ax-fs-overlay-gradient { position: absolute; bottom: 0; left: 0; right: 0; height: 120px; background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%); pointer-events: none; }
-.ax-fs-ctrl-bar {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px;
-}
-.ax-fs-progress-wrap { display: flex; flex-direction: column; gap: 4px; }
-.ax-fs-progress-bar { height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; cursor: pointer; }
-.ax-fs-progress-fill { height: 100%; background: linear-gradient(90deg, #00AEEF, #39FF14); border-radius: 2px; transition: width 0.8s linear; }
-.ax-fs-times { display: flex; justify-content: space-between; font-size: 11px; color: rgba(255,255,255,0.7); }
-.ax-fs-btns { display: flex; align-items: center; gap: 8px; }
-.ax-fs-ctrl-btn {
-  background: none; border: none; color: rgba(255,255,255,0.85); font-size: 18px;
-  cursor: pointer; padding: 4px 6px; border-radius: 4px; line-height: 1;
-}
-.ax-fs-ctrl-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
-.ax-fs-exit-btn { margin-left: auto; }
-.ax-fs-spacer { flex: 1; }
-.ax-fs-vol-slider { width: 80px; accent-color: #00AEEF; }
-.ax-fs-hide-cursor { cursor: none; }
-
-/* Fullscreen active state */
-.ax-fs-active { position: fixed !important; inset: 0 !important; z-index: 99999 !important; width: 100vw !important; height: 100vh !important; border-radius: 0 !important; }
-.ax-fs-active .ax-media-area { aspect-ratio: unset !important; width: 100% !important; height: 100% !important; }
-.ax-fs-active #ax-video { display: block !important; width: 100% !important; height: 100% !important; object-fit: contain !important; }
-.ax-fs-active .ax-fs-overlay { pointer-events: auto; }
-
-/* Progress bar (normal) */
-.ax-progress-wrap { padding: 10px 14px 4px; }
-.ax-progress-bar { height: 4px; background: rgba(0,174,239,0.15); border-radius: 2px; overflow: hidden; }
-.ax-progress-fill { height: 100%; background: linear-gradient(90deg, #00AEEF, #39FF14); border-radius: 2px; transition: width 0.8s linear; }
-.ax-progress-times { display: flex; justify-content: space-between; font-size: 11px; color: #5a80a8; padding: 4px 0; }
-
-/* Controls */
-.ax-controls {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 14px 12px;
-}
-.ax-ctrl-btn {
-  background: rgba(0,174,239,0.08); border: 1px solid rgba(0,174,239,0.22);
-  color: #5a80a8; border-radius: 6px; padding: 7px 12px;
-  font-size: 13px; cursor: pointer; transition: background 0.15s, color 0.15s;
-}
-.ax-ctrl-btn:hover { background: rgba(0,174,239,0.18); color: #00AEEF; }
-.ax-ctrl-btn.primary { background: rgba(0,174,239,0.15); color: #00AEEF; border-color: rgba(0,174,239,0.35); }
-.ax-volume-wrap { display: flex; align-items: center; gap: 6px; }
-.ax-volume-slider { width: 80px; accent-color: #00AEEF; }
-.ax-controls-spacer { flex: 1; }
-
-/* Now Playing panel (below player) */
-.ax-now-playing-panel {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
-  padding: 10px 16px 0; flex-wrap: wrap; max-width: 900px; margin: 0 auto;
-  border-top: 1px solid rgba(0,174,239,0.11);
-}
-.ax-np-panel-label { font-size: 9px; font-weight: 800; letter-spacing: 2px; color: #ff3344; margin-bottom: 2px; }
-.ax-np-panel-title { font-size: 14px; font-weight: 800; color: #c8d0e8; line-height: 1.2; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ax-np-panel-meta { font-size: 11px; color: #5a80a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ax-np-panel-time { font-size: 11px; color: #5a80a8; text-align: right; }
-.ax-np-panel-remain { font-size: 10px; color: #3a5a7a; text-align: right; margin-top: 2px; }
-
-/* ── Info row (channels + up next + EPG) ── */
-.snx-tv-info-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
-  gap: 12px; padding: 12px 16px 20px; max-width: 900px; margin: 0 auto;
-}
-.snx-tv-section-card {
-  background: rgba(7,20,40,0.85);
-  border: 1px solid rgba(0,174,239,0.16);
-  border-radius: 12px; overflow: hidden;
-}
-.snx-tv-section-title {
-  font-size: 10px; font-weight: 800; letter-spacing: 2px;
-  color: #5a80a8; text-transform: uppercase;
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid rgba(0,174,239,0.1);
-}
-
-/* Channel list */
-.ax-channels { overflow-y: auto; max-height: 320px; }
-.ax-channel-btn {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 10px 14px; background: transparent;
-  border: none; border-left: 3px solid transparent;
-  color: #5a80a8; font-size: 12px; font-weight: 600;
-  cursor: pointer; text-align: left; transition: background 0.15s, color 0.15s;
-}
-.ax-channel-btn:hover { background: rgba(0,174,239,0.07); color: #c8d0e8; }
-.ax-channel-btn.active { background: rgba(0,174,239,0.1); color: #00AEEF; border-left-color: #00AEEF; }
-.ax-ch-num { font-size: 10px; color: #3a5a7a; min-width: 22px; }
-.ax-ch-icon { font-size: 14px; }
-.ax-ch-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ax-ch-status { width: 7px; height: 7px; border-radius: 50%; background: #1a3a5c; flex-shrink: 0; }
-.ax-ch-status.live { background: #39FF14; box-shadow: 0 0 6px rgba(57,255,20,0.6); animation: snxTvDot 2s ease-in-out infinite; }
-.ax-ch-status.idle { background: #1a3a5c; }
-
-/* Schedule / Up Next */
-.ax-schedule-list { overflow-y: auto; max-height: 320px; }
-.ax-schedule-item { padding: 9px 14px; border-bottom: 1px solid rgba(0,174,239,0.08); }
-.ax-schedule-item:last-child { border-bottom: none; }
-.ax-sched-title { font-size: 12px; font-weight: 700; color: #c8d0e8; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ax-sched-meta { font-size: 10px; color: #5a80a8; }
-
-/* EPG */
-.ax-epg-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 10px 4px; }
-.ax-epg-tab {
-  padding: 4px 10px; border-radius: 14px; font-size: 10px; font-weight: 700;
-  background: rgba(0,174,239,0.07); border: 1px solid rgba(0,174,239,0.18);
-  color: #5a80a8; cursor: pointer; letter-spacing: 0.5px;
-  transition: background 0.15s, color 0.15s;
-}
-.ax-epg-tab:hover { background: rgba(0,174,239,0.14); color: #c8d0e8; }
-.ax-epg-tab.active { background: rgba(0,174,239,0.18); border-color: rgba(0,174,239,0.45); color: #00AEEF; }
-.ax-epg-body { overflow-y: auto; max-height: 280px; padding-bottom: 8px; }
-.ax-epg-row { display: flex; align-items: flex-start; gap: 8px; padding: 9px 14px 8px; border-bottom: 1px solid rgba(0,174,239,0.07); }
-.ax-epg-row:last-child { border-bottom: none; }
-.ax-epg-row.current { background: rgba(0,174,239,0.05); }
-.ax-epg-badge { font-size: 9px; font-weight: 800; letter-spacing: 1px; color: #5a80a8; min-width: 36px; padding-top: 2px; flex-shrink: 0; }
-.ax-epg-info { flex: 1; min-width: 0; }
-.ax-epg-title { font-size: 12px; font-weight: 700; color: #c8d0e8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ax-epg-meta { font-size: 10px; color: #5a80a8; margin-top: 1px; }
-.ax-epg-remain { font-size: 10px; color: #3a5a7a; flex-shrink: 0; padding-top: 2px; }
-.ax-epg-empty { padding: 16px 14px; font-size: 12px; color: #3a5a7a; }
-
-/* Submit modal */
-.ax-modal-overlay {
-  position: fixed; inset: 0; z-index: 8000;
-  background: rgba(0,3,15,0.88); backdrop-filter: blur(6px);
-  display: flex; align-items: center; justify-content: center; padding: 16px;
-}
-.ax-modal-box {
-  background: #060d1e; border: 1px solid rgba(0,174,239,0.35);
-  border-radius: 16px; padding: 22px 20px;
-  max-height: 90vh; overflow-y: auto;
-  box-shadow: 0 0 60px rgba(0,100,255,0.2);
-  animation: snxTvModalIn 0.22s cubic-bezier(0.34,1.56,0.64,1) both;
-}
-@keyframes snxTvModalIn { from { opacity:0; transform:scale(0.94) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
-.ax-modal-title { font-size: 14px; font-weight: 800; color: #00AEEF; letter-spacing: 1px; margin-bottom: 12px; }
-.ax-modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
-.ax-btn-ghost {
-  padding: 9px 18px; background: transparent; border: 1px solid rgba(0,174,239,0.25);
-  color: #5a80a8; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700;
-}
-.ax-btn-ghost:hover { color: #c8d0e8; border-color: rgba(0,174,239,0.5); }
-.ax-btn-primary {
-  padding: 9px 18px; background: #0090cc; color: #fff; border: none;
-  border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700;
-}
-.ax-btn-primary:hover { background: #00AEEF; }
-.ax-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-.ax-auth-err { display: none; font-size: 12px; color: #ff3344; padding: 6px 10px; background: rgba(255,51,68,0.08); border-radius: 6px; margin-top: 6px; }
-.ax-auth-err.visible { display: block; }
-
-/* Toast */
-#ax-toast {
-  position: fixed; bottom: 80px; right: 20px; z-index: 9500;
-  max-width: calc(100vw - 40px);
-}
-
-/* Founder bar in channel.html nav */
-.ax-founder-badge-nav {
-  padding: 3px 10px; border-radius: 12px;
-  background: rgba(57,255,20,0.1); border: 1px solid rgba(57,255,20,0.3);
-  color: #39FF14; font-size: 10px; font-weight: 800; letter-spacing: 1px;
-}
-
-/* ── Studio pane (inside SNS) ── */
-.ax-ctrl-layout {
-  display: flex; flex-direction: column; min-height: 500px;
-  background: rgba(5,7,14,0.98);
-  border: 1px solid rgba(0,174,239,0.15);
-  border-radius: 12px; overflow: hidden;
-}
-@media (min-width: 768px) {
-  .ax-ctrl-layout { flex-direction: row; }
-}
-.ax-ctrl-sidebar {
-  width: 100%; flex-shrink: 0;
-  background: rgba(2,4,10,0.95);
-  border-bottom: 1px solid rgba(0,174,239,0.12);
-  padding: 14px 10px;
-  display: flex; flex-direction: column; gap: 2px;
-  overflow-y: auto;
-}
-@media (min-width: 768px) {
-  .ax-ctrl-sidebar {
-    width: 200px; border-bottom: none;
-    border-right: 1px solid rgba(0,174,239,0.12);
-    min-height: 500px;
-  }
-}
-.ax-ctrl-content { flex: 1; overflow-y: auto; padding: 16px; min-width: 0; }
-.ax-ctrl-founder-badge {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 10px 12px; margin-bottom: 4px;
-  border-bottom: 1px solid rgba(0,174,239,0.1);
-}
-.ax-ctrl-founder-title { font-size: 13px; font-weight: 900; color: #00AEEF; letter-spacing: 0.08em; line-height: 1.2; }
-.ax-ctrl-founder-sub { font-size: 9px; color: #39FF14; letter-spacing: 0.5px; font-weight: 700; margin-top: 2px; }
-.ax-ctrl-section-label {
-  font-size: 9px; font-weight: 800; letter-spacing: 2px;
-  color: #3a5a7a; text-transform: uppercase;
-  padding: 10px 8px 4px; margin-top: 4px;
-}
-.ax-ctrl-nav-btn {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 10px; border-radius: 7px;
-  background: transparent; border: none;
-  color: #5a80a8; font-size: 12px; font-weight: 600;
-  cursor: pointer; text-align: left;
-  transition: background 0.15s, color 0.15s;
-}
-.ax-ctrl-nav-btn:hover { background: rgba(0,174,239,0.08); color: #c8d0e8; }
-.ax-ctrl-nav-btn.active { background: rgba(0,174,239,0.12); color: #00AEEF; }
-.ax-ctrl-nav-icon { font-size: 14px; width: 20px; text-align: center; flex-shrink: 0; }
-.ax-ctrl-exit-btn { color: #ff5577 !important; margin-top: auto; }
-.ax-ctrl-exit-btn:hover { background: rgba(255,51,102,0.08) !important; }
-.ax-ctrl-pane { display: none; }
-.ax-ctrl-pane.active { display: block; }
-.ax-ctrl-error {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  min-height: 300px; gap: 12px; padding: 40px 24px; text-align: center;
-}
-.ax-ctrl-error-msg {
-  font-size: 13px; color: #5a80a8; line-height: 1.6; max-width: 480px;
-  background: rgba(0,174,239,0.05); border: 1px solid rgba(0,174,239,0.15);
-  border-radius: 8px; padding: 14px 18px;
-}
-
-/* ── Mobile adjustments ── */
-@media (max-width: 480px) {
-  .snx-tv-header { padding: 10px 12px 8px; }
-  .snx-tv-tab { padding: 6px 12px; font-size: 11px; }
-  .snx-tv-panel { padding: 0 10px 20px; }
-  .snx-tv-info-row { grid-template-columns: 1fr; }
-}
-</style>
-
-<div class="page" id="tvPage">
-  <!-- snx-ch-adapter.js renders the Main TV broadcast into #snxTvApp -->
-  <!-- snx-tv-network.js injects the WATCH / TV STUDIO tab bar above the player -->
-  <div id="snxTvApp" style="min-height:200px;"></div>
-  <!-- TV Network tab bar + studio panel injected dynamically by snx-tv-network.js -->
-</div><!-- end tvPage -->
-
 <!-- ████ LIVE PAGE — Shadow Nexus Live Hub ████ -->
 <div class="page" id="livePage">
   <div class="live-page-header">
@@ -12095,256 +11700,6 @@ body.arcade-fs-ios body::after { display:none !important; }
      snx-sfu.js ~47 KB  deferred
      live.js   ~182 KB  deferred
      ─────────────────────────────────────────────────────────────────────────── -->
-
-<!-- ── 24-Hour TV adapter + TV Network ────────────────────────────────────────
-     Stage 2B DEFERRED: snx-ch-adapter.js and snx-tv-network.css are NOT loaded
-     at startup. SNXFeatureLoader loads them when the user navigates to tvPage.
-     snx-ch-adapter.js      ~83 KB  deferred
-     snx-tv-network.css     ~45 KB  deferred
-     ─────────────────────────────────────────────────────────────────────────── -->
-<!-- [PHASE-2-DISABLED] snx-creator-live.css removed — new creator-live UI not needed in Phase 1 -->
-<script type="module">
-/**
- * SNX TV Network — index.html integration
- * Initialises the WATCH / TV STUDIO tab bar when the user opens tvPage.
- * Auth is read from window._snxCurrentUser (set by the main SNS auth block).
- * No second login, no second Firebase init.
- *
- * Build: SHADOW-TV-2026-GLOBAL-UPDATE-02
- *
- * TABS: WATCH | TV STUDIO (founder only)
- * Removed: GUIDE tab, MORE tab, Channels tab, My Channel tab, Go Live.
- * Preserved: player, Now Playing, Up Next, TV Studio, programming,
- *            schedule backend, playlists, queue, media, TV engine, Firebase data.
- *
- * CANONICAL ENTRY POINT: window.snxOpen24HourTV()
- * All navigation to tvPage must use this function (or realmNavTo('tvPage') which
- * delegates to it).  It serialises auth-waiting, page-active checks, and engine
- * initialisation into a single sequential Promise so there is never a race
- * between snxTvInit() and snxTvNetworkInit().
- *
- * INIT LOCK: window._snxTvInitPromise
- * If TV startup is already in progress when another caller arrives, the same
- * Promise is returned — no second engine is created.
- */
-let _tvNetworkModule = null;
-let _tvNetworkInited = false;
-
-async function _getTvNetworkModule() {
-  if (!_tvNetworkModule) {
-    _tvNetworkModule = await import('./snx-tv-network.js');
-    // Expose publicly so VIEW CHANNEL onclick and external callers can use it
-    window._tvNetworkModule = _tvNetworkModule;
-  }
-  return _tvNetworkModule;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   snxTvNetworkInit — initialise / re-sync the TV Network module.
-   Called exclusively from snxOpen24HourTV(); never called directly by navTo.
-───────────────────────────────────────────────────────────────────────── */
-window.snxTvNetworkInit = async function() {
-  try {
-    const m = await _getTvNetworkModule();
-    if (!_tvNetworkInited) {
-      _tvNetworkInited = true;
-      console.log('[SNX-TV] Network initializing');
-      m.initTvNetwork(window._snxCurrentUser || null);
-    } else {
-      // Re-entry — just sync auth state in case it changed
-      m.onTvNetworkAuthChange(window._snxCurrentUser || null);
-    }
-  } catch (err) {
-    console.warn('[SNX TV Network index] Init error:', err.message);
-  }
-};
-
-window.snxTvNetworkTeardown = function() {
-  // FIX: Stop any audio/video the TV Network might have resumed via _switchTab.
-  // The subscriptions stay alive for instant re-entry, but media must not play
-  // while the user is on a different SNS page.
-  const vid = document.getElementById('ax-video');
-  const aud = document.getElementById('ax-audio');
-  if (vid && !vid.paused) { try { vid.pause(); } catch(_) {} }
-  if (aud && !aud.paused) { try { aud.pause(); } catch(_) {} }
-  // Ensure the flag is cleared so _switchTab's resume guard fires correctly.
-  window._snxTvPageActive = false;
-  // Release the init lock so the next navigation can start fresh.
-  window._snxTvInitPromise = null;
-};
-
-// Keep TV Network in sync with SNS auth changes
-window.addEventListener('snxAuthStateChanged', e => {
-  if (_tvNetworkModule) {
-    _tvNetworkModule.onTvNetworkAuthChange(e.detail?.user || null);
-  }
-});
-window.addEventListener('snxAuthSignOut', () => {
-  if (_tvNetworkModule) {
-    _tvNetworkModule.onTvNetworkAuthChange(null);
-  }
-});
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   snxOpen24HourTV — CANONICAL 24-HOUR TV STARTUP CONTROLLER
-   ═══════════════════════════════════════════════════════════════════════════
-   This is the ONE function that starts the TV.  All paths that navigate to
-   tvPage (realmNavTo / mobileNavTo / deep-links) end up here.
-
-   Sequence:
-     A. Confirm tvPage will be / is active
-     B. Wait for Shadow Nexus authentication to resolve
-     C. Use the existing logged-in SNS session (never a second login)
-     D. Initialize snxTvInit() — the 24-Hour channel engine
-     E. Wait for tvPage to be actually active in the DOM
-     F. Initialize snxTvNetworkInit() — WATCH / TV STUDIO tab bar + theater
-     G. Sync auth state so TV STUDIO tab resolves correctly (founder only)
-     H. Playback begins automatically inside snxTvInit/_startWithUser
-
-   INIT LOCK (window._snxTvInitPromise):
-     If TV startup is already running, the same Promise is reused.
-     This prevents duplicate Firestore listeners, duplicate timers,
-     and duplicate audio from being created.
-
-   Guest mode:
-     Guests (null user) are allowed to watch public Shadow Nexus TV.
-     Auth resolution is still awaited to give Firebase time to confirm
-     the user really is a guest and not a slow sign-in.
-═══════════════════════════════════════════════════════════════════════════ */
-window.snxOpen24HourTV = function() {
-  console.log('[SNX-TV] TV navigation requested — build:', window.SHADOW_NEXUS_BUILD_VERSION || 'SNS-2026-TV-STABILITY-001');
-
-  // ── INIT LOCK: if already in progress, reuse the running Promise ──────────
-  if (window._snxTvInitPromise) {
-    console.log('[SNX-TV] Init already in progress — reusing existing Promise');
-    return window._snxTvInitPromise;
-  }
-
-  window._snxTvInitPromise = (async () => {
-    try {
-      // ── A. Stop Music Hub radio — never two audio streams at once ────────────
-      if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
-
-      // ── B. Wait for Shadow Nexus authentication to resolve ────────────────────
-      // Uses the canonical auth-ready queue — never depends on polling.
-      const user = await new Promise((resolve) => {
-        if (window._snxAuthResolved) {
-          console.log('[SNX-TV] Auth ready (already resolved)');
-          resolve(window._snxCurrentUser || null);
-        } else {
-          console.log('[SNX-TV] Waiting for auth…');
-          // _snxOnAuthReady is set up by the SNS Firebase auth block.
-          // If it isn't defined yet (extremely early call), fall back to the queue directly.
-          const enqueue = () => {
-            window._snxAuthReadyQueue = window._snxAuthReadyQueue || [];
-            window._snxAuthReadyQueue.push(() => {
-              console.log('[SNX-TV] Auth ready (resolved via queue)');
-              resolve(window._snxCurrentUser || null);
-            });
-          };
-          if (typeof window._snxOnAuthReady === 'function') {
-            window._snxOnAuthReady(() => {
-              console.log('[SNX-TV] Auth ready');
-              resolve(window._snxCurrentUser || null);
-            });
-          } else {
-            enqueue();
-          }
-          // Safety timeout — if auth never fires within 10s, proceed as guest
-          setTimeout(() => {
-            if (!window._snxAuthResolved) {
-              console.warn('[SNX-TV] Auth timeout — proceeding as guest');
-              resolve(null);
-            }
-          }, 10000);
-        }
-      });
-
-      // ── C. Confirm tvPage is active — the portal transition fires navTo THEN
-      //      sets up the page, so by the time this async code runs tvPage is
-      //      already shown.  We do a quick DOM check as a sanity guard. ─────────
-      const tvPageEl = document.getElementById('tvPage');
-      const isActive = tvPageEl && tvPageEl.classList.contains('active');
-      if (!isActive) {
-        console.log('[SNX-TV] TV page active — waiting for DOM');
-        // Give the portal transition (250ms) plus a small buffer to complete
-        await new Promise(r => setTimeout(r, 300));
-      }
-      console.log('[SNX-TV] TV page active');
-
-      // ── D. Initialize snxTvInit — the core 24-Hour channel engine ─────────────
-      // snxTvInit is defined on window by snx-ch-adapter.js (type="module" script).
-      // It already guards against double media creation via _stopMediaFull/_stopTick.
-      if (typeof window.snxTvInit === 'function') {
-        console.log('[SNX-TV] TV engine initializing');
-        window.snxTvInit();
-      } else {
-        console.warn('[SNX-TV] snxTvInit not yet available — module may still be loading');
-      }
-
-      // ── E. Small yield so snxTvInit's synchronous DOM work settles ────────────
-      await new Promise(r => setTimeout(r, 50));
-
-      // ── F. Initialize snxTvNetworkInit — WATCH / TV STUDIO tab bar + theater ──
-      console.log('[SNX-TV] Network initializing');
-      await window.snxTvNetworkInit();
-
-      // ── G. Sync auth state so TV STUDIO tab resolves correctly (founder only) ─
-      if (_tvNetworkModule && user) {
-        _tvNetworkModule.onTvNetworkAuthChange(user);
-      }
-
-      console.log('[SNX-TV] Playback ready');
-
-    } catch (err) {
-      console.warn('[SNX-TV] Startup error:', err && err.message);
-    } finally {
-      // Release the lock — next navigation can start fresh if teardown happened
-      // (teardown also clears it, but this covers the success path too so that
-      //  re-navigating TV→Feed→TV works correctly)
-      window._snxTvInitPromise = null;
-    }
-  })();
-
-  return window._snxTvInitPromise;
-};
-
-/* ── Deep-link helpers called by notification buttons ────────────────────────
-   snxOpenTvLive(creatorUid, liveId)  — navigate to 24-Hour TV
-   snxOpenTvReplay — no-op; SNS Live is a separate system (live.html)
-   These work whether the user is currently on any page inside index.html.
-──────────────────────────────────────────────────────────────────────────── */
-window.snxOpenTvLive = async function(creatorUid, _liveId) {
-  if (!creatorUid) return;
-  // Navigate to TV page — SNS Live viewer removed from 24-Hour TV.
-  // SNS Live is accessed via live.html (separate system).
-  if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-  if (typeof window.snxOpen24HourTV === 'function') await window.snxOpen24HourTV();
-};
-
-window.snxOpenTvReplay = async function(creatorUid, _replayId) {
-  if (!creatorUid) return;
-  // Navigate to TV page — SNS Live replay viewer removed from 24-Hour TV.
-  if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-  if (typeof window.snxOpen24HourTV === 'function') await window.snxOpen24HourTV();
-};
-
-/* ── snx:openCreatorChannel event — fired by VIEW CHANNEL button ─────────────
-   Creator channel viewer removed from 24-Hour TV.
-   Navigates to tvPage (WATCH tab) so the user sees the main broadcast.
-──────────────────────────────────────────────────────────────────────────── */
-window.addEventListener('snx:openCreatorChannel', async e => {
-  const uid = e?.detail?.uid;
-  if (!uid) return;
-  // Creator channel viewer removed — just ensure TV is open on WATCH tab.
-  try {
-    if (typeof window.realmNavTo === 'function') window.realmNavTo('tvPage');
-    await _getTvNetworkModule(); // ensure module is loaded (no-op if already)
-  } catch (_) {}
-});
-</script>
-
-
 
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -16577,30 +15932,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
               text = `<b>${escFeed(n.fromName)}</b> was live`;
               actHtml = `<div class="notif-actions" style="margin-top:6px;"><button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button></div>`;
               navFn = ``;
-          } else if (n.type === 'creator_live') {
-              // 🔴 Creator went LIVE on Shadow Nexus TV
-              // Deep-link opens the actual live session — not just the channel page.
-              icon = '🔴';
-              const _clName = escFeed(n.channelName || n.fromName || 'A creator');
-              text = `<b>${_clName}</b> is <span style="color:#ff3344;font-weight:800;">LIVE</span> on Shadow Nexus TV`;
-              const _clDeepLink = n.deepLink || (n.fromUid && n.liveId
-                  ? `channel.html?live=${n.fromUid}&liveId=${n.liveId}`
-                  : 'channel.html');
-              actHtml = `<div class="notif-actions" style="margin-top:6px;">
-                  <button class="btn-accept" style="font-size:11px;background:rgba(255,51,68,0.15);border-color:rgba(255,51,68,0.5);color:#ff6677;" onclick="event.stopPropagation();snxOpenTvLive('${escFeed(n.fromUid||'')}','${escFeed(n.liveId||'')}');markNotifById('${nid}')">🔴 Watch Live</button>
-                  <button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button>
-              </div>`;
-              navFn = `snxOpenTvLive('${escFeed(n.fromUid||'')}','${escFeed(n.liveId||'')}')`;
-          } else if (n.type === 'replay_published') {
-              // ▶ Creator published a live replay
-              icon = '▶️';
-              const _rpName = escFeed(n.channelName || n.fromName || 'A creator');
-              text = `<b>${_rpName}</b> posted a Live Replay: <i>"${escFeed(n.replayTitle || '')}"</i>`;
-              actHtml = `<div class="notif-actions" style="margin-top:6px;">
-                  <button class="btn-accept" style="font-size:11px;" onclick="event.stopPropagation();snxOpenTvReplay('${escFeed(n.fromUid||'')}','${escFeed(n.replayId||'')}');markNotifById('${nid}')">▶ Watch Replay</button>
-                  <button class="notif-mark-all" style="font-size:11px;" onclick="event.stopPropagation();markNotifById('${nid}')">✓ Dismiss</button>
-              </div>`;
-              navFn = `snxOpenTvReplay('${escFeed(n.fromUid||'')}','${escFeed(n.replayId||'')}')`;
           } else if (n.type === 'announcement') {
               icon = '📢';
               text = `<b>Admin</b>: ${escFeed(n.body || 'New announcement')}`;
@@ -17425,34 +16756,6 @@ window.addEventListener('snx:openCreatorChannel', async e => {
                   }, 600);
               }
           };
-
-          // VIEW CHANNEL button — injected once per profile session
-          // Allows direct navigation from a user's SNS profile to their TV channel
-          let btnViewChannel = document.getElementById('btnViewChannelAction');
-          if (!btnViewChannel) {
-              btnViewChannel = document.createElement('button');
-              btnViewChannel.id = 'btnViewChannelAction';
-              btnViewChannel.style.cssText = 'border-color:rgba(0,174,239,0.35);color:#00AEEF;font-size:12px;padding:6px 14px;border-radius:20px;';
-              const btnReport2 = document.getElementById('btnReportUser');
-              if (btnReport2) btnReport2.insertAdjacentElement('afterend', btnViewChannel);
-              else document.getElementById('btnFollowAction')?.insertAdjacentElement('afterend', btnViewChannel);
-          }
-          // Always show VIEW CHANNEL — hide only on own profile
-          if (isSelf) {
-              btnViewChannel.style.display = 'none';
-          } else {
-              btnViewChannel.textContent   = '📺 View Channel';
-              btnViewChannel.style.display = '';
-              btnViewChannel.onclick       = () => {
-                  // Navigate to 24-Hour TV — creator channel viewer removed,
-                  // user lands on the main WATCH tab.
-                  if (typeof window.snxOpen24HourTV === 'function') {
-                      window.snxOpen24HourTV();
-                  } else if (typeof window.realmNavTo === 'function') {
-                      realmNavTo('tvPage');
-                  }
-              };
-          }
 
           // Block / Report buttons — show on other users' profiles only
           const btnBlock  = document.getElementById('btnBlockUser');
@@ -22223,7 +21526,6 @@ function navTo(pageId) {
         communityPage:'navCommunity', supportRoomsPage:'navSupport',
         communityRulesPage:'navCommunityRules',
         inboxPage:'navInbox',
-        tvPage:'navNexus',
         livePage:'navLive',
         radioPage:'navRadio'
     };
@@ -22361,53 +21663,6 @@ function navTo(pageId) {
         if (window.SNXRadioRequests && typeof window.SNXRadioRequests.closeModal === 'function') {
             window.SNXRadioRequests.closeModal();
         }
-    }
-    // ── 24-Hour TV lifecycle hooks ──
-    // TV startup is handled exclusively by the canonical snxOpen24HourTV() controller.
-    // It serialises auth-waiting, page-active checks, and engine initialisation into
-    // a single sequential Promise — preventing the race between snxTvInit() and
-    // snxTvNetworkInit() that caused the "must refresh 2-3 times" bug.
-    //
-    // Stage 2B: snx-ch-adapter.js is lazy-loaded on first tvPage navigation.
-    // snxOpen24HourTV already handles the snxTvInit-not-yet-ready case via its
-    // fallback path — so lazy loading integrates naturally.
-    //
-    // Portal transition timing: realmNavTo fires firePortalTransition(→ navTo after 250ms).
-    // navTo calls show() synchronously, so tvPage is already in the DOM as active by the
-    // time snxOpen24HourTV runs — no additional wait needed here.
-    if (pageId === 'tvPage') {
-        // Stage 2B: ensure TV modules are loaded before delegating.
-        // SNXFeatureLoader.loadFeature('tv') loads snx-ch-adapter.js (ES module)
-        // and snx-tv-network.css, then snxOpen24HourTV() runs normally.
-        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('tv')) {
-            window.SNXFeatureLoader.loadFeature('tv')
-                .then(function () {
-                    // Delegate to canonical controller now that modules are loaded
-                    if (typeof window.snxOpen24HourTV === 'function') {
-                        window.snxOpen24HourTV();
-                    } else {
-                        // belt-and-suspenders fallback
-                        if (typeof window.snxTvInit === 'function') window.snxTvInit();
-                        if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
-                    }
-                })
-                .catch(function (err) {
-                    console.warn('[navTo] TV feature load failed:', err && err.message);
-                });
-        } else {
-            // Modules already loaded — delegate to canonical controller directly.
-            if (typeof window.snxOpen24HourTV === 'function') {
-                window.snxOpen24HourTV();
-            } else {
-                // Fallback: module not yet loaded — use legacy path (rare, e.g. cold first paint)
-                if (typeof window.snxMHStopRadio === 'function') window.snxMHStopRadio();
-                if (typeof window.snxTvInit === 'function') window.snxTvInit();
-                if (typeof window.snxTvNetworkInit === 'function') window.snxTvNetworkInit();
-            }
-        }
-    } else {
-        if (typeof window.snxTvTeardown === 'function') window.snxTvTeardown();
-        if (typeof window.snxTvNetworkTeardown === 'function') window.snxTvNetworkTeardown();
     }
     // Initialize 24-HOUR NEXUS when nexusPage opens (legacy)
     if (pageId === 'nexusPage') {
@@ -31940,10 +31195,6 @@ window.firePortalTransition = firePortalTransition;
    7. SHADOW CORE NAV — realm navigation wrappers
    ═══════════════════════════════════════════════════════ */
 window.realmNavTo = function(pageId) {
-    // Music Hub has been retired — redirect any studioPage link to 24-Hour TV
-    if (pageId === 'studioPage') {
-        pageId = 'tvPage';
-    }
     firePortalTransition(function() {
         if (typeof navTo === 'function') navTo(pageId);
     });
@@ -31988,7 +31239,6 @@ function updateShadowCoreActive(pageId) {
         'administratorPage': ['navAdminOfficer', 'scNavAdm', 'ncmAdm'],
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
-        'tvPage':            ['navNexus', 'scNavNexus', 'ncmNexus'],
         'livePage':          ['scNavLive', 'ncmLive'],
         'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio']
     };
@@ -35155,36 +34405,6 @@ window.snxFounderPanelCleanup = (function() {
         if (window.goLiveOrWatch) window.goLiveOrWatch = _wrappedGoLive;
     }
 
-    /* ── Guard: TV Studio tab (snxTvNetworkInit wraps the studio tab display) ── */
-    function _hookTvStudio() {
-        if (window._snxGuestTvStudioHooked) return;
-        // The TV network shows TV STUDIO only to founders via _refreshStudioTab().
-        // For guests who somehow navigate directly, guard snxOpen24HourTV result
-        // by intercepting the TV Network's openStudio / switchToStudio methods.
-        const tryHookStudio = function() {
-            if (window._snxGuestTvStudioHooked) return;
-            const m = window._tvNetworkModule;
-            if (!m) return;
-            // Hook switchTab so clicking TV STUDIO tab shows login prompt
-            const origSwitch = m.switchTab || m._switchTab;
-            if (origSwitch) {
-                window._snxGuestTvStudioHooked = true;
-                const guarded = function(tabId) {
-                    if ((tabId === 'tv-studio' || tabId === 'studio') && !_isAuthUser() && window.snxIsGuest()) {
-                        snxJoinOpen({ title: '📺 TV STUDIO', desc: 'TV Studio is available to authorized staff. Sign in to continue.' });
-                        return;
-                    }
-                    return origSwitch.apply(this, arguments);
-                };
-                if (m.switchTab) m.switchTab = guarded;
-                if (m._switchTab) m._switchTab = guarded;
-            }
-        };
-        tryHookStudio();
-        setTimeout(tryHookStudio, 1500);
-        setTimeout(tryHookStudio, 3000);
-    }
-
     /* ─────────────────────────────────────────────────────────
        STARTUP — attach all hooks after DOM is ready
     ───────────────────────────────────────────────────────── */
@@ -35211,7 +34431,6 @@ window.snxFounderPanelCleanup = (function() {
         _tryHook(_hookInboxPage);
         _tryHook(_hookNotificationsPage);
         _tryHook(_hookMyChannel);
-        _tryHook(_hookTvStudio);
 
         // Guard _startInboxListener so it never queries Firestore for guests
         function _hookInboxListener() {
@@ -35726,7 +34945,6 @@ window.snxFounderPanelCleanup = (function() {
         'searchPage':      'Search',
         'radioPage':       'Radio',
         'livePage':        'Live',
-        'tvPage':          'TV',
         'settingsPage':    'Settings',
         'communityPage':   'Community Hub',
         'communityRulesPage': 'Community Rules',

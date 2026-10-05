@@ -20,10 +20,6 @@
     max-width: none !important;
     width: calc(100% - 240px) !important;
   }
-  /* TV page full-width is intentional */
-  #tvPage {
-    max-width: none !important;
-  }
 }
 
 /* ═══════════════════════════════════════════════════════════

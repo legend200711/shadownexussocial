@@ -4459,9 +4459,8 @@ window.snxNPStopChannel = function() {};
    Music Hub has been removed from the active website.
    Backend data is preserved; only the frontend is retired.
 
-   snxMHStopRadio is kept as a safe no-op because 24-Hour TV
-   startup calls it to ensure no conflicting audio stream is
-   running before the TV engine initialises.
+   snxMHStopRadio is kept as a safe no-op for callers that
+   check for it before starting media.
 ═══════════════════════════════════════════════════════ */
 
 window.snxMHStopRadio   = function() { /* Music Hub retired — no-op */ };
