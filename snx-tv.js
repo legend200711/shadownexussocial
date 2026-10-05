@@ -691,12 +691,15 @@ function _applyVolume() {
 /**
  * Resume the Web Audio context after a user gesture.
  * MUST be called from any user-initiated event handler.
+ * Returns a Promise that resolves when the context is running (or immediately
+ * if it was already running, or if there is no Web Audio context).
  */
 function _resumeAudioContext() {
   var ctx = _snxViz._audioCtx;
   if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(function () {});
+    return ctx.resume().catch(function () { return Promise.resolve(); });
   }
+  return Promise.resolve();
 }
 
 var _viewerReady = false;
@@ -850,51 +853,55 @@ function _attachTapOverlay() {
   if (!btn) return;
   btn.addEventListener('click', function () {
     _hideTapOverlay();
-    // ── AUDIO FIX: Resume AudioContext on user gesture ──────────────────
-    // Browsers suspend AudioContext until a user gesture. createMediaElementSource()
-    // re-routes all audio through the graph, so a suspended context = total silence.
-    // This must happen BEFORE v.play() — order matters.
-    _resumeAudioContext();
-    _applyVolume();
-    // ────────────────────────────────────────────────────────────────────
 
     var v = _el.video;
     if (!v) return;
 
-    // Stage 4: after user gesture, re-calculate the correct offset before playing.
-    // Autoplay may have been blocked for seconds/minutes; time has passed.
-    if (_scheduleMode && global.SNXTVTimeline) {
-      var resolved = global.SNXTVTimeline.resolve(Date.now());
-      if (resolved && resolved.mode === 'playing' && resolved.currentItem) {
-        var offset = resolved.itemOffset || 0;
-        if (resolved.currentItem.mediaUrl !== (v.src || '')) {
-          // Different item should be on air now
-          _applyTimelineState(resolved, true);
+    // ── AUDIO FIX: Resume AudioContext BEFORE playing ────────────────────
+    // AudioContext starts SUSPENDED until a user gesture.
+    // createMediaElementSource() permanently routes all audio through the
+    // Web Audio graph, so a suspended context = total silence.
+    // We await the resume() promise to guarantee the context is running
+    // before v.play() causes audio to flow through the graph.
+    _resumeAudioContext().then(function () {
+      // Ensure volume/gain is applied now that context is confirmed running.
+      _applyVolume();
+
+      // Stage 4: after user gesture, re-calculate the correct offset before playing.
+      // Autoplay may have been blocked for seconds/minutes; time has passed.
+      if (_scheduleMode && global.SNXTVTimeline) {
+        var resolved = global.SNXTVTimeline.resolve(Date.now());
+        if (resolved && resolved.mode === 'playing' && resolved.currentItem) {
+          var offset = resolved.itemOffset || 0;
+          if (resolved.currentItem.mediaUrl !== (v.src || '')) {
+            // Different item should be on air now
+            _applyTimelineState(resolved, true);
+            return;
+          }
+          // Seek to correct offset, then play
+          try {
+            if (isFinite(v.duration) && v.duration > 0) {
+              v.currentTime = Math.min(offset, v.duration - 0.5);
+            } else if (offset > 0) {
+              v.currentTime = offset;
+            }
+          } catch (e) {}
+          v.play().catch(function (e) {
+            console.warn('[SNX TV] Play after tap rejected:', e.message);
+            onMediaError('Playback could not start');
+          });
           return;
         }
-        // Seek to correct offset, then play
-        try {
-          if (isFinite(v.duration) && v.duration > 0) {
-            v.currentTime = Math.min(offset, v.duration - 0.5);
-          } else if (offset > 0) {
-            v.currentTime = offset;
-          }
-        } catch (e) {}
-        v.play().catch(function (e) {
-          console.warn('[SNX TV] Play after tap rejected:', e.message);
-          onMediaError('Playback could not start');
-        });
+        // Gap or no schedule — re-apply timeline state
+        _applyTimelineState(resolved, false);
         return;
       }
-      // Gap or no schedule
-      _applyTimelineState(resolved, false);
-      return;
-    }
 
-    // Adapter mode — just play from current position
-    v.play().catch(function (e) {
-      console.warn('[SNX TV] Play after tap rejected:', e.message);
-      onMediaError('Playback could not start');
+      // Adapter mode — just play from current position
+      v.play().catch(function (e) {
+        console.warn('[SNX TV] Play after tap rejected:', e.message);
+        onMediaError('Playback could not start');
+      });
     });
   });
 }
@@ -907,21 +914,19 @@ function _attachVolumeControls() {
 
   if (muteBtn) {
     muteBtn.addEventListener('click', function () {
-      _resumeAudioContext();
       _muted = !_muted;
       _saveVolumePrefs();
-      _applyVolume();
+      _resumeAudioContext().then(function () { _applyVolume(); });
     });
   }
 
   if (slider) {
     slider.addEventListener('input', function () {
-      _resumeAudioContext();
       var val = parseInt(slider.value, 10) || 0;
       _volume = val / 100;
       _muted  = (val === 0);
       _saveVolumePrefs();
-      _applyVolume();
+      _resumeAudioContext().then(function () { _applyVolume(); });
     });
   }
 }
@@ -1374,6 +1379,11 @@ function _switchChannel(channelId) {
 /* ── Viewer channel selector — populated from SNXTVTimeline.getChannels() ── */
 var _channelSelectorInited = false;
 
+/**
+ * Rebuild the viewer channel selector options and show/hide the channel bar.
+ * Safe to call repeatedly — rebuilds options every time, binds the change
+ * listener only once.
+ */
 function _initChannelSelector() {
   var bar = document.getElementById('snxTvChannelBar');
   var sel = _el.channelSelector;
@@ -1390,21 +1400,45 @@ function _initChannelSelector() {
   // Only show channel bar when there are 2+ channels
   if (bar) bar.style.display = (channels.length > 1) ? '' : 'none';
 
-  // Rebuild options
+  // Rebuild options every call so newly-created channels appear immediately
   sel.innerHTML = channels.map(function (ch) {
     return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
   }).join('');
   sel.value = _activeChannelId || 'default';
 
+  // Bind the change listener only once
   if (_channelSelectorInited) return;
   _channelSelectorInited = true;
 
   sel.addEventListener('change', function () {
     var id = sel.value === 'default' ? null : sel.value;
-    _resumeAudioContext();
-    _applyVolume();
+    _resumeAudioContext().then(function () { _applyVolume(); });
     _switchChannel(id);
   });
+}
+
+/**
+ * Re-render the viewer channel selector without re-binding events.
+ * Called by _onTimelineChange when the channel list changes (e.g. new channel created).
+ */
+function _refreshChannelSelector() {
+  var bar = document.getElementById('snxTvChannelBar');
+  var sel = _el.channelSelector;
+  if (!sel) return;
+
+  var channels = [];
+  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getChannels === 'function') {
+    channels = global.SNXTVTimeline.getChannels();
+  } else if (global.SNXTVStudio && typeof global.SNXTVStudio.getChannels === 'function') {
+    channels = global.SNXTVStudio.getChannels();
+  }
+
+  if (bar) bar.style.display = (channels.length > 1) ? '' : 'none';
+
+  sel.innerHTML = channels.map(function (ch) {
+    return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
+  }).join('');
+  sel.value = _activeChannelId || 'default';
 }
 
 /**
@@ -1498,6 +1532,9 @@ function _onTimelineChange(resolved) {
   } finally {
     _tlChanging = false;
   }
+  // Refresh the viewer channel selector whenever timeline data changes
+  // (covers the case where a new channel was just created in Studio).
+  if (_viewerReady) _refreshChannelSelector();
 }
 
 /**
@@ -2376,6 +2413,9 @@ global.SNXTV = {
 
   // Channel switch (called by viewer channel selector)
   switchChannel: _switchChannel,
+
+  // Channel selector refresh (called by Studio after channel created/deleted)
+  _refreshChannelSelector: _refreshChannelSelector,
 
   // Volume API (accessible from external UI if needed)
   setVolume: function (v) {

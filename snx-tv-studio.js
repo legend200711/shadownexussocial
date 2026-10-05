@@ -2800,7 +2800,7 @@ async function _openCreateChannelModal() {
   const db = _db();
   if (!db) return;
   try {
-    await addDoc(collection(db, COLL_TV_CHANNELS), {
+    const docRef = await addDoc(collection(db, COLL_TV_CHANNELS), {
       name:        name.trim(),
       description: desc.trim(),
       status:      'active',
@@ -2809,8 +2809,33 @@ async function _openCreateChannelModal() {
       createdAt:   serverTimestamp(),
       updatedAt:   serverTimestamp(),
     });
+
+    // Optimistically add to local cache so the panel and selectors update
+    // immediately — before the Firestore onSnapshot fires.
+    const newChannel = {
+      id:          docRef.id,
+      name:        name.trim(),
+      description: desc.trim(),
+      status:      'active',
+      artworkUrl:  '',
+      createdBy:   (_cu() || {}).uid || '',
+    };
+    if (!_tvChannels.find(c => c.id === docRef.id)) {
+      _tvChannels = _tvChannels.concat([newChannel]);
+    }
+
     _toast('✓ Channel created: ' + name.trim());
+
+    // Update the Studio header channel selector
+    _renderChannelSelectorInHeader();
+
+    // Update the Studio channels panel
     if (_activeTab === 'channels') _renderChannelsPanel();
+
+    // Notify the TV viewer to refresh its channel selector
+    if (global.SNXTV && typeof global.SNXTV._refreshChannelSelector === 'function') {
+      global.SNXTV._refreshChannelSelector();
+    }
   } catch (e) {
     _toast('Could not create channel: ' + e.message);
   }
