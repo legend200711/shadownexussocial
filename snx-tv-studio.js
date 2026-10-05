@@ -125,6 +125,18 @@ function _fmtDur(secs) {
   return m + ':' + (s < 10 ? '0' : '') + s;
 }
 
+/** Format seconds as H:MM:SS (for playlist/total duration display) */
+function _fmtDurHMS(secs) {
+  if (!secs || !isFinite(secs) || secs <= 0) return '0:00';
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  const mm = m < 10 ? '0' + m : '' + m;
+  const ss = s < 10 ? '0' + s : '' + s;
+  if (h > 0) return h + ':' + mm + ':' + ss;
+  return m + ':' + ss;
+}
+
 function _ts(ms) {
   if (!ms) return '—';
   const d = new Date(typeof ms === 'object' && ms.seconds ? ms.seconds * 1000 : ms);
@@ -387,13 +399,19 @@ function _renderMediaPanel() {
   const el = _container && _container.querySelector('#snxtvMediaPanel');
   if (!el) return;
 
+  // Count items missing duration for the repair button badge
+  const missingCount = _tvMedia.filter(m => !(m.duration > 0)).length;
+  const repairBadge  = missingCount > 0 ? ` (${missingCount} missing)` : ' ✓';
+
   el.innerHTML = `
 <div class="snxtv-section">
   <div class="snxtv-section-header">
     <span>TV Media Library</span>
     <button class="snxtv-btn snxtv-btn--primary" id="snxtvBtnAddFromSNS">+ Add from SNS Media</button>
     <button class="snxtv-btn snxtv-btn--ghost" id="snxtvBtnUploadNew">↑ Upload New</button>
+    <button class="snxtv-btn snxtv-btn--ghost" id="snxtvBtnRepairDurations" title="Load each item with missing duration and save the real duration">⏱ Repair Durations${_esc(repairBadge)}</button>
   </div>
+  <div id="snxtvRepairStatus" style="display:none;font-size:11px;color:rgba(0,212,255,0.8);padding:4px 0;"></div>
   <div id="snxtvMediaGrid" class="snxtv-media-grid"></div>
 </div>
 <div class="snxtv-section snxtv-section--hidden" id="snxtvSnsLibSection">
@@ -428,6 +446,9 @@ function _renderMediaPanel() {
   el.querySelector('#snxtvBtnUploadNew').addEventListener('click', () => _openUploadSection());
   el.querySelector('#snxtvBtnCloseSNS').addEventListener('click', () => _closeSnsLib());
   el.querySelector('#snxtvBtnCloseUpload').addEventListener('click', () => _closeUploadSection());
+
+  // Repair durations button
+  el.querySelector('#snxtvBtnRepairDurations').addEventListener('click', () => _repairMissingDurations());
 
   // SNS lib sub-tabs
   el.querySelectorAll('.snxtv-stab').forEach(btn => {
@@ -465,6 +486,90 @@ function _bindMediaCardEvents() {
   grid.querySelectorAll('.snxtv-btn-addtopl').forEach(btn => {
     btn.addEventListener('click', () => _promptAddToPlaylist(btn.dataset.id));
   });
+}
+
+/* ════════════════════════════════════════════════════════════
+   DURATION BACKFILL / REPAIR
+   For existing tv_media items that have duration=0 (or missing),
+   load them in a hidden HTMLMediaElement, read the real duration,
+   and save it back to Firestore.  Does NOT re-upload, delete, or
+   change the mediaUrl in any way.
+════════════════════════════════════════════════════════════ */
+
+/**
+ * Load a media URL into a hidden A/V element and return the real duration (s).
+ * @param {string} url
+ * @param {string} mediaType  'audio' | 'video'
+ * @returns {Promise<number>}
+ */
+function _detectUrlDuration(url, mediaType) {
+  return new Promise(function (resolve) {
+    if (!url) { resolve(0); return; }
+    const tag  = (mediaType === 'video') ? 'video' : 'audio';
+    const el   = document.createElement(tag);
+    el.preload = 'metadata';
+    el.style.cssText = 'position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
+    document.body.appendChild(el);
+    const cleanup = function () {
+      try { document.body.removeChild(el); } catch (_) {}
+      el.src = '';
+    };
+    el.onloadedmetadata = function () {
+      const dur = isFinite(el.duration) && el.duration > 0 ? Math.round(el.duration) : 0;
+      cleanup();
+      resolve(dur);
+    };
+    el.onerror = function () { cleanup(); resolve(0); };
+    // Safety timeout — CDN latency; give each item up to 15 s
+    setTimeout(function () { cleanup(); resolve(0); }, 15000);
+    el.src = url;
+  });
+}
+
+/**
+ * Scan all tv_media items with duration ≤ 0.
+ * For each, load the mediaUrl, detect real duration, write to Firestore.
+ * Shows live progress in the Media panel repair status bar.
+ */
+async function _repairMissingDurations() {
+  const missing = _tvMedia.filter(m => !(m.duration > 0) && m.mediaUrl);
+  if (!missing.length) {
+    _toast('✓ All TV media items already have duration metadata.');
+    return;
+  }
+
+  const { doc, updateDoc } = _fs();
+  const db = _db();
+  if (!db) { _toast('Firestore not ready.'); return; }
+
+  const statusEl = _container && _container.querySelector('#snxtvRepairStatus');
+  if (statusEl) statusEl.style.display = 'block';
+
+  const report = [];
+  for (let i = 0; i < missing.length; i++) {
+    const item = missing[i];
+    if (statusEl) {
+      statusEl.textContent = `⏱ Detecting duration for "${item.title || 'Untitled'}" (${i + 1}/${missing.length})…`;
+    }
+    const dur = await _detectUrlDuration(item.mediaUrl, item.mediaType || 'audio');
+    if (dur > 0) {
+      try {
+        await updateDoc(doc(db, COLL_TV_MEDIA, item.id), { duration: dur });
+        report.push(`✓ "${item.title || 'Untitled'}" → ${_fmtDur(dur)}`);
+      } catch (e) {
+        report.push(`✗ "${item.title || 'Untitled'}" — save failed: ${e.message}`);
+      }
+    } else {
+      report.push(`⚠ "${item.title || 'Untitled'}" — duration unavailable (media may not support metadata loading)`);
+    }
+  }
+
+  if (statusEl) {
+    statusEl.textContent = `✓ Duration repair complete. ${report.length} items processed.`;
+    setTimeout(() => { if (statusEl) statusEl.style.display = 'none'; }, 8000);
+  }
+  _toast(`✓ Duration repair done — ${missing.length} items checked.`);
+  console.log('[SNX-TV-STUDIO] Duration repair report:\n' + report.join('\n'));
 }
 
 /* ── SNS Library Browser ── */
@@ -835,6 +940,34 @@ function _bindUploadFormEvents(panelEl) {
   }
 }
 
+/**
+ * Detect the real duration (seconds) of a local audio/video File using
+ * HTMLMediaElement.loadedmetadata.  Returns 0 if detection fails or the
+ * file is not A/V media.
+ *
+ * @param {File} file
+ * @returns {Promise<number>}  duration in seconds (0 = unknown)
+ */
+function _detectFileDuration(file) {
+  return new Promise(function (resolve) {
+    const isAV = file.type.startsWith('audio/') || file.type.startsWith('video/');
+    if (!isAV) { resolve(0); return; }
+    const url = URL.createObjectURL(file);
+    const el  = document.createElement(file.type.startsWith('video/') ? 'video' : 'audio');
+    el.preload = 'metadata';
+    const cleanup = function () { URL.revokeObjectURL(url); el.src = ''; };
+    el.onloadedmetadata = function () {
+      const dur = isFinite(el.duration) && el.duration > 0 ? Math.round(el.duration) : 0;
+      cleanup();
+      resolve(dur);
+    };
+    el.onerror = function () { cleanup(); resolve(0); };
+    // Safety timeout — if metadata never fires, give up after 10 s
+    setTimeout(function () { cleanup(); resolve(0); }, 10000);
+    el.src = url;
+  });
+}
+
 async function _doUpload() {
   const fileInput    = _container && _container.querySelector('#snxtvUploadFile');
   const titleInput   = _container && _container.querySelector('#snxtvUploadTitle');
@@ -867,6 +1000,10 @@ async function _doUpload() {
   // R2 key in tv/{uid}/ namespace (allowed by upload-worker for both audio and video)
   const ext   = (file.name.split('.').pop() || (isVideo ? 'mp4' : 'mp3')).toLowerCase().replace(/[^a-z0-9]/g, '');
   const r2Key = `tv/${cu.uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+
+  // ── Detect real media duration before upload ──────────────────────────────
+  if (statusEl) statusEl.textContent = 'Reading media metadata…';
+  const detectedDuration = await _detectFileDuration(file);
 
   if (statusEl) statusEl.textContent = 'Uploading…';
   if (progressWrap) progressWrap.style.display = 'flex';
@@ -940,7 +1077,7 @@ async function _doUpload() {
                 r2Url:        resp.url,
                 thumbnailUrl: artworkUrl,
                 r2Key,
-                duration:     0,
+                duration:     detectedDuration,
                 visibility:   'public',
                 isPublic:     true,
                 uploadedAt:   serverTimestamp(),
@@ -959,7 +1096,7 @@ async function _doUpload() {
                 downloadURL: resp.url,
                 artUrl:      artworkUrl,
                 r2Key,
-                duration:    0,
+                duration:    detectedDuration,
                 visibility:  'public',
                 isPublic:    true,
                 uploadedAt:  serverTimestamp(),
@@ -982,7 +1119,7 @@ async function _doUpload() {
               mediaType,
               mediaUrl:         resp.url,
               artworkUrl,
-              duration:         0,
+              duration:         detectedDuration,
               sourceId:         firestoreId || r2Key,
               sourceCollection: isVideo ? COLL_VIDEOS : COLL_PROFILE_MUSIC,
               sourceType:       isVideo ? 'video' : 'music',
@@ -1130,6 +1267,21 @@ function _renderPlaylistEditor(el, plId) {
 
   const items = pl.items || [];
 
+  // ── Calculate playlist total duration ────────────────────────────────────
+  let plTotal = 0;
+  let plMissingDur = 0;
+  for (const item of items) {
+    const m = _tvMedia.find(x => x.id === item.mediaId);
+    if (!m || !m.mediaUrl) continue;
+    if (m.duration > 0) { plTotal += m.duration; }
+    else { plMissingDur++; }
+  }
+  const plDurLabel = items.length === 0
+    ? '—'
+    : (plMissingDur > 0
+        ? (_fmtDurHMS(plTotal) + ` <span class="snxtv-dur-warn" style="font-size:11px;">⚠ ${plMissingDur} item${plMissingDur > 1 ? 's' : ''} missing duration — use ⏱ Repair Durations in Media tab</span>`)
+        : _fmtDurHMS(plTotal));
+
   el.innerHTML = `
 <div class="snxtv-section">
   <div class="snxtv-section-header">
@@ -1137,6 +1289,10 @@ function _renderPlaylistEditor(el, plId) {
     <span id="snxtvPlEditorName" style="flex:1;margin:0 8px;font-weight:600;">${_esc(pl.name || 'Untitled')}</span>
     <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvBtnRenamePl">✏ Rename</button>
     <button class="snxtv-btn snxtv-btn--primary snxtv-btn--sm" id="snxtvBtnLoadThisPl">▶ Load to TV</button>
+  </div>
+  <div style="font-size:12px;color:rgba(255,255,255,0.6);padding:4px 0 8px 0;">
+    Playlist Duration: <strong style="color:#fff;">${plDurLabel}</strong>
+    &nbsp;·&nbsp; ${items.length} item${items.length !== 1 ? 's' : ''}
   </div>
 
   <div class="snxtv-pl-editor">
@@ -1189,12 +1345,16 @@ function _renderPlaylistEditorItems(items) {
     const title  = media ? (media.title || 'Untitled') : '(Unavailable)';
     const typeIcon = media ? (media.mediaType === 'video' ? '🎬' : '🎵') : '⚠';
     const unavailable = !media;
+    // Per-item duration display
+    const durStr = media
+      ? (media.duration > 0 ? _fmtDur(media.duration) : '<span style="color:rgba(255,120,80,0.9);" title="Duration unavailable — use ⏱ Repair Durations in Media tab">?:??</span>')
+      : '';
     return `
 <div class="snxtv-pl-item${unavailable ? ' snxtv-pl-item--unavailable' : ''}">
   <span class="snxtv-pl-item-num">${idx + 1}</span>
   <span class="snxtv-pl-item-type">${typeIcon}</span>
   <span class="snxtv-pl-item-title">${_esc(title)}</span>
-  ${unavailable ? '<span class="snxtv-badge-unavail">Unavailable</span>' : ''}
+  ${unavailable ? '<span class="snxtv-badge-unavail">Unavailable</span>' : `<span style="font-size:11px;color:rgba(255,255,255,0.5);margin-left:auto;margin-right:6px;">${durStr}</span>`}
   <div class="snxtv-pl-item-btns">
     <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--xs snxtv-pl-item-up" data-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>↑</button>
     <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--xs snxtv-pl-item-down" data-idx="${idx}" ${idx === items.length - 1 ? 'disabled' : ''}>↓</button>
@@ -1436,6 +1596,30 @@ function _renderProgramEditor(el, progId) {
     ? ('Playlist: ' + (_tvPlaylists.find(p => p.id === prog.sourceRef)?.name || prog.sourceRef))
     : ('Media: ' + (_tvMedia.find(m => m.id === prog.sourceRef)?.title || prog.sourceRef));
 
+  // ── For playlist sources, show playlist total duration as a dedicated row ──
+  let plDurRow = '';
+  if (prog.sourceType === 'playlist') {
+    const pl = _tvPlaylists.find(p => p.id === prog.sourceRef);
+    if (pl) {
+      let plTotal = 0, plMissing = 0, plCount = 0;
+      for (const item of (pl.items || [])) {
+        const m = _tvMedia.find(x => x.id === item.mediaId);
+        if (!m || !m.mediaUrl) continue;
+        plCount++;
+        if (m.duration > 0) plTotal += m.duration; else plMissing++;
+      }
+      const plDurDisplay = plMissing > 0
+        ? `${_fmtDurHMS(plTotal)} <span class="snxtv-dur-warn" style="font-size:11px;">⚠ ${plMissing} item${plMissing > 1 ? 's' : ''} missing duration — click ⏱ Repair Durations in Media tab to fix</span>`
+        : (plCount === 0 ? '—' : _fmtDurHMS(plTotal));
+      plDurRow = `<div class="snxtv-prog-detail-row"><span class="snxtv-prog-detail-label">Playlist Duration:</span>
+        <span>${plDurDisplay}</span>
+      </div>
+      <div class="snxtv-prog-detail-row" style="font-size:11px;color:rgba(255,255,255,0.45);">
+        <span>Playback: ${plCount} item${plCount !== 1 ? 's' : ''} will loop sequentially for the full scheduled program block duration.</span>
+      </div>`;
+    }
+  }
+
   el.innerHTML = `
 <div class="snxtv-section">
   <div class="snxtv-section-header">
@@ -1445,8 +1629,9 @@ function _renderProgramEditor(el, progId) {
   </div>
   <div class="snxtv-pl-editor">
     <div class="snxtv-prog-detail-row"><span class="snxtv-prog-detail-label">Source:</span> <span>${_esc(sourceLabel)}</span></div>
-    <div class="snxtv-prog-detail-row"><span class="snxtv-prog-detail-label">Duration:</span>
-      <span>${dur.hasUnknown ? '<span class="snxtv-dur-warn">⚠ Unknown duration — some items missing duration metadata. Cannot schedule accurately.</span>' : _fmtDur(dur.duration)}</span>
+    ${plDurRow}
+    <div class="snxtv-prog-detail-row"><span class="snxtv-prog-detail-label">Content Duration:</span>
+      <span>${dur.hasUnknown && dur.duration === 0 ? '<span class="snxtv-dur-warn">⚠ Unknown duration — some items missing duration metadata. Use ⏱ Repair Durations in Media tab to fix.</span>' : _fmtDurHMS(dur.duration)}</span>
     </div>
     <div class="snxtv-prog-detail-row"><span class="snxtv-prog-detail-label">Description:</span>
       <span>${_esc(prog.description || '—')}</span>
