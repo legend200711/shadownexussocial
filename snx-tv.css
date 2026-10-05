@@ -1425,3 +1425,100 @@
   .snxtv-prog-detail-row { font-size: 11px; }
   .snxtv-prog-detail-label { min-width: 70px; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   STAGE 6 — Volume Controls + Viewer Channel Selector + Studio Channel Row
+════════════════════════════════════════════════════════════ */
+
+/* ── Volume bar ── */
+.snx-tv-volume-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(0,0,0,0.25);
+  border-bottom: 1px solid rgba(0,212,255,0.1);
+}
+
+.snx-tv-mute-btn {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.snx-tv-mute-btn:hover { opacity: 1; }
+
+.snx-tv-volume-slider {
+  flex: 1;
+  max-width: 160px;
+  height: 4px;
+  cursor: pointer;
+  accent-color: #00d4ff;
+  background: rgba(255,255,255,0.15);
+  border-radius: 2px;
+  appearance: auto;
+  -webkit-appearance: auto;
+}
+
+/* ── Viewer Channel selector bar ── */
+.snx-tv-channel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(0,20,50,0.5);
+  border-bottom: 1px solid rgba(0,212,255,0.12);
+}
+.snx-tv-channel-bar-label {
+  font-size: 14px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.snx-tv-channel-sel {
+  flex: 1;
+  max-width: 260px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(0,212,255,0.25);
+  color: #e8f4ff;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.snx-tv-channel-sel:focus { outline: none; border-color: rgba(0,212,255,0.5); }
+.snx-tv-channel-sel option { background: #0a1a30; color: #e8f4ff; }
+
+/* ── Studio Channel selector row ── */
+.snxtv-channel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(0,20,50,0.6);
+  border-bottom: 1px solid rgba(0,212,255,0.12);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.snxtv-channel-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: rgba(0,212,255,0.6);
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.snxtv-channel-sel {
+  flex: 1;
+  min-width: 80px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e8f4ff;
+}

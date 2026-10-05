@@ -1819,5 +1819,13 @@ service cloud.firestore {
       allow write: if isFounderEmail();
     }
 
+    // ── tv_channels — channel registry ────────────────────────────────────
+    //   READ:  any signed-in user (for viewer channel selector)
+    //   WRITE: Founder only
+    match /tv_channels/{channelId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
   }
 }

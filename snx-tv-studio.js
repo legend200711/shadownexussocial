@@ -41,7 +41,7 @@
    CONSTANTS
 ════════════════════════════════════════════════════════════ */
 
-const STUDIO_VERSION        = 'SNS-2026-TV-STAGE5-002';
+const STUDIO_VERSION        = 'SNS-2026-TV-STAGE6-001';
 const R2_WORKER_URL         = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 const COLL_TV_MEDIA         = 'tv_media';
 const COLL_TV_PLAYLISTS     = 'tv_playlists';
@@ -49,6 +49,7 @@ const COLL_TV_PROGRAMS      = 'tv_programs';
 const COLL_TV_SCHEDULE      = 'tv_schedule';
 const COLL_TV_SUBMISSIONS   = 'tv_submissions';
 const COLL_TV_SETTINGS      = 'tv_settings';
+const COLL_TV_CHANNELS      = 'tv_channels';
 const COLL_PROFILE_MUSIC    = 'profileMusic';
 const COLL_VIDEOS           = 'videos';
 
@@ -61,16 +62,21 @@ let _container     = null;
 let _activeTab     = 'dashboard';
 
 // In-memory caches
-let _tvMedia         = [];   // tv_media docs
+let _tvMedia         = [];   // tv_media docs (shared library)
 let _tvPlaylists     = [];   // tv_playlists docs
 let _snsMusicLib     = [];   // profileMusic docs (SNS source)
 let _snsVideoLib     = [];   // videos docs (SNS source)
 let _tvSubmissions   = [];   // tv_submissions docs
-let _tvSettings      = {};   // tv_settings/channel doc
+let _tvSettings      = {};   // tv_settings doc for active channel
+let _tvChannels      = [];   // tv_channels docs
 
 // Stage 3: programs + schedule (mirrors SNXTVTimeline caches for studio use)
 let _tvPrograms    = [];   // tv_programs docs
 let _tvSchedule    = [];   // tv_schedule docs
+
+// Multi-channel: active channel context
+// null = default channel (backward compat)
+let _activeChannelId = null;
 
 // Live Firestore listeners
 let _unsubMedia       = null;
@@ -78,6 +84,7 @@ let _unsubPlaylists   = null;
 let _unsubPrograms    = null;
 let _unsubSchedule    = null;
 let _unsubSubmissions = null;
+let _unsubChannels    = null;
 
 // Active playlist being edited
 let _editingPlId    = null;
@@ -198,6 +205,7 @@ function unmount() {
   _tvPrograms = [];
   _tvSchedule = [];
   _tvSubmissions = [];
+  _tvChannels = [];
   _snsMusicLib = [];
   _snsVideoLib = [];
   _tvSettings = {};
@@ -205,6 +213,65 @@ function unmount() {
   _editingPlId  = null;
   _editingProgId = null;
   _editingSlotId = null;
+}
+
+/**
+ * Switch the Studio's active channel context.
+ * Called by snx-tv.js _switchChannel() so Studio operates on the right channel.
+ * @param {string|null} channelId
+ */
+function setChannel(channelId) {
+  const newId = channelId || null;
+  if (_activeChannelId === newId) return;
+  _activeChannelId = newId;
+  // Reload live listeners for the new channel
+  _teardownListeners();
+  if (_mounted) {
+    setTimeout(_startLiveListeners, 50);
+    // Re-render the channel selector in the header if visible
+    _renderChannelSelectorInHeader();
+  }
+}
+
+/**
+ * Get the currently active channel object, or a default channel stub.
+ */
+function _activeChannel() {
+  if (!_activeChannelId) {
+    return { id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV' };
+  }
+  return _tvChannels.find(c => c.id === _activeChannelId) ||
+    { id: _activeChannelId, name: 'Unknown Channel', description: '' };
+}
+
+/**
+ * Filter a docs array to only those belonging to the active channel.
+ * Backward compat: docs without channelId belong to 'default'.
+ */
+function _channelDocs(arr) {
+  const id = _activeChannelId || 'default';
+  return arr.filter(d => (d.channelId || 'default') === id);
+}
+
+/**
+ * Render the channel selector row in the Studio header (idempotent update).
+ */
+function _renderChannelSelectorInHeader() {
+  if (!_container) return;
+  const sel = _container.querySelector('#snxtvChannelSel');
+  if (!sel) return;
+  const ch = _activeChannel();
+  // Rebuild options
+  const channels = _buildChannelOptions();
+  sel.innerHTML = channels;
+  sel.value = _activeChannelId || 'default';
+}
+
+function _buildChannelOptions() {
+  const all = [{ id: 'default', name: 'Shadow Nexus TV' }, ..._tvChannels.filter(c => c.id !== 'default')];
+  return all.map(c =>
+    `<option value="${_esc(c.id)}">${_esc(c.name || c.id)}</option>`
+  ).join('');
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -222,6 +289,16 @@ function _buildDOM() {
     <button class="snxtv-studio-close" id="snxtvStudioClose" type="button" title="Close Studio">✕</button>
   </div>
 
+  <!-- ── CHANNEL SELECTOR ──────────────────────────────────── -->
+  <div class="snxtv-channel-row" id="snxtvChannelRow">
+    <span class="snxtv-channel-label">CHANNEL:</span>
+    <select class="snxtv-select snxtv-channel-sel" id="snxtvChannelSel" style="flex:1;min-width:0;max-width:200px;">
+      <option value="default">Shadow Nexus TV</option>
+    </select>
+    <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvBtnNewChannel" title="Create new channel">+ Channel</button>
+    <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvBtnEditChannel" title="Edit channel">✏</button>
+  </div>
+
   <!-- ── TAB NAV ───────────────────────────────────────────── -->
   <nav class="snxtv-studio-tabs" id="snxtvStudioTabs">
     <button class="snxtv-tab snxtv-tab--active" data-tab="dashboard">DASHBOARD</button>
@@ -230,6 +307,7 @@ function _buildDOM() {
     <button class="snxtv-tab" data-tab="playlists">PLAYLISTS</button>
     <button class="snxtv-tab" data-tab="programming">PROGRAMMING</button>
     <button class="snxtv-tab" data-tab="schedule">SCHEDULE</button>
+    <button class="snxtv-tab" data-tab="channels">CHANNELS</button>
     <button class="snxtv-tab" data-tab="settings">SETTINGS</button>
   </nav>
 
@@ -251,6 +329,9 @@ function _buildDOM() {
   </div>
   <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelSchedule">
     <div id="snxtvSchedulePanel"></div>
+  </div>
+  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelChannels">
+    <div id="snxtvChannelsPanel"></div>
   </div>
   <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelSettings">
     <div id="snxtvSettingsPanel"></div>
@@ -274,6 +355,32 @@ function _bindEvents() {
   tabs.forEach(btn => {
     btn.addEventListener('click', () => _switchTab(btn.dataset.tab));
   });
+
+  // Channel selector
+  const channelSel = _container.querySelector('#snxtvChannelSel');
+  if (channelSel) {
+    channelSel.addEventListener('change', () => {
+      const val = channelSel.value;
+      const id  = (val === 'default') ? null : val;
+      // Switch channel context in Studio
+      setChannel(id);
+      // Switch viewer + timeline to the same channel
+      if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
+        global.SNXTVTimeline.setChannel(id);
+      }
+      if (global.SNXTV && typeof global.SNXTV.switchChannel === 'function') {
+        global.SNXTV.switchChannel(id);
+      }
+    });
+  }
+
+  // New channel button
+  const newChanBtn = _container.querySelector('#snxtvBtnNewChannel');
+  if (newChanBtn) newChanBtn.addEventListener('click', _openCreateChannelModal);
+
+  // Edit channel button
+  const editChanBtn = _container.querySelector('#snxtvBtnEditChannel');
+  if (editChanBtn) editChanBtn.addEventListener('click', () => _openEditChannelModal(_activeChannelId));
 }
 
 function _switchTab(tab) {
@@ -294,6 +401,7 @@ function _switchTab(tab) {
   if (tab === 'playlists')   _renderPlaylistsPanel();
   if (tab === 'programming') _renderProgrammingPanel();
   if (tab === 'schedule')    _renderSchedulePanel();
+  if (tab === 'channels')    _renderChannelsPanel();
   if (tab === 'settings')    _renderSettingsPanel();
 }
 
@@ -302,7 +410,7 @@ function _switchTab(tab) {
 ════════════════════════════════════════════════════════════ */
 
 function _startLiveListeners() {
-  const { collection, onSnapshot, query, orderBy } = _fs();
+  const { collection, doc, onSnapshot, query, orderBy } = _fs();
   const db = _db();
   if (!db || !collection || !onSnapshot) {
     console.warn('[SNX-TV-STUDIO] Firestore not ready — retrying in 1s');
@@ -310,7 +418,7 @@ function _startLiveListeners() {
     return;
   }
 
-  // ── tv_media live listener ──
+  // ── tv_media live listener (shared library — not filtered by channel) ──
   try {
     const qMedia = query(collection(db, COLL_TV_MEDIA), orderBy('createdAt', 'desc'));
     _unsubMedia = onSnapshot(qMedia, snap => {
@@ -324,7 +432,7 @@ function _startLiveListeners() {
     console.warn('[SNX-TV-STUDIO] tv_media listener setup failed:', e.message);
   }
 
-  // ── tv_playlists live listener ──
+  // ── tv_playlists live listener (all channels; _channelDocs filters for active channel) ──
   try {
     const qPl = query(collection(db, COLL_TV_PLAYLISTS), orderBy('createdAt', 'asc'));
     _unsubPlaylists = onSnapshot(qPl, snap => {
@@ -338,7 +446,7 @@ function _startLiveListeners() {
     console.warn('[SNX-TV-STUDIO] tv_playlists listener setup failed:', e.message);
   }
 
-  // ── tv_programs live listener ──
+  // ── tv_programs live listener (all channels; _channelDocs filters for active channel) ──
   try {
     const qProg = query(collection(db, COLL_TV_PROGRAMS), orderBy('createdAt', 'asc'));
     _unsubPrograms = onSnapshot(qProg, snap => {
@@ -353,7 +461,7 @@ function _startLiveListeners() {
     console.warn('[SNX-TV-STUDIO] tv_programs listener setup failed:', e.message);
   }
 
-  // ── tv_schedule live listener ──
+  // ── tv_schedule live listener (all channels; _channelDocs filters for active channel) ──
   try {
     const qSched = query(collection(db, COLL_TV_SCHEDULE), orderBy('startTime', 'asc'));
     _unsubSchedule = onSnapshot(qSched, snap => {
@@ -380,6 +488,20 @@ function _startLiveListeners() {
   } catch (e) {
     console.warn('[SNX-TV-STUDIO] tv_submissions listener setup failed:', e.message);
   }
+
+  // ── tv_channels live listener ──
+  try {
+    _unsubChannels = onSnapshot(collection(db, COLL_TV_CHANNELS), snap => {
+      _tvChannels = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Update the channel selector options whenever channels change
+      _renderChannelSelectorInHeader();
+      if (_activeTab === 'channels') _renderChannelsPanel();
+    }, err => {
+      console.warn('[SNX-TV-STUDIO] tv_channels listener error:', err.message);
+    });
+  } catch (e) {
+    console.warn('[SNX-TV-STUDIO] tv_channels listener setup failed:', e.message);
+  }
 }
 
 function _teardownListeners() {
@@ -388,6 +510,7 @@ function _teardownListeners() {
   if (_unsubPrograms)    { try { _unsubPrograms(); }    catch(_){} _unsubPrograms    = null; }
   if (_unsubSchedule)    { try { _unsubSchedule(); }    catch(_){} _unsubSchedule    = null; }
   if (_unsubSubmissions) { try { _unsubSubmissions(); } catch(_){} _unsubSubmissions = null; }
+  if (_unsubChannels)    { try { _unsubChannels(); }    catch(_){} _unsubChannels    = null; }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1078,6 +1201,7 @@ async function _doUpload() {
                 thumbnailUrl: artworkUrl,
                 r2Key,
                 duration:     detectedDuration,
+                status:       'published',
                 visibility:   'public',
                 isPublic:     true,
                 uploadedAt:   serverTimestamp(),
@@ -1196,10 +1320,11 @@ function _renderPlaylistsPanel() {
 }
 
 function _renderPlaylistList() {
-  if (!_tvPlaylists.length) {
-    return '<div class="snxtv-empty">No playlists yet. Create one to get started.</div>';
+  const channelPlaylists = _channelDocs(_tvPlaylists);
+  if (!channelPlaylists.length) {
+    return '<div class="snxtv-empty">No playlists yet for this channel. Create one to get started.</div>';
   }
-  return _tvPlaylists.map(pl => {
+  return channelPlaylists.map(pl => {
     const itemCount = (pl.items || []).length;
     return `
 <div class="snxtv-pl-row" data-id="${_esc(pl.id)}">
@@ -1226,6 +1351,7 @@ async function _createPlaylist() {
     const docRef = await addDoc(collection(db, COLL_TV_PLAYLISTS), {
       name:      name.trim(),
       items:     [],
+      channelId: _activeChannelId || 'default',
       ownerId:   (_cu() || {}).uid || '',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -1509,6 +1635,7 @@ function getAdapterQueue() {
   if (_currentPlaylistQueue && _currentPlaylistQueue.length) {
     return _currentPlaylistQueue.slice();
   }
+  // Shared media library — no channel filter here (channel isolation is at schedule level)
   return _tvMedia
     .filter(m => m.mediaUrl)
     .map(m => ({
@@ -1565,10 +1692,11 @@ function _renderProgrammingPanel() {
 }
 
 function _renderProgramList() {
-  if (!_tvPrograms.length) {
-    return '<div class="snxtv-empty">No programs yet. Create one to get started.</div>';
+  const channelPrograms = _channelDocs(_tvPrograms);
+  if (!channelPrograms.length) {
+    return '<div class="snxtv-empty">No programs yet for this channel. Create one to get started.</div>';
   }
-  return _tvPrograms.map(prog => {
+  return channelPrograms.map(prog => {
     const dur = _calcStudioProgramDuration(prog);
     const src = prog.sourceType === 'playlist'
       ? ('PL: ' + (_tvPlaylists.find(p => p.id === prog.sourceRef)?.name || prog.sourceRef))
@@ -1718,6 +1846,7 @@ async function _createProgram() {
       description: '',
       sourceType:  firstMedia ? 'media' : '',
       sourceRef:   firstMedia ? firstMedia.id : '',
+      channelId:   _activeChannelId || 'default',
       ownerId:     (_cu() || {}).uid || '',
       createdAt:   serverTimestamp(),
       updatedAt:   serverTimestamp(),
@@ -1874,11 +2003,12 @@ function _slotEffectiveDuration(slot, prog) {
 }
 
 function _renderScheduleList(conflictEntryIds) {
-  if (!_tvSchedule.length) {
-    return '<div class="snxtv-empty">No schedule entries yet. Add one to begin programming.</div>';
+  const channelSchedule = _channelDocs(_tvSchedule);
+  if (!channelSchedule.length) {
+    return '<div class="snxtv-empty">No schedule entries yet for this channel. Add one to begin programming.</div>';
   }
 
-  const sorted = _tvSchedule.slice().sort((a, b) => _tsMs(a.startTime) - _tsMs(b.startTime));
+  const sorted = channelSchedule.slice().sort((a, b) => _tsMs(a.startTime) - _tsMs(b.startTime));
   const now = Date.now();
 
   return sorted.map(slot => {
@@ -1973,7 +2103,7 @@ function _renderSlotEditor(el, slotId) {
     <div>
       <label class="snxtv-form-label">Program</label>
       <select id="snxtvSlotProgSelect" class="snxtv-select">
-        ${_tvPrograms.map(p => `<option value="${_esc(p.id)}" ${p.id === slot.programId ? 'selected' : ''}>${_esc(p.name || 'Untitled')}</option>`).join('')}
+        ${_channelDocs(_tvPrograms).map(p => `<option value="${_esc(p.id)}" ${p.id === slot.programId ? 'selected' : ''}>${_esc(p.name || 'Untitled')}</option>`).join('')}
       </select>
     </div>
     <div>
@@ -2099,14 +2229,15 @@ function _renderSlotEditor(el, slotId) {
 }
 
 async function _addScheduleSlot() {
-  if (!_tvPrograms.length) {
-    _toast('Create a program first in the Programming tab.');
+  const channelPrograms = _channelDocs(_tvPrograms);
+  if (!channelPrograms.length) {
+    _toast('Create a program for this channel first in the Programming tab.');
     return;
   }
   const { addDoc, collection, serverTimestamp } = _fs();
   const db = _db();
   if (!db) return;
-  const firstProg = _tvPrograms[0];
+  const firstProg = channelPrograms[0];
   const startDate = new Date(Date.now() + 60 * 60 * 1000); // default: 1 hour from now
 
   try {
@@ -2115,6 +2246,7 @@ async function _addScheduleSlot() {
       startTime:         startDate.getTime(),
       scheduledDuration: 0,   // 0 = auto (derived from media durations)
       enabled:           true,
+      channelId:         _activeChannelId || 'default',
       ownerId:           (_cu() || {}).uid || '',
       createdAt:         serverTimestamp(),
       updatedAt:         serverTimestamp(),
@@ -2616,6 +2748,135 @@ async function submitContent(data) {
 }
 
 /* ════════════════════════════════════════════════════════════
+   CHANNELS PANEL — Create / Edit / Delete TV Channels
+════════════════════════════════════════════════════════════ */
+
+function _renderChannelsPanel() {
+  const el = _container && _container.querySelector('#snxtvChannelsPanel');
+  if (!el) return;
+
+  const channels = [
+    { id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV (Default)', status: 'active', _isDefault: true },
+    ..._tvChannels.filter(c => c.id !== 'default')
+  ];
+
+  el.innerHTML = `
+<div class="snxtv-section">
+  <div class="snxtv-section-header">
+    <span>TV Channels</span>
+    <button class="snxtv-btn snxtv-btn--primary snxtv-btn--sm" id="snxtvBtnNewChannel2">+ Create Channel</button>
+  </div>
+  <div style="padding:8px 12px;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.5;">
+    Each channel has its own playlists, programs, schedule, and now-playing state.
+    The shared media library is available to all channels.
+  </div>
+  <div id="snxtvChannelList">
+    ${channels.map(ch => `
+    <div class="snxtv-pl-row" style="${ch.id === (_activeChannelId || 'default') ? 'border-left:3px solid #00d4ff;' : ''}">
+      <div class="snxtv-pl-info">
+        <div class="snxtv-pl-name">${_esc(ch.name || ch.id)}</div>
+        <div class="snxtv-pl-meta">${_esc(ch.description || '')}${ch._isDefault ? ' · Default channel' : ''} · ${_esc(ch.status || 'active')}</div>
+      </div>
+      <div class="snxtv-pl-actions">
+        ${!ch._isDefault ? `
+        <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm snxtv-ch-edit" data-id="${_esc(ch.id)}">✏ Edit</button>
+        <button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-ch-delete" data-id="${_esc(ch.id)}">🗑</button>
+        ` : '<span style="font-size:10px;color:rgba(255,255,255,0.3);">Built-in</span>'}
+      </div>
+    </div>`).join('')}
+  </div>
+</div>`;
+
+  el.querySelector('#snxtvBtnNewChannel2') && el.querySelector('#snxtvBtnNewChannel2').addEventListener('click', _openCreateChannelModal);
+  el.querySelectorAll('.snxtv-ch-edit').forEach(btn => btn.addEventListener('click', () => _openEditChannelModal(btn.dataset.id)));
+  el.querySelectorAll('.snxtv-ch-delete').forEach(btn => btn.addEventListener('click', () => _deleteChannel(btn.dataset.id)));
+}
+
+async function _openCreateChannelModal() {
+  const name = prompt('Channel Name:');
+  if (!name || !name.trim()) return;
+  const desc = prompt('Description (optional):') || '';
+  const { addDoc, collection, serverTimestamp } = _fs();
+  const db = _db();
+  if (!db) return;
+  try {
+    await addDoc(collection(db, COLL_TV_CHANNELS), {
+      name:        name.trim(),
+      description: desc.trim(),
+      status:      'active',
+      artworkUrl:  '',
+      createdBy:   (_cu() || {}).uid || '',
+      createdAt:   serverTimestamp(),
+      updatedAt:   serverTimestamp(),
+    });
+    _toast('✓ Channel created: ' + name.trim());
+    if (_activeTab === 'channels') _renderChannelsPanel();
+  } catch (e) {
+    _toast('Could not create channel: ' + e.message);
+  }
+}
+
+async function _openEditChannelModal(channelId) {
+  if (!channelId || channelId === 'default') {
+    _toast('The default Shadow Nexus TV channel cannot be edited here.');
+    return;
+  }
+  const ch = _tvChannels.find(c => c.id === channelId);
+  if (!ch) { _toast('Channel not found.'); return; }
+
+  const newName = prompt('Channel Name:', ch.name || '');
+  if (newName === null) return; // cancelled
+  const newDesc = prompt('Description:', ch.description || '');
+  if (newDesc === null) return; // cancelled
+
+  const { doc, updateDoc, serverTimestamp } = _fs();
+  const db = _db();
+  if (!db) return;
+  try {
+    await updateDoc(doc(db, COLL_TV_CHANNELS, channelId), {
+      name:        newName.trim() || ch.name,
+      description: newDesc.trim(),
+      updatedAt:   serverTimestamp(),
+    });
+    _toast('✓ Channel updated.');
+    _renderChannelSelectorInHeader();
+    if (_activeTab === 'channels') _renderChannelsPanel();
+  } catch (e) {
+    _toast('Update failed: ' + e.message);
+  }
+}
+
+async function _deleteChannel(channelId) {
+  if (!channelId || channelId === 'default') {
+    _toast('The default channel cannot be deleted.');
+    return;
+  }
+  const ch = _tvChannels.find(c => c.id === channelId);
+  if (!confirm(`Delete channel "${ch ? ch.name : channelId}"?\n\nThis removes the channel definition only.\nShared media is NOT deleted.\nSchedule entries and programs for this channel will remain in Firestore but will no longer appear.`)) return;
+
+  const { doc, deleteDoc } = _fs();
+  const db = _db();
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, COLL_TV_CHANNELS, channelId));
+    _toast('Channel deleted.');
+    // If we were on this channel, switch to default
+    if (_activeChannelId === channelId) {
+      setChannel(null);
+      if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
+        global.SNXTVTimeline.setChannel(null);
+      }
+      if (global.SNXTV && typeof global.SNXTV.switchChannel === 'function') {
+        global.SNXTV.switchChannel(null);
+      }
+    }
+    if (_activeTab === 'channels') _renderChannelsPanel();
+  } catch (e) {
+    _toast('Delete failed: ' + e.message);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    PUBLIC API
 ════════════════════════════════════════════════════════════ */
 
@@ -2629,6 +2890,13 @@ const SNXTVStudio = {
   getSettings: () => Object.assign({}, _tvSettings),
   // Public submission API (any signed-in user)
   submitContent,
+  // Multi-channel API
+  setChannel,
+  getActiveChannelId: () => _activeChannelId || 'default',
+  getChannels: () => [
+    { id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV' },
+    ..._tvChannels.filter(c => c.id !== 'default')
+  ],
   // Stage 5: expose for debugging
   _getPrograms: () => _tvPrograms.slice(),
   _getSchedule: () => _tvSchedule.slice(),
@@ -2647,7 +2915,7 @@ const SNXTVStudio = {
   },
 
   version:   STUDIO_VERSION,
-  buildId:   'SNS-2026-TV-STAGE5-001'
+  buildId:   'SNS-2026-TV-STAGE6-001'
 };
 
 global.SNXTVStudio = SNXTVStudio;

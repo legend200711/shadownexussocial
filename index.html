@@ -68,7 +68,7 @@
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
 <!-- ── Shadow Nexus 24-Hour TV — Stage 5 ── -->
-<link rel="stylesheet" href="snx-tv.css?v=SNS-2026-TV-STAGE5-001">
+<link rel="stylesheet" href="snx-tv.css?v=SNS-2026-TV-STAGE6-001">
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
 <link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-STAGE2A-001">
 <!-- ── Shadow Nexus Radio — player + standalone page styles ──
@@ -11722,6 +11722,14 @@ body.arcade-fs-ios body::after { display:none !important; }
     </div>
   </div>
 
+  <!-- ── CHANNEL SELECTOR (Viewer) ── -->
+  <div class="snx-tv-channel-bar" id="snxTvChannelBar" style="display:none;">
+    <span class="snx-tv-channel-bar-label">📺</span>
+    <select class="snx-tv-channel-sel" id="snxTvChannelSelect" title="Switch Channel">
+      <option value="default">Shadow Nexus TV</option>
+    </select>
+  </div>
+
   <!-- ── MAIN PLAYER AREA ── -->
   <div class="snx-tv-player-wrap" id="snxTvPlayerWrap">
 
@@ -11772,16 +11780,22 @@ body.arcade-fs-ios body::after { display:none !important; }
       <div class="snx-tv-unavailable-msg" id="snxTvUnavailableMsg">Shadow Nexus TV is warming up…</div>
     </div>
 
-    <!-- Tap to watch overlay (autoplay blocked) -->
+    <!-- Tap to watch overlay (autoplay/sound activation) -->
     <div class="snx-tv-tap-overlay" id="snxTvTapOverlay">
-      <button class="snx-tv-tap-btn" id="snxTvTapBtn" type="button">▶ TAP TO WATCH</button>
-      <div class="snx-tv-tap-hint">Tap to begin playback</div>
+      <button class="snx-tv-tap-btn" id="snxTvTapBtn" type="button">▶ TAP TO WATCH WITH SOUND</button>
+      <div class="snx-tv-tap-hint">Browser requires a tap to enable audio</div>
     </div>
 
     <!-- Fullscreen button -->
     <button class="snx-tv-fullscreen-btn" id="snxTvFullscreenBtn" type="button" title="Fullscreen">⛶</button>
 
   </div><!-- end player wrap -->
+
+  <!-- ── VOLUME CONTROLS ── -->
+  <div class="snx-tv-volume-bar" id="snxTvVolumeBar">
+    <button class="snx-tv-mute-btn" id="snxTvMuteBtn" type="button" title="Mute/Unmute">🔊</button>
+    <input class="snx-tv-volume-slider" id="snxTvVolumeSlider" type="range" min="0" max="100" value="80" step="1" aria-label="Volume">
+  </div>
 
   <!-- ── NOW PLAYING ── -->
   <div class="snx-tv-now-playing">
@@ -25532,11 +25546,11 @@ function _supportStopCanvas() {
 <script src="nexus.js?v=SNS-2026-ALBUM-PRIVACY-001"></script>
 
 <!-- ── Shadow Nexus 24-Hour TV — Stage 5: TV Studio + Submissions + Dashboard + Settings ── -->
-<script src="snx-tv-studio.js?v=SNS-2026-TV-STAGE5-001"></script>
-<!-- ── Shadow Nexus 24-Hour TV — Stage 4: Authoritative Timeline Resolver (hardened) ── -->
-<script src="snx-tv-timeline.js?v=SNS-2026-TV-STAGE4-001"></script>
-<!-- ── Shadow Nexus 24-Hour TV — Stage 5: TV Core + Viewer + Submit Content ── -->
-<script src="snx-tv.js?v=SNS-2026-TV-STAGE5-001"></script>
+<script src="snx-tv-studio.js?v=SNS-2026-TV-STAGE6-002"></script>
+<!-- ── Shadow Nexus 24-Hour TV — Stage 6: Authoritative Timeline Resolver (hardened) ── -->
+<script src="snx-tv-timeline.js?v=SNS-2026-TV-STAGE6-002"></script>
+<!-- ── Shadow Nexus 24-Hour TV — Stage 6: TV Core + Viewer + Audio Fix ── -->
+<script src="snx-tv.js?v=SNS-2026-TV-STAGE6-002"></script>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════

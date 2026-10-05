@@ -1,8 +1,8 @@
 /**
  * snx-tv.js
  * Shadow Nexus Social — 24-Hour TV
- * Stage 4: Reliability + Recovery + Mobile/PWA Hardening
- * Build: SNS-2026-TV-STAGE4-001
+ * Stage 6: Audio Fix + Multi-Channel Support
+ * Build: SNS-2026-TV-STAGE6-001
  *
  * ════════════════════════════════════════════════════════════════════════
  *  SHADOW NEXUS SOCIAL 24-HOUR TV IS SNS-NATIVE.
@@ -292,6 +292,10 @@ function onPlaybackStarted() {
   _mediaErrorCount = 0;
   _recovering = false;
   _setState({ status: 'playing', onAir: true, needsUserGesture: false });
+  // Re-apply volume on every track start (preserves volume through track/channel changes).
+  // Also resume AudioContext in case a gesture happened and it hadn't been resumed yet.
+  _resumeAudioContext();
+  _applyVolume();
 }
 
 /**
@@ -633,7 +637,67 @@ var _el = {
   guideList:          null,
   guideToggle:        null,
   guideContent:       null,
+  // Volume controls
+  muteBtn:            null,
+  volumeSlider:       null,
+  channelSelector:    null,
 };
+
+/* ── Volume state (persisted in sessionStorage) ── */
+var _volume      = 0.8;   // 0–1; default 80%
+var _muted       = false;
+var _volumeInited = false;
+
+function _loadVolumePrefs() {
+  if (_volumeInited) return;
+  _volumeInited = true;
+  try {
+    var sv = sessionStorage.getItem('snxTvVolume');
+    var sm = sessionStorage.getItem('snxTvMuted');
+    if (sv !== null) _volume = Math.max(0, Math.min(1, parseFloat(sv) || 0.8));
+    if (sm !== null) _muted  = sm === '1';
+  } catch (e) {}
+}
+
+function _saveVolumePrefs() {
+  try {
+    sessionStorage.setItem('snxTvVolume', String(_volume));
+    sessionStorage.setItem('snxTvMuted',  _muted ? '1' : '0');
+  } catch (e) {}
+}
+
+function _applyVolume() {
+  var v = _el.video;
+  if (!v) return;
+  // Set the element volume only when the Web Audio graph is NOT connected.
+  // Once createMediaElementSource() is called, v.volume has no effect on
+  // audible output — the gainNode controls it exclusively.
+  var webAudioActive = !!(_snxViz._gainNode);
+  if (!webAudioActive) {
+    v.volume = _muted ? 0 : _volume;
+  }
+  v.muted  = false;  // Never use the element's muted property
+  if (_el.muteBtn)      _el.muteBtn.textContent  = _muted ? '🔇' : '🔊';
+  if (_el.volumeSlider) _el.volumeSlider.value    = String(Math.round((_muted ? 0 : _volume) * 100));
+  // Sync Web Audio gainNode
+  if (_snxViz._gainNode) {
+    _snxViz._gainNode.gain.value = _muted ? 0 : _volume;
+  }
+  // Always try to resume a suspended AudioContext when applying volume
+  // (volume interactions are user gestures that unblock autoplay).
+  _resumeAudioContext();
+}
+
+/**
+ * Resume the Web Audio context after a user gesture.
+ * MUST be called from any user-initiated event handler.
+ */
+function _resumeAudioContext() {
+  var ctx = _snxViz._audioCtx;
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(function () {});
+  }
+}
 
 var _viewerReady = false;
 var _mediaLoaded = false;  // last media URL loaded into the element (adapter mode)
@@ -674,16 +738,26 @@ function _initViewer() {
   _el.guideList         = document.getElementById('snxTvGuideList');
   _el.guideToggle       = document.getElementById('snxTvGuideToggle');
   _el.guideContent      = document.getElementById('snxTvGuideContent');
+  _el.muteBtn           = document.getElementById('snxTvMuteBtn');
+  _el.volumeSlider      = document.getElementById('snxTvVolumeSlider');
+  _el.channelSelector   = document.getElementById('snxTvChannelSelect');
 
   if (!_el.video) {
     console.warn('[SNX TV] Viewer elements not found — is #tvPage in the DOM?');
     return;
   }
 
+  // Load persisted volume preferences before attaching listeners
+  _loadVolumePrefs();
+
   _attachMediaListeners();
   _attachTapOverlay();
+  _attachVolumeControls();
   _attachFullscreen();
   _attachGuideToggle();
+
+  // Apply initial volume to the element
+  _applyVolume();
 
   // Subscribe the viewer to TV Core state
   subscribe(_renderState);
@@ -776,6 +850,14 @@ function _attachTapOverlay() {
   if (!btn) return;
   btn.addEventListener('click', function () {
     _hideTapOverlay();
+    // ── AUDIO FIX: Resume AudioContext on user gesture ──────────────────
+    // Browsers suspend AudioContext until a user gesture. createMediaElementSource()
+    // re-routes all audio through the graph, so a suspended context = total silence.
+    // This must happen BEFORE v.play() — order matters.
+    _resumeAudioContext();
+    _applyVolume();
+    // ────────────────────────────────────────────────────────────────────
+
     var v = _el.video;
     if (!v) return;
 
@@ -815,6 +897,33 @@ function _attachTapOverlay() {
       onMediaError('Playback could not start');
     });
   });
+}
+
+/* ── Volume controls ── */
+
+function _attachVolumeControls() {
+  var muteBtn = _el.muteBtn;
+  var slider  = _el.volumeSlider;
+
+  if (muteBtn) {
+    muteBtn.addEventListener('click', function () {
+      _resumeAudioContext();
+      _muted = !_muted;
+      _saveVolumePrefs();
+      _applyVolume();
+    });
+  }
+
+  if (slider) {
+    slider.addEventListener('input', function () {
+      _resumeAudioContext();
+      var val = parseInt(slider.value, 10) || 0;
+      _volume = val / 100;
+      _muted  = (val === 0);
+      _saveVolumePrefs();
+      _applyVolume();
+    });
+  }
 }
 
 function _attachFullscreen() {
@@ -881,6 +990,11 @@ function _renderPlayer(state) {
   if (!v) return;
 
   var item = state.current;
+
+  // ── Ensure Web Audio graph is built for this video element ──────────────
+  // Build it early — before the first play — so audio never has a frame
+  // where it bypasses the graph.  Safe to call on every render; idempotent.
+  _snxViz.ensureGraph(v);
 
   // ── Load media into element if URL changed (adapter/playlist mode only) ──
   // In scheduled mode, loadItemAt() handles the load+seek.
@@ -1194,6 +1308,105 @@ function _fmtGuideTime(ms) {
 
 var _opened = false;
 
+/* ── Multi-channel support ── */
+
+/** Currently active channel ID. null = default (all existing single-channel data) */
+var _activeChannelId = null;
+
+/**
+ * Switch to a different TV channel.
+ * Resolves the channel's timeline from the correct offset so viewers join mid-program.
+ * @param {string} channelId
+ */
+function _switchChannel(channelId) {
+  if (_activeChannelId === channelId) return; // already on this channel
+  _activeChannelId = channelId;
+
+  // Stop current playback cleanly
+  var v = _el.video;
+  if (v && !v.paused) v.pause();
+
+  // Reset per-channel viewer state
+  _scheduleMode  = false;
+  _tlMediaLoaded = null;
+  _mediaLoaded   = null;
+  _playlistQueue = null;
+  _queueIndex    = 0;
+  _opened        = false;
+  _lastResolvedState = null;
+
+  _setState({
+    status:        'loading',
+    current:       null,
+    next:          null,
+    onAir:         false,
+    elapsed:       0,
+    duration:      0,
+    isScheduled:   false,
+    isGap:         false,
+    gapLabel:      '',
+    program:       null,
+    scheduleEntry: null,
+    error:         null,
+    needsUserGesture: false
+  });
+
+  // Tell SNXTVTimeline to reload for the new channel
+  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
+    global.SNXTVTimeline.setChannel(channelId);
+  }
+
+  // Tell SNXTVStudio to switch its channel context
+  if (global.SNXTVStudio && typeof global.SNXTVStudio.setChannel === 'function') {
+    global.SNXTVStudio.setChannel(channelId);
+  }
+
+  // Re-apply volume (channel switch must not mute audio)
+  _resumeAudioContext();
+  _applyVolume();
+
+  // Restart the timeline mode so it resolves the new channel
+  _unsubTimeline && (function() { try { _unsubTimeline(); } catch(_){} _unsubTimeline = null; })();
+  _startTimelineMode();
+  _opened = true;
+}
+
+/* ── Viewer channel selector — populated from SNXTVTimeline.getChannels() ── */
+var _channelSelectorInited = false;
+
+function _initChannelSelector() {
+  var bar = document.getElementById('snxTvChannelBar');
+  var sel = _el.channelSelector;
+  if (!sel) return;
+
+  // Get channel list from SNXTVTimeline or SNXTVStudio
+  var channels = [];
+  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getChannels === 'function') {
+    channels = global.SNXTVTimeline.getChannels();
+  } else if (global.SNXTVStudio && typeof global.SNXTVStudio.getChannels === 'function') {
+    channels = global.SNXTVStudio.getChannels();
+  }
+
+  // Only show channel bar when there are 2+ channels
+  if (bar) bar.style.display = (channels.length > 1) ? '' : 'none';
+
+  // Rebuild options
+  sel.innerHTML = channels.map(function (ch) {
+    return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
+  }).join('');
+  sel.value = _activeChannelId || 'default';
+
+  if (_channelSelectorInited) return;
+  _channelSelectorInited = true;
+
+  sel.addEventListener('change', function () {
+    var id = sel.value === 'default' ? null : sel.value;
+    _resumeAudioContext();
+    _applyVolume();
+    _switchChannel(id);
+  });
+}
+
 /**
  * Called when the TV page becomes active.
  */
@@ -1205,6 +1418,9 @@ function pageOpen() {
 
   // Show Submit Content button for any signed-in user
   _initSubmitArea();
+
+  // Populate the viewer channel selector
+  _initChannelSelector();
 
   // Start timeline listener and try scheduled mode
   _startTimelineMode();
@@ -1784,6 +2000,15 @@ global.addEventListener('snxAuthSignOut', function () {
    Canvas-based audio visualizer for audio-only TV content.
    Connects to the existing <video> element via Web Audio API.
    No second audio playback engine — we only analyse, not play.
+
+   ── AUDIO ARCHITECTURE (PERMANENT GRAPH) ────────────────────
+   createMediaElementSource() permanently captures the <video>
+   element.  Once called, ALL audio MUST flow through the graph.
+   The graph is NEVER torn down — only the canvas drawing stops.
+   Graph: srcNode → analyser → gainNode → audioCtx.destination
+   This ensures audio plays whether or not the canvas is shown.
+   AudioContext starts SUSPENDED; resume() is called from every
+   user-gesture handler (tap button, mute, volume slider, play).
 ════════════════════════════════════════════════════════════ */
 
 var _snxViz = (function () {
@@ -1792,10 +2017,11 @@ var _snxViz = (function () {
   var _ctx       = null;
   var _raf       = null;
   var _analyser  = null;
-  var _srcNode   = null;
+  var _srcNode   = null;   // NEVER disconnected once created
   var _audioCtx  = null;
-  var _connected = false;
-  var _active    = false;
+  var _gainNode  = null;   // master gain for volume control
+  var _connected = false;  // true once the permanent graph is built
+  var _active    = false;  // true while canvas animation is running
   var _lastVideo = null;
 
   // Particle field
@@ -1820,48 +2046,64 @@ var _snxViz = (function () {
     }
   }
 
+  /**
+   * Build the permanent Web Audio graph for the given video element.
+   * Safe to call multiple times — idempotent once connected.
+   * The graph is NEVER disconnected after creation.
+   */
   function _connectAnalyser(videoEl) {
+    // Already connected to this element — nothing to do.
     if (_connected && _lastVideo === videoEl) return;
-    _disconnectAnalyser();
+
+    // If we already have a permanent graph but _lastVideo differs, this is a
+    // second <video> element (should never happen — there is only one — but guard
+    // defensively: keep the old graph rather than destroying it).
+    if (_connected) return;
+
     _lastVideo = videoEl;
     if (!videoEl) return;
+
     try {
       if (!_audioCtx) {
         var AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
         _audioCtx = new AudioCtx();
+        // AudioContext starts SUSPENDED — resume() is called from user-gesture
+        // handlers (_resumeAudioContext).  Do NOT try to resume here.
       }
-      if (_audioCtx.state === 'suspended') {
-        _audioCtx.resume().catch(function(){});
-      }
+
+      // Build the permanent graph: source → analyser → gain → destination.
+      // After createMediaElementSource the element's native audio output is
+      // silenced; ALL sound must travel through this graph.
       _srcNode  = _audioCtx.createMediaElementSource(videoEl);
       _analyser = _audioCtx.createAnalyser();
       _analyser.fftSize = 256;
       _analyser.smoothingTimeConstant = 0.82;
-      // Signal path: source → analyser → destination (speakers remain active)
+      _gainNode = _audioCtx.createGain();
+
       _srcNode.connect(_analyser);
-      _analyser.connect(_audioCtx.destination);
-      _freqData = new Uint8Array(_analyser.frequencyBinCount);
-      _timeData = new Uint8Array(_analyser.frequencyBinCount);
+      _analyser.connect(_gainNode);
+      _gainNode.connect(_audioCtx.destination);
+
+      _freqData  = new Uint8Array(_analyser.frequencyBinCount);
+      _timeData  = new Uint8Array(_analyser.frequencyBinCount);
       _connected = true;
+
+      console.log('[SNX-VIZ] Web Audio graph built. AudioContext state:', _audioCtx.state);
     } catch (e) {
-      // Element already captured by another AudioContext or browser restriction
-      console.info('[SNX-VIZ] Web Audio connect skipped (non-fatal):', e.message);
-      _connected = false;
-      _analyser  = null;
-      _srcNode   = null;
+      // Browser restriction or element already captured — leave _connected false.
+      // Audio will fall back to the element's native output (v.volume still works).
+      console.info('[SNX-VIZ] Web Audio graph not available (non-fatal):', e.message);
+      _srcNode  = null;
+      _analyser = null;
+      _gainNode = null;
     }
   }
 
+  /** @deprecated — kept for safety; the permanent graph is never torn down. */
   function _disconnectAnalyser() {
-    try {
-      if (_srcNode)  { _srcNode.disconnect();  _srcNode  = null; }
-      if (_analyser) { _analyser.disconnect(); _analyser = null; }
-    } catch(e) {}
-    _connected = false;
-    _lastVideo = null;
-    _freqData  = null;
-    _timeData  = null;
+    // No-op: disconnecting srcNode destroys the audio path permanently.
+    // The graph stays connected for the lifetime of the page.
   }
 
   function _bandEnergy(data, lo, hi) {
@@ -2006,13 +2248,23 @@ var _snxViz = (function () {
     }
   }
 
+  /**
+   * Ensure the Web Audio graph is built for the given element.
+   * Called for ALL media items (not just visualizer mode) so the graph
+   * is established before the first track and never needs to be rebuilt.
+   * Safe to call repeatedly — idempotent.
+   */
+  function ensureGraph(videoEl) {
+    if (!_connected && videoEl) _connectAnalyser(videoEl);
+  }
+
   function start(videoEl) {
     _canvas = document.getElementById('snxTvVisualizer');
     if (!_canvas) return;
     _ctx = _canvas.getContext('2d');
     if (!_ctx) return;
     _resizeCanvas();
-    _connectAnalyser(videoEl);
+    if (!_connected && videoEl) _connectAnalyser(videoEl);
     if (!_active) {
       _active = true;
       _raf = requestAnimationFrame(_draw);
@@ -2025,19 +2277,32 @@ var _snxViz = (function () {
     if (_canvas && _ctx) {
       _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
     }
-    // Keep analyser connected — audio still plays; we just stop drawing
+    // IMPORTANT: graph stays connected — audio still flows through gainNode.
+    // Only the canvas animation is stopped here.
   }
 
   function destroy() {
+    // destroy() is only called on sign-out. The AudioContext can be closed
+    // because the entire TV will be re-initialized on next sign-in.
     stop();
-    _disconnectAnalyser();
     if (_audioCtx) {
       try { _audioCtx.close(); } catch(e) {}
       _audioCtx = null;
     }
+    _srcNode   = null;
+    _analyser  = null;
+    _gainNode  = null;
+    _connected = false;
+    _lastVideo = null;
+    _freqData  = null;
+    _timeData  = null;
   }
 
-  return { start: start, stop: stop, destroy: destroy };
+  // Expose audioCtx, gainNode, and ensureGraph so external code can reach them.
+  return { start: start, stop: stop, destroy: destroy, ensureGraph: ensureGraph,
+    get _audioCtx() { return _audioCtx; },
+    get _gainNode()  { return _gainNode;  }
+  };
 })();
 
 /* ════════════════════════════════════════════════════════════
@@ -2109,8 +2374,19 @@ global.SNXTV = {
   // Timeline resync hook (called by SNXTVTimeline)
   _timelineResync: _timelineResync,
 
+  // Channel switch (called by viewer channel selector)
+  switchChannel: _switchChannel,
+
+  // Volume API (accessible from external UI if needed)
+  setVolume: function (v) {
+    _volume = Math.max(0, Math.min(1, v));
+    _muted  = (_volume === 0);
+    _saveVolumePrefs();
+    _applyVolume();
+  },
+
   // Version
-  version: 'SNS-2026-TV-STAGE4-001'
+  version: 'SNS-2026-TV-STAGE6-001'
 };
 
 })(window);

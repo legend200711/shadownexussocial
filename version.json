@@ -1,7 +1,7 @@
 {
-  "buildId": "SNS-2026-TV-STAGE5-001",
+  "buildId": "SNS-2026-TV-STAGE6-002",
   "swVersion": "v102",
-  "deployedAt": "2026-10-25T00:00:00Z",
+  "deployedAt": "2026-10-26T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
@@ -36,9 +36,9 @@
   "shadowAIAdaptiveLearningFinalVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
   "shadowAIUnifiedRCVersion": "SR-2026-UNIFIED-AI-RC-001",
   "shadowAIUnifiedBridgeBuild": "SR-2026-STAGE2-BRIDGE-001",
-  "tvVersion": "SNS-2026-TV-STAGE5-001",
-  "tvStudioVersion": "SNS-2026-TV-STAGE4-001",
-  "tvTimelineVersion": "SNS-2026-TV-STAGE4-001",
-  "tvCssVersion": "SNS-2026-TV-STAGE2-001",
-  "note": "SNS-2026-TV-STAGE5-001: Shadow Nexus Social 24-Hour TV — Stage 5 production deployment. New files: snx-tv.js (Stage4 reliability+recovery+mobile hardening), snx-tv-timeline.js (authoritative resolver), snx-tv-studio.js (Founder media/playlist/program/schedule management), snx-tv.css (TV UI styles). Architecture: SNS-native R2 media via Firestore tv_media → tv_playlists → tv_programs → tv_schedule. Join-in-progress seek. Offline/online recovery. Tab-sleep resync. No Supabase, no new KV, no new service accounts. SW: v102. snx-media-controller.js: Feed video controller updated. Firestore rules: TV collections (tv_media, tv_playlists, tv_programs, tv_schedule) with isFounderEmail() write guard. All existing SNS systems (Radio, Live, Feed, Profiles, DMs, Shadow Reaper AI, WebRTC) preserved unchanged. PRIOR BUILD: SR-2026-UNIFIED-AI-RC-001 (Shadow Reaper Unified AI)."
+  "tvVersion": "SNS-2026-TV-STAGE6-002",
+  "tvStudioVersion": "SNS-2026-TV-STAGE6-002",
+  "tvTimelineVersion": "SNS-2026-TV-STAGE6-002",
+  "tvCssVersion": "SNS-2026-TV-STAGE6-001",
+  "note": "SNS-2026-TV-STAGE6-002: Complete 24-hour TV upgrades and multi-channel support. Audio fix: permanent Web Audio graph (createMediaElementSource never re-disconnected). Multi-channel: tv_channels collection, channel selector in viewer and studio, per-channel schedule isolation. Video/audio upload with artwork. Duration detection. Sequential playlist advancement. Custom program block duration. Content submissions. TV Guide from live schedule. Mid-program join-in-progress. Mobile/PWA. Firestore rules: tv_channels added. PRIOR BUILD: SNS-2026-TV-STAGE5-001."
 }

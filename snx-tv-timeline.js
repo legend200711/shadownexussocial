@@ -35,12 +35,13 @@
    CONSTANTS
 ════════════════════════════════════════════════════════════ */
 
-const VERSION           = 'SNS-2026-TV-STAGE5-001';
+const VERSION           = 'SNS-2026-TV-STAGE6-001';
 const COLL_SCHEDULE     = 'tv_schedule';
 const COLL_PROGRAMS     = 'tv_programs';
 const COLL_PLAYLISTS    = 'tv_playlists';
 const COLL_MEDIA        = 'tv_media';
 const COLL_TV_SETTINGS  = 'tv_settings';
+const COLL_TV_CHANNELS  = 'tv_channels';
 
 /** Tolerance (seconds) before we seek to correct drift */
 const DRIFT_TOLERANCE   = 8;
@@ -53,14 +54,18 @@ const GAP_LABEL         = 'Programming Resumes Soon';
    STATE
 ════════════════════════════════════════════════════════════ */
 
-/** Live schedule array  — [{id, programId, startTime(ms), enabled, ...}] */
+/** Live schedule array  — [{id, programId, startTime(ms), enabled, channelId, ...}] */
 let _schedule   = [];
-/** Live programs cache  — {programId: {id, name, sourceType, sourceRef, duration, ...}} */
+/** Live programs cache  — {programId: {id, name, sourceType, sourceRef, duration, channelId, ...}} */
 let _programs   = {};
-/** Live playlists cache — {plId: {id, name, items:[{mediaId}], ...}} */
+/** Live playlists cache — {plId: {id, name, items:[{mediaId}], channelId, ...}} */
 let _playlists  = {};
-/** Live tv_media cache  — {mediaId: {id, title, mediaType, mediaUrl, artworkUrl, duration}} */
+/** Live tv_media cache  — {mediaId: {id, title, mediaType, mediaUrl, artworkUrl, duration}}
+ *  NOTE: tv_media is a SHARED library — not channel-specific.
+ */
 let _media      = {};
+/** Live channels cache — {channelId: {id, name, description, artworkUrl, status, ...}} */
+let _channels   = {};
 
 /** Firestore unsub handles */
 let _unsubSchedule  = null;
@@ -68,9 +73,21 @@ let _unsubPrograms  = null;
 let _unsubPlaylists = null;
 let _unsubMedia     = null;
 let _unsubSettings  = null;
+let _unsubChannels  = null;
 
-/** Channel settings cache — { fallbackMode, fallbackPlaylistId, ... } */
+/** Channel settings cache — keyed by channelId: { fallbackMode, fallbackPlaylistId, ... }
+ *  For the default (legacy) channel, key is 'default'.
+ */
+let _settingsMap    = {};
+/** Active channel settings (alias for the current channel) */
 let _settings       = {};
+
+/**
+ * The currently active channel ID.
+ * null = default channel (all docs without channelId field = backward compat).
+ * 'default' = same as null (the original single-channel setup).
+ */
+let _activeChannelId = null;
 
 /** Resync interval handle */
 let _resyncTimer    = null;
@@ -91,6 +108,57 @@ let _lastResolved   = null;
 function _fs() { return global._snxFirestore || {}; }
 function _db() { const f = _fs(); return f.db || global._snxDb || null; }
 function _isFounder() { return (global._snxRole || '') === 'founder'; }
+
+/* ════════════════════════════════════════════════════════════
+   CHANNEL HELPERS
+════════════════════════════════════════════════════════════ */
+
+/**
+ * Returns true if a Firestore doc belongs to the active channel.
+ * Backward compatibility: docs without channelId belong to the default channel.
+ * @param {Object} doc  — must have optional .channelId field
+ */
+function _belongsToActiveChannel(doc) {
+  const id = _activeChannelId || 'default';
+  const docChannel = doc.channelId || 'default';
+  return docChannel === id;
+}
+
+/**
+ * Switch the active channel.  Tears down listeners and restarts them for the new channel.
+ * @param {string|null} channelId  — null / 'default' = original single-channel
+ */
+function setChannel(channelId) {
+  const newId = channelId || 'default';
+  if ((_activeChannelId || 'default') === newId) return;
+  _activeChannelId = newId === 'default' ? null : newId;
+
+  // Update the active settings from the settings map
+  _settings = _settingsMap[_activeChannelId || 'default'] || {};
+
+  // Restart listeners to pick up the new channel's filtered data
+  stopListening();
+  startListening();
+
+  // Notify subscribers so the viewer re-resolves the new channel
+  _notifySubscribers();
+  console.log('[SNXTV-TL] Channel switched to:', _activeChannelId || 'default');
+}
+
+/**
+ * Return all available channels (from tv_channels collection).
+ * Always includes a virtual "default" channel representing the original SNS TV.
+ * @returns {Array}
+ */
+function getChannels() {
+  const list = Object.values(_channels);
+  // Always ensure the default channel appears first
+  const hasDefault = list.some(c => c.id === 'default');
+  const defaultChannel = {
+    id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV', artworkUrl: '', status: 'active'
+  };
+  return hasDefault ? list : [defaultChannel, ...list];
+}
 
 /* ════════════════════════════════════════════════════════════
    FIRESTORE TIMESTAMP → ms
@@ -196,6 +264,8 @@ function _activeSchedule() {
   const out = [];
   for (const entry of _schedule) {
     if (entry.enabled === false) continue;
+    // ── Channel isolation: only include entries belonging to the active channel ──
+    if (!_belongsToActiveChannel(entry)) continue;
     const prog = _programs[entry.programId];
     if (!prog) continue;
     const startMs = _tsToMs(entry.startTime);
@@ -600,19 +670,18 @@ function startListening() {
   }
   _listening = true;
 
-  // ── tv_schedule ──
+  // ── tv_schedule — all channels loaded; _activeSchedule() filters by channel ──
   try {
     const q = query(collection(db, COLL_SCHEDULE), orderBy('startTime', 'asc'));
     _unsubSchedule = onSnapshot(q, snap => {
       _schedule = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _notifySubscribers();
     }, e => {
-      // Keep last valid _schedule on transient Firestore error (auto-retry by SDK)
       console.warn('[SNXTV-TL] schedule listener error (auto-retry):', e.message);
     });
   } catch (e) { console.warn('[SNXTV-TL] schedule setup:', e.message); }
 
-  // ── tv_programs ──
+  // ── tv_programs — all channels loaded; _activeSchedule() resolves correct programs ──
   try {
     _unsubPrograms = onSnapshot(collection(db, COLL_PROGRAMS), snap => {
       _programs = {};
@@ -623,7 +692,7 @@ function startListening() {
     });
   } catch (e) { console.warn('[SNXTV-TL] programs setup:', e.message); }
 
-  // ── tv_playlists ──
+  // ── tv_playlists — shared library, all channels see all playlists ──
   try {
     _unsubPlaylists = onSnapshot(collection(db, COLL_TV_PLAYLISTS_COLL), snap => {
       _playlists = {};
@@ -634,7 +703,7 @@ function startListening() {
     });
   } catch (e) { console.warn('[SNXTV-TL] playlists setup:', e.message); }
 
-  // ── tv_media ──
+  // ── tv_media — shared library (not channel-specific) ──
   try {
     _unsubMedia = onSnapshot(collection(db, COLL_MEDIA), snap => {
       _media = {};
@@ -645,20 +714,36 @@ function startListening() {
     });
   } catch (e) { console.warn('[SNXTV-TL] media setup:', e.message); }
 
-  // ── tv_settings/channel — fallback configuration ──
+  // ── tv_settings — per-channel settings document (keyed by channelId or 'channel' for default) ──
+  // For the default channel we read 'channel'; for named channels we read their channelId doc.
   try {
-    _unsubSettings = onSnapshot(doc(db, COLL_TV_SETTINGS, 'channel'), snap => {
-      _settings = snap.exists() ? snap.data() : {};
+    const settingsDocId = _activeChannelId || 'channel';
+    _unsubSettings = onSnapshot(doc(db, COLL_TV_SETTINGS, settingsDocId), snap => {
+      const data = snap.exists() ? snap.data() : {};
+      _settingsMap[_activeChannelId || 'default'] = data;
+      _settings = data;
       _notifySubscribers();
     }, e => {
       console.warn('[SNXTV-TL] settings listener error (auto-retry):', e.message);
     });
   } catch (e) { console.warn('[SNXTV-TL] settings setup:', e.message); }
 
+  // ── tv_channels — channel registry (all channels) ──
+  try {
+    _unsubChannels = onSnapshot(collection(db, COLL_TV_CHANNELS), snap => {
+      _channels = {};
+      snap.docs.forEach(d => { _channels[d.id] = { id: d.id, ...d.data() }; });
+      // Notify subscribers — channel list changed (e.g. new channel created)
+      _notifySubscribers();
+    }, e => {
+      console.warn('[SNXTV-TL] channels listener error (auto-retry):', e.message);
+    });
+  } catch (e) { console.warn('[SNXTV-TL] channels setup:', e.message); }
+
   // ── Periodic resync ──
   _resyncTimer = setInterval(_periodicResync, RESYNC_INTERVAL);
 
-  console.log('[SNXTV-TL] Live listeners started — version', VERSION);
+  console.log('[SNXTV-TL] Live listeners started — version', VERSION, '— channel:', _activeChannelId || 'default');
 }
 
 function stopListening() {
@@ -667,8 +752,8 @@ function stopListening() {
   if (_unsubPlaylists) { try { _unsubPlaylists(); } catch(_){} _unsubPlaylists = null; }
   if (_unsubMedia)     { try { _unsubMedia();     } catch(_){} _unsubMedia     = null; }
   if (_unsubSettings)  { try { _unsubSettings();  } catch(_){} _unsubSettings  = null; }
+  if (_unsubChannels)  { try { _unsubChannels();  } catch(_){} _unsubChannels  = null; }
   if (_resyncTimer)    { clearInterval(_resyncTimer); _resyncTimer = null; }
-  _settings  = {};
   _listening = false;
   console.log('[SNXTV-TL] Listeners stopped.');
 }
@@ -748,7 +833,7 @@ function getPlaylistsMap() {
 
 const SNXTVTimeline = {
   version: VERSION,
-  buildId: 'SNS-2026-TV-STAGE5-001',
+  buildId: 'SNS-2026-TV-STAGE6-001',
 
   // Lifecycle
   startListening,
@@ -782,6 +867,14 @@ const SNXTVTimeline = {
 
   // Channel settings (audioVisualMode, fallbackMode, etc.)
   getSettings: function () { return Object.assign({}, _settings); },
+
+  // ── Multi-channel API ──────────────────────────────────────────────────
+  // Switch the active channel (reloads timeline for new channel)
+  setChannel,
+  // Return all available channels
+  getChannels,
+  // Get current active channel ID
+  getActiveChannelId: function () { return _activeChannelId || 'default'; },
 };
 
 global.SNXTVTimeline = SNXTVTimeline;
