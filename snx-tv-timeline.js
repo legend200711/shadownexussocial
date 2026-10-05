@@ -157,6 +157,7 @@ function _programItems(program) {
     return [{
       id:        m.id,
       title:     m.title || 'Untitled',
+      artist:    m.artist || '',
       mediaType: m.mediaType || 'video',
       mediaUrl:  m.mediaUrl,
       artwork:   m.artworkUrl || '',
@@ -174,6 +175,7 @@ function _programItems(program) {
       out.push({
         id:        m.id,
         title:     m.title || 'Untitled',
+        artist:    m.artist || '',
         mediaType: m.mediaType || 'video',
         mediaUrl:  m.mediaUrl,
         artwork:   m.artworkUrl || '',
@@ -334,6 +336,7 @@ function _resolveFallback(nextSlot, slots) {
     items.push({
       id:        m.id,
       title:     m.title || 'Untitled',
+      artist:    m.artist || '',
       mediaType: m.mediaType || 'video',
       mediaUrl:  m.mediaUrl,
       artwork:   m.artworkUrl || '',
@@ -713,6 +716,9 @@ const SNXTVTimeline = {
   getPrograms,
   getMediaMap,
   getPlaylistsMap,
+
+  // Channel settings (audioVisualMode, fallbackMode, etc.)
+  getSettings: function () { return Object.assign({}, _settings); },
 };
 
 global.SNXTVTimeline = SNXTVTimeline;

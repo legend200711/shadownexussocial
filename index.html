@@ -11734,12 +11734,27 @@ body.arcade-fs-ios body::after { display:none !important; }
       style="background:#000;">
     </video>
 
-    <!-- Artwork panel — shown for audio items with artwork -->
+    <!-- Artwork panel — cinematic mode for audio items with artwork -->
     <div class="snx-tv-artwork" id="snxTvArtwork">
-      <img id="snxTvArtworkImg" src="" alt="" style="width:100%;height:100%;object-fit:cover;">
+      <!-- Blurred background derived from artwork -->
+      <div class="snx-tv-artwork-bg" id="snxTvArtworkBg"></div>
+      <!-- Centered artwork card with glow -->
+      <div class="snx-tv-artwork-frame">
+        <img id="snxTvArtworkImg" src="" alt="">
+        <div class="snx-tv-artwork-glow" id="snxTvArtworkGlow"></div>
+      </div>
+      <!-- Metadata overlay -->
+      <div class="snx-tv-artwork-meta" id="snxTvArtworkMeta">
+        <div class="snx-tv-artwork-onair">● ON AIR</div>
+        <div class="snx-tv-artwork-title" id="snxTvArtworkTitle"></div>
+        <div class="snx-tv-artwork-artist" id="snxTvArtworkArtist"></div>
+      </div>
     </div>
 
-    <!-- Fallback visual — shown when no video and no artwork -->
+    <!-- Visualizer canvas — shown for audio items without artwork -->
+    <canvas class="snx-tv-visualizer" id="snxTvVisualizer"></canvas>
+
+    <!-- Fallback visual — shown when no video/audio is playing -->
     <div class="snx-tv-visual-fallback" id="snxTvFallback">
       <div class="snx-tv-visual-fallback-icon">📺</div>
       <div class="snx-tv-visual-fallback-label" id="snxTvFallbackLabel">Shadow Nexus TV</div>
@@ -11772,6 +11787,7 @@ body.arcade-fs-ios body::after { display:none !important; }
   <div class="snx-tv-now-playing">
     <div class="snx-tv-np-label">Now Playing</div>
     <div class="snx-tv-np-title" id="snxTvNpTitle">—</div>
+    <div class="snx-tv-np-artist" id="snxTvNpArtist" style="display:none;"></div>
     <div class="snx-tv-np-meta">
       <span class="snx-tv-np-type-badge" id="snxTvNpTypeBadge">TV</span>
     </div>

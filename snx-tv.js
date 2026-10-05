@@ -459,6 +459,11 @@ var _el = {
   video:              null,
   artwork:            null,
   artworkImg:         null,
+  artworkBg:          null,
+  artworkGlow:        null,
+  artworkTitle:       null,
+  artworkArtist:      null,
+  visualizer:         null,
   fallback:           null,
   fallbackLabel:      null,
   tapOverlay:         null,
@@ -470,6 +475,7 @@ var _el = {
   onairDot:           null,
   onairText:          null,
   npTitle:            null,
+  npArtist:           null,
   npTypeBadge:        null,
   progressFill:       null,
   timeDisplay:        null,
@@ -494,6 +500,11 @@ function _initViewer() {
   _el.video             = document.getElementById('snxTvVideo');
   _el.artwork           = document.getElementById('snxTvArtwork');
   _el.artworkImg        = document.getElementById('snxTvArtworkImg');
+  _el.artworkBg         = document.getElementById('snxTvArtworkBg');
+  _el.artworkGlow       = document.getElementById('snxTvArtworkGlow');
+  _el.artworkTitle      = document.getElementById('snxTvArtworkTitle');
+  _el.artworkArtist     = document.getElementById('snxTvArtworkArtist');
+  _el.visualizer        = document.getElementById('snxTvVisualizer');
   _el.fallback          = document.getElementById('snxTvFallback');
   _el.fallbackLabel     = document.getElementById('snxTvFallbackLabel');
   _el.tapOverlay        = document.getElementById('snxTvTapOverlay');
@@ -505,6 +516,7 @@ function _initViewer() {
   _el.onairDot          = document.getElementById('snxTvOnAirDot');
   _el.onairText         = document.getElementById('snxTvOnAirText');
   _el.npTitle           = document.getElementById('snxTvNpTitle');
+  _el.npArtist          = document.getElementById('snxTvNpArtist');
   _el.npTypeBadge       = document.getElementById('snxTvNpTypeBadge');
   _el.progressFill      = document.getElementById('snxTvProgressFill');
   _el.timeDisplay       = document.getElementById('snxTvTimeDisplay');
@@ -713,6 +725,7 @@ function _renderPlayer(state) {
   var v           = _el.video;
   var artworkWrap = _el.artwork;
   var artImg      = _el.artworkImg;
+  var visualizer  = _el.visualizer;
   var fallback    = _el.fallback;
   var loading     = _el.loadingOverlay;
   var unavail     = _el.unavailableOverlay;
@@ -741,16 +754,71 @@ function _renderPlayer(state) {
     }
   }
 
-  // ── Toggle video vs artwork vs fallback ──
-  var isVideo   = item && item.mediaType === 'video';
-  var hasArtwork= item && item.artwork;
+  // ── Determine display mode ──
+  // audioVisualMode from channel settings: 'auto' | 'artwork' | 'visualizer'
+  var avMode   = _getAudioVisualMode();
+  var isVideo  = item && item.mediaType === 'video';
+  var isAudio  = item && item.mediaType === 'audio';
+  var hasArtwork = item && item.artwork;
 
-  _setVisible(v,           item && isVideo);
-  _setVisible(artworkWrap, item && !isVideo && hasArtwork);
-  _setVisible(fallback,    !item || (!isVideo && !hasArtwork));
+  // Priority: video → video player. Audio: per mode.
+  var showVideo      = !!(item && isVideo);
+  var showArtwork    = false;
+  var showVisualizer = false;
 
-  if (artImg && hasArtwork && artImg.src !== item.artwork) {
-    artImg.src = item.artwork;
+  if (isAudio) {
+    if (avMode === 'visualizer') {
+      showVisualizer = true;
+    } else if (avMode === 'artwork') {
+      // Artwork preferred; fall back to visualizer only if truly no artwork
+      if (hasArtwork) {
+        showArtwork = true;
+      } else {
+        showVisualizer = true;
+      }
+    } else {
+      // AUTO (default): artwork if available, visualizer if not
+      if (hasArtwork) {
+        showArtwork = true;
+      } else {
+        showVisualizer = true;
+      }
+    }
+  }
+
+  var showFallback = !item || (!isVideo && !isAudio);
+
+  _setVisible(v,           showVideo);
+  _setVisible(artworkWrap, showArtwork);
+  _setVisible(visualizer,  showVisualizer);
+  _setVisible(fallback,    showFallback);
+
+  // ── Update artwork presentation ──
+  if (showArtwork && artImg) {
+    if (artImg.dataset.snxSrc !== item.artwork) {
+      artImg.dataset.snxSrc = item.artwork;
+      artImg.src = item.artwork;
+      _updateArtworkPresentation(item);
+    }
+  }
+
+  // ── Update artwork overlay metadata ──
+  if (showArtwork) {
+    if (_el.artworkTitle) _el.artworkTitle.textContent = item.title || '';
+    if (_el.artworkArtist) _el.artworkArtist.textContent = item.artist || '';
+  }
+
+  // ── Drive the audio visual engine ──
+  if (showVisualizer) {
+    _snxViz.start(v, item);
+  } else {
+    _snxViz.stop();
+  }
+
+  if (showArtwork) {
+    _snxArtwork.start(item, state);
+  } else {
+    _snxArtwork.stop();
   }
 
   // ── Overlays ──
@@ -778,11 +846,37 @@ function _renderPlayer(state) {
   }
 }
 
+/** Get channel audio-visual mode from TV settings (cached in SNXTVTimeline or Studio) */
+function _getAudioVisualMode() {
+  // Try timeline settings cache first, then studio settings cache
+  var cfg = null;
+  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getSettings === 'function') {
+    cfg = global.SNXTVTimeline.getSettings();
+  }
+  if (!cfg && global.SNXTVStudio && typeof global.SNXTVStudio.getSettings === 'function') {
+    cfg = global.SNXTVStudio.getSettings();
+  }
+  if (!cfg && global._snxTvSettings) {
+    cfg = global._snxTvSettings;
+  }
+  return (cfg && cfg.audioVisualMode) || 'auto';
+}
+
+/** Apply artwork cinematic presentation — blurred bg + glow color */
+function _updateArtworkPresentation(item) {
+  if (!item || !item.artwork) return;
+  var bg   = _el.artworkBg;
+  var glow = _el.artworkGlow;
+  if (bg)   bg.style.backgroundImage = 'url(' + _esc(item.artwork) + ')';
+  if (glow) glow.style.setProperty('--snx-glow-src', 'url(' + _esc(item.artwork) + ')');
+}
+
 function _renderNowPlaying(state) {
-  var title = _el.npTitle;
-  var badge = _el.npTypeBadge;
-  var fill  = _el.progressFill;
-  var time  = _el.timeDisplay;
+  var title  = _el.npTitle;
+  var artist = _el.npArtist;
+  var badge  = _el.npTypeBadge;
+  var fill   = _el.progressFill;
+  var time   = _el.timeDisplay;
 
   var item  = state.current;
 
@@ -797,6 +891,13 @@ function _renderNowPlaying(state) {
     } else {
       title.textContent = '—';
     }
+  }
+
+  // Artist line — shown for audio items with an artist field
+  if (artist) {
+    var artistName = (item && item.mediaType === 'audio' && item.artist) ? item.artist : '';
+    artist.textContent  = artistName;
+    artist.style.display = artistName ? '' : 'none';
   }
 
   if (badge) {
@@ -987,6 +1088,9 @@ function pageLeave() {
     v.pause();
   }
   _clearStallTimer();
+  // Stop visual engines while TV is not visible (saves CPU/battery)
+  _snxViz.stop();
+  _snxArtwork.stop();
   // Note: DO NOT stop the timeline listener here.
   // The timeline subscription keeps schedule data fresh while the user is elsewhere,
   // so rejoining is instant. Timeline data (stations) is global, not viewer-specific.
@@ -1263,6 +1367,9 @@ function _attachLifecycleEvents() {
     } else {
       // Page hidden — clear stall timer to avoid spurious recovery while backgrounded
       _clearStallTimer();
+      // Pause canvas animation while backgrounded
+      _snxViz.stop();
+      _snxArtwork.stop();
     }
   });
 
@@ -1503,6 +1610,9 @@ global.addEventListener('snxAuthSignOut', function () {
     global.SNXTVTimeline.stopListening();
   }
 
+  _snxViz.stop();
+  _snxArtwork.stop();
+
   if (global.SNXTVStudio && typeof global.SNXTVStudio.unmount === 'function') {
     global.SNXTVStudio.unmount();
   }
@@ -1514,6 +1624,313 @@ global.addEventListener('snxAuthSignOut', function () {
   // _viewerReady stays true: the video element is still in the DOM and listeners are attached.
   // We just cleared playing state. The viewer will render idle on next state snapshot.
 });
+
+/* ════════════════════════════════════════════════════════════
+   ── SHADOW NEXUS MUSIC VISUALIZER ─────────────────────────
+   Canvas-based audio visualizer for audio-only TV content.
+   Connects to the existing <video> element via Web Audio API.
+   No second audio playback engine — we only analyse, not play.
+════════════════════════════════════════════════════════════ */
+
+var _snxViz = (function () {
+
+  var _canvas    = null;
+  var _ctx       = null;
+  var _raf       = null;
+  var _analyser  = null;
+  var _srcNode   = null;
+  var _audioCtx  = null;
+  var _connected = false;
+  var _active    = false;
+  var _lastVideo = null;
+
+  // Particle field
+  var _particles = [];
+  var PARTICLE_COUNT = 55;
+
+  // Frequency data buffer
+  var _freqData  = null;
+  var _timeData  = null;
+
+  function _initParticles(w, h) {
+    _particles = [];
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+      _particles.push({
+        x:  Math.random() * w,
+        y:  Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        r:  Math.random() * 2 + 0.5,
+        a:  Math.random() * 0.4 + 0.05,
+      });
+    }
+  }
+
+  function _connectAnalyser(videoEl) {
+    if (_connected && _lastVideo === videoEl) return;
+    _disconnectAnalyser();
+    _lastVideo = videoEl;
+    if (!videoEl) return;
+    try {
+      if (!_audioCtx) {
+        var AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        _audioCtx = new AudioCtx();
+      }
+      if (_audioCtx.state === 'suspended') {
+        _audioCtx.resume().catch(function(){});
+      }
+      _srcNode  = _audioCtx.createMediaElementSource(videoEl);
+      _analyser = _audioCtx.createAnalyser();
+      _analyser.fftSize = 256;
+      _analyser.smoothingTimeConstant = 0.82;
+      // Signal path: source → analyser → destination (speakers remain active)
+      _srcNode.connect(_analyser);
+      _analyser.connect(_audioCtx.destination);
+      _freqData = new Uint8Array(_analyser.frequencyBinCount);
+      _timeData = new Uint8Array(_analyser.frequencyBinCount);
+      _connected = true;
+    } catch (e) {
+      // Element already captured by another AudioContext or browser restriction
+      console.info('[SNX-VIZ] Web Audio connect skipped (non-fatal):', e.message);
+      _connected = false;
+      _analyser  = null;
+      _srcNode   = null;
+    }
+  }
+
+  function _disconnectAnalyser() {
+    try {
+      if (_srcNode)  { _srcNode.disconnect();  _srcNode  = null; }
+      if (_analyser) { _analyser.disconnect(); _analyser = null; }
+    } catch(e) {}
+    _connected = false;
+    _lastVideo = null;
+    _freqData  = null;
+    _timeData  = null;
+  }
+
+  function _bandEnergy(data, lo, hi) {
+    if (!data) return 0;
+    var sum = 0, n = hi - lo;
+    for (var i = lo; i < hi && i < data.length; i++) sum += data[i];
+    return n > 0 ? (sum / n) / 255 : 0;
+  }
+
+  function _draw() {
+    if (!_active || !_canvas || !_ctx) return;
+    _raf = requestAnimationFrame(_draw);
+
+    var w = _canvas.width;
+    var h = _canvas.height;
+    if (w < 2 || h < 2) return;
+
+    if (_analyser && _freqData) {
+      _analyser.getByteFrequencyData(_freqData);
+    }
+    if (_analyser && _timeData) {
+      _analyser.getByteTimeDomainData(_timeData);
+    }
+
+    var freq = _freqData;
+    var time = _timeData;
+
+    var bass   = _bandEnergy(freq, 0,  4);
+    var mid    = _bandEnergy(freq, 4,  16);
+    var treble = _bandEnergy(freq, 16, 32);
+    var energy = bass * 0.5 + mid * 0.3 + treble * 0.2;
+
+    // Trail fade
+    _ctx.fillStyle = 'rgba(2, 4, 15, 0.55)';
+    _ctx.fillRect(0, 0, w, h);
+
+    // Deep radial background gradient, energy-reactive
+    var gAlpha = 0.08 + energy * 0.12;
+    var bgGrad = _ctx.createRadialGradient(w * 0.5, h * 0.55, 0, w * 0.5, h * 0.5, w * 0.7);
+    bgGrad.addColorStop(0,   'rgba(0,40,100,' + gAlpha + ')');
+    bgGrad.addColorStop(0.5, 'rgba(0,10,40,'  + (gAlpha * 0.5) + ')');
+    bgGrad.addColorStop(1,   'rgba(0,0,0,0)');
+    _ctx.fillStyle = bgGrad;
+    _ctx.fillRect(0, 0, w, h);
+
+    // Spectrum bars
+    if (freq) {
+      var barCount = 48;
+      var barW     = w / barCount;
+      var barGap   = barW * 0.35;
+      var maxBarH  = h * 0.38;
+      var centerY  = h * 0.72;
+
+      for (var bi = 0; bi < barCount; bi++) {
+        var idx   = Math.floor((bi / barCount) * (freq.length * 0.6));
+        var val   = freq[idx] / 255;
+        var barH  = val * maxBarH;
+        var bx    = bi * barW + barGap * 0.5;
+        var bw    = barW - barGap;
+        var hue   = 195 + (bi / barCount) * 40;
+        var sat   = 80  + val * 20;
+        var lit   = 35  + val * 45;
+        var alp   = 0.2 + val * 0.75;
+
+        var barGrad = _ctx.createLinearGradient(0, centerY - barH, 0, centerY);
+        barGrad.addColorStop(0, 'hsla(' + hue + ',' + sat + '%,' + (lit + 15) + '%,' + alp + ')');
+        barGrad.addColorStop(1, 'hsla(' + hue + ',' + sat + '%,' + lit + '%,0.05)');
+        _ctx.fillStyle = barGrad;
+        _ctx.fillRect(bx, centerY - barH, bw, barH);
+
+        // Mirror bars (subtle)
+        _ctx.fillStyle = 'hsla(' + hue + ',' + sat + '%,' + lit + '%,' + (alp * 0.12) + ')';
+        _ctx.fillRect(bx, centerY, bw, barH * 0.28);
+      }
+    }
+
+    // Waveform line
+    if (time) {
+      _ctx.beginPath();
+      _ctx.strokeStyle = 'rgba(0,174,239,' + (0.3 + energy * 0.55) + ')';
+      _ctx.lineWidth   = 1.5 + energy * 2.5;
+      _ctx.shadowBlur  = 8 + energy * 18;
+      _ctx.shadowColor = 'rgba(0,174,239,0.8)';
+      var sliceW = w / time.length;
+      var xw = 0;
+      for (var wi = 0; wi < time.length; wi++) {
+        var wv = time[wi] / 128 - 1;
+        var wy = h * 0.5 + wv * h * 0.12 * (1 + energy * 0.8);
+        if (wi === 0) _ctx.moveTo(xw, wy);
+        else          _ctx.lineTo(xw, wy);
+        xw += sliceW;
+      }
+      _ctx.stroke();
+      _ctx.shadowBlur  = 0;
+      _ctx.shadowColor = 'transparent';
+    }
+
+    // Floating particles
+    for (var pi = 0; pi < _particles.length; pi++) {
+      var p = _particles[pi];
+      p.x += p.vx * (1 + energy * 2.5);
+      p.y += p.vy * (1 + energy * 1.5);
+      if (p.x < 0) p.x = w;
+      if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h;
+      if (p.y > h) p.y = 0;
+      var pa = p.a * (0.4 + bass * 0.8);
+      _ctx.beginPath();
+      _ctx.arc(p.x, p.y, p.r * (1 + energy * 0.6), 0, Math.PI * 2);
+      _ctx.fillStyle = 'rgba(0,174,239,' + pa + ')';
+      _ctx.fill();
+    }
+
+    // Bass-reactive central glow
+    var glowR = w * (0.08 + bass * 0.18);
+    var glowG = _ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, glowR);
+    glowG.addColorStop(0, 'rgba(0,174,239,' + (bass * 0.3) + ')');
+    glowG.addColorStop(1, 'rgba(0,174,239,0)');
+    _ctx.fillStyle = glowG;
+    _ctx.fillRect(0, 0, w, h);
+
+    // Channel label
+    _ctx.globalAlpha   = 0.15 + energy * 0.1;
+    _ctx.font          = 'bold ' + Math.max(8, Math.round(w * 0.018)) + 'px system-ui,sans-serif';
+    _ctx.fillStyle     = '#00AEEF';
+    _ctx.textAlign     = 'center';
+    _ctx.fillText('SHADOW NEXUS TV', w * 0.5, h * 0.89);
+    _ctx.globalAlpha   = 1;
+    _ctx.textAlign     = 'left';
+  }
+
+  function _resizeCanvas() {
+    if (!_canvas) return;
+    var wrap = _canvas.parentElement;
+    if (!wrap) return;
+    var w = wrap.offsetWidth  || 640;
+    var h = wrap.offsetHeight || 360;
+    if (_canvas.width !== w || _canvas.height !== h) {
+      _canvas.width  = w;
+      _canvas.height = h;
+      _initParticles(w, h);
+    }
+  }
+
+  function start(videoEl) {
+    _canvas = document.getElementById('snxTvVisualizer');
+    if (!_canvas) return;
+    _ctx = _canvas.getContext('2d');
+    if (!_ctx) return;
+    _resizeCanvas();
+    _connectAnalyser(videoEl);
+    if (!_active) {
+      _active = true;
+      _raf = requestAnimationFrame(_draw);
+    }
+  }
+
+  function stop() {
+    _active = false;
+    if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
+    if (_canvas && _ctx) {
+      _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
+    }
+    // Keep analyser connected — audio still plays; we just stop drawing
+  }
+
+  function destroy() {
+    stop();
+    _disconnectAnalyser();
+    if (_audioCtx) {
+      try { _audioCtx.close(); } catch(e) {}
+      _audioCtx = null;
+    }
+  }
+
+  return { start: start, stop: stop, destroy: destroy };
+})();
+
+/* ════════════════════════════════════════════════════════════
+   ── ARTWORK CINEMATIC MODE ────────────────────────────────
+   Ken Burns slow pan + glow pulse animation for artwork panel.
+════════════════════════════════════════════════════════════ */
+
+var _snxArtwork = (function () {
+
+  var _active = false;
+  var _raf    = null;
+  var _t      = 0;
+
+  function _tick() {
+    if (!_active) return;
+    _raf = requestAnimationFrame(_tick);
+    _t  += 0.0008;
+
+    var bg = document.getElementById('snxTvArtworkBg');
+    if (bg) {
+      var px = 50 + Math.sin(_t * 0.7) * 3;
+      var py = 50 + Math.cos(_t * 0.5) * 3;
+      var sc = 1.08 + Math.sin(_t * 0.3) * 0.04;
+      bg.style.backgroundPosition = px + '% ' + py + '%';
+      bg.style.transform          = 'scale(' + sc + ')';
+    }
+
+    var glow = document.getElementById('snxTvArtworkGlow');
+    if (glow) {
+      glow.style.opacity = (0.3 + Math.sin(_t * 1.8) * 0.12).toFixed(3);
+    }
+  }
+
+  function start() {
+    if (!_active) {
+      _active = true;
+      _raf    = requestAnimationFrame(_tick);
+    }
+  }
+
+  function stop() {
+    _active = false;
+    if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
+  }
+
+  return { start: start, stop: stop };
+})();
 
 /* ════════════════════════════════════════════════════════════
    ── PUBLIC API ────────────────────────────────────────────

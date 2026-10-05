@@ -123,17 +123,126 @@
 
 .snx-tv-video.visible { display: block; }
 
+/* ── Cinematic Artwork Panel ── */
 .snx-tv-artwork {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
   display: none;
-  background: #040c1a;
+  background: #020408;
+  overflow: hidden;
 }
 
 .snx-tv-artwork.visible { display: block; }
+
+/* Blurred background derived from the artwork */
+.snx-tv-artwork-bg {
+  position: absolute;
+  inset: -8%;        /* slightly oversized so the scale() Ken Burns never reveals edges */
+  background-size: cover;
+  background-position: 50% 50%;
+  filter: blur(28px) brightness(0.35) saturate(1.4);
+  transform-origin: center;
+  will-change: background-position, transform;
+}
+
+/* Centered artwork card */
+.snx-tv-artwork-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.snx-tv-artwork-frame img {
+  width: auto;
+  height: 72%;
+  max-width: 72%;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04);
+  display: block;
+}
+
+/* Glow ring behind the artwork image */
+.snx-tv-artwork-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, rgba(0,174,239,0.18) 0%, transparent 65%);
+  pointer-events: none;
+  z-index: 0;
+  will-change: opacity;
+}
+
+/* Metadata overlay at bottom of artwork panel */
+.snx-tv-artwork-meta {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px 14px;
+  background: linear-gradient(to top, rgba(2,4,15,0.75) 0%, transparent 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.snx-tv-artwork-onair {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: rgba(57, 255, 20, 0.75);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  animation: snxTvOnAirPulse 2s ease-in-out infinite;
+}
+
+@keyframes snxTvOnAirPulse {
+  0%, 100% { opacity: 0.75; }
+  50%       { opacity: 1; }
+}
+
+.snx-tv-artwork-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e8f4ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.snx-tv-artwork-artist {
+  font-size: 11px;
+  color: rgba(160, 200, 240, 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Music Visualizer Canvas ── */
+.snx-tv-visualizer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+  background: #020408;
+}
+
+.snx-tv-visualizer.visible { display: block; }
+
+/* ── Now Playing artist line ── */
+.snx-tv-np-artist {
+  font-size: 12px;
+  color: rgba(120, 170, 210, 0.65);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* Fallback visual when no artwork — cinematic dark gradient */
 .snx-tv-visual-fallback {
@@ -479,6 +588,20 @@
   .snx-tv-up-next { padding: 12px 12px; }
   .snx-tv-up-next-item { padding: 9px 10px; gap: 10px; }
   .snx-tv-un-thumb { width: 38px; height: 38px; }
+
+  /* Artwork mode — scale artwork down on small screens */
+  .snx-tv-artwork-frame img {
+    height: 64%;
+    max-width: 80%;
+  }
+
+  .snx-tv-artwork-meta {
+    padding: 12px 14px 12px;
+  }
+
+  .snx-tv-artwork-title  { font-size: 12px; }
+  .snx-tv-artwork-artist { font-size: 10px; }
+  .snx-tv-artwork-onair  { font-size: 7px; letter-spacing: 2px; }
 }
 
 /* ══════════════════════════════════════════════════════════

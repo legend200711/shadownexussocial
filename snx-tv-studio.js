@@ -627,7 +627,7 @@ async function _addToTvMedia(sourceType, sourceId) {
       title     = s.title || 'Untitled';
       artworkUrl= s.artUrl || s.coverImage || '';
       duration  = s.duration || 0;
-      sourceDoc = { collection: COLL_PROFILE_MUSIC, id: sourceId };
+      sourceDoc = { collection: COLL_PROFILE_MUSIC, id: sourceId, artist: s.artist || '' };
     } else {
       const v = _snsVideoLib.find(x => x.id === sourceId);
       if (!v) { _toast('Source video not found.'); return; }
@@ -648,6 +648,7 @@ async function _addToTvMedia(sourceType, sourceId) {
   try {
     await addDoc(collection(db, COLL_TV_MEDIA), {
       title,
+      artist:    sourceDoc.artist || '',
       mediaType,
       mediaUrl,
       artworkUrl,
@@ -765,12 +766,16 @@ function _renderUploadForm() {
     <label for="snxtvUploadTitle">Title</label>
     <input type="text" id="snxtvUploadTitle" placeholder="Title" maxlength="200">
   </div>
+  <div class="snxtv-form-row" id="snxtvUploadArtistRow" style="display:none;">
+    <label for="snxtvUploadArtist">Artist (optional)</label>
+    <input type="text" id="snxtvUploadArtist" placeholder="Artist name" maxlength="200">
+  </div>
   <div class="snxtv-form-row">
     <label for="snxtvUploadDesc">Description (optional)</label>
     <input type="text" id="snxtvUploadDesc" placeholder="Description" maxlength="400">
   </div>
   <div class="snxtv-form-row" id="snxtvUploadThumbRow" style="display:none;">
-    <label for="snxtvUploadThumb">Thumbnail Image (optional, .jpg/.png/.webp)</label>
+    <label for="snxtvUploadThumb">Artwork / Cover Image (optional, .jpg/.png/.webp)</label>
     <input type="file" id="snxtvUploadThumb" accept=".jpg,.jpeg,.png,.webp,image/*">
   </div>
   <div class="snxtv-upload-type-badge" id="snxtvUploadTypeBadge" style="display:none;margin-bottom:8px;font-size:11px;padding:4px 10px;border-radius:20px;display:inline-block;"></div>
@@ -802,20 +807,24 @@ function _bindUploadFormEvents(panelEl) {
   if (!btn) return;
   btn.addEventListener('click', _doUpload);
 
-  // Show/hide thumbnail field and type badge when file is chosen
+  // Show/hide artwork/artist fields and type badge when file is chosen
   const fileInput = panelEl.querySelector('#snxtvUploadFile');
   if (fileInput) {
     fileInput.addEventListener('change', () => {
       const f = fileInput.files && fileInput.files[0];
       const thumbRow  = panelEl.querySelector('#snxtvUploadThumbRow');
+      const artistRow = panelEl.querySelector('#snxtvUploadArtistRow');
       const typeBadge = panelEl.querySelector('#snxtvUploadTypeBadge');
       if (!f) {
         if (thumbRow)  thumbRow.style.display  = 'none';
+        if (artistRow) artistRow.style.display = 'none';
         if (typeBadge) typeBadge.style.display = 'none';
         return;
       }
       const isVideo = f.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(f.name);
-      if (thumbRow)  thumbRow.style.display  = isVideo ? '' : 'none';
+      // Artwork field shown for both audio and video; artist only for audio
+      if (thumbRow)  thumbRow.style.display  = '';
+      if (artistRow) artistRow.style.display = isVideo ? 'none' : '';
       if (typeBadge) {
         typeBadge.textContent = isVideo ? '🎬 Video file detected' : '🎵 Audio file detected';
         typeBadge.style.cssText = isVideo
@@ -829,6 +838,7 @@ function _bindUploadFormEvents(panelEl) {
 async function _doUpload() {
   const fileInput    = _container && _container.querySelector('#snxtvUploadFile');
   const titleInput   = _container && _container.querySelector('#snxtvUploadTitle');
+  const artistInput  = _container && _container.querySelector('#snxtvUploadArtist');
   const descInput    = _container && _container.querySelector('#snxtvUploadDesc');
   const thumbInput   = _container && _container.querySelector('#snxtvUploadThumb');
   const statusEl     = _container && _container.querySelector('#snxtvUploadStatus');
@@ -839,6 +849,7 @@ async function _doUpload() {
   if (!fileInput || !fileInput.files.length) { _toast('Choose a file first.'); return; }
   const file      = fileInput.files[0];
   const title     = (titleInput && titleInput.value.trim()) || file.name.replace(/\.[^.]+$/, '');
+  const artistVal = (artistInput && artistInput.value.trim()) || '';
   const desc      = (descInput  && descInput.value.trim())  || '';
   const thumbFile = (thumbInput && thumbInput.files && thumbInput.files[0]) || null;
 
@@ -943,7 +954,7 @@ async function _doUpload() {
                 userId:      cu.uid,
                 title,
                 description: desc,
-                artist:      (global._snxUserData && global._snxUserData.displayName) || '',
+                artist:      artistVal || (global._snxUserData && global._snxUserData.displayName) || '',
                 musicUrl:    resp.url,
                 downloadURL: resp.url,
                 artUrl:      artworkUrl,
@@ -967,6 +978,7 @@ async function _doUpload() {
             await addDoc(collection(db, COLL_TV_MEDIA), {
               title,
               description:      desc,
+              artist:           isVideo ? '' : (artistVal || (global._snxUserData && global._snxUserData.displayName) || ''),
               mediaType,
               mediaUrl:         resp.url,
               artworkUrl,
@@ -984,10 +996,11 @@ async function _doUpload() {
         }
 
         if (statusEl) statusEl.textContent = `✓ ${isVideo ? 'Video' : 'Audio'} added to TV Media Library!`;
-        if (fileInput) fileInput.value = '';
-        if (titleInput) titleInput.value = '';
-        if (descInput)  descInput.value  = '';
-        if (thumbInput) thumbInput.value = '';
+        if (fileInput)   fileInput.value   = '';
+        if (titleInput)  titleInput.value  = '';
+        if (artistInput) artistInput.value = '';
+        if (descInput)   descInput.value   = '';
+        if (thumbInput)  thumbInput.value  = '';
         _toast(`✓ ${isVideo ? 'Video' : 'Audio'} upload complete and added to TV.`);
         _closeUploadSection();
         resolveOuter();
@@ -1298,6 +1311,7 @@ async function _loadPlaylistToTV(plId) {
     tvItems.push({
       id:        media.id,
       title:     media.title || 'Untitled',
+      artist:    media.artist || '',
       mediaType: media.mediaType === 'video' ? 'video' : 'audio',
       mediaUrl:  media.mediaUrl,
       artwork:   media.artworkUrl || '',
@@ -1340,6 +1354,7 @@ function getAdapterQueue() {
     .map(m => ({
       id:        m.id,
       title:     m.title || 'Untitled',
+      artist:    m.artist || '',
       mediaType: m.mediaType === 'video' ? 'video' : 'audio',
       mediaUrl:  m.mediaUrl,
       artwork:   m.artworkUrl || '',
@@ -2313,6 +2328,16 @@ function _renderSettingsPanel() {
     </div>
 
     <div>
+      <label class="snxtv-form-label">Audio-Only Display Mode</label>
+      <select id="snxtvCfgAudioVisual" class="snxtv-select">
+        <option value="auto"      ${(!cfg.audioVisualMode || cfg.audioVisualMode === 'auto') ? 'selected' : ''}>AUTO — Artwork when available, Visualizer when not</option>
+        <option value="artwork"   ${cfg.audioVisualMode === 'artwork'   ? 'selected' : ''}>Artwork Preferred — always show artwork (visualizer if none)</option>
+        <option value="visualizer"${cfg.audioVisualMode === 'visualizer'? 'selected' : ''}>Visualizer — always show music visualizer</option>
+      </select>
+      <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:4px;line-height:1.5;">AUTO is recommended. Video content always overrides to the video player.</div>
+    </div>
+
+    <div>
       <label class="snxtv-form-label">Allow Content Submissions (from viewers)</label>
       <select id="snxtvCfgSubmissionsEnabled" class="snxtv-select">
         <option value="1" ${cfg.submissionsEnabled !== false ? 'selected' : ''}>Enabled</option>
@@ -2347,6 +2372,7 @@ function _renderSettingsPanel() {
           tagline:             el.querySelector('#snxtvCfgTagline').value.trim(),
           fallbackMode:        el.querySelector('#snxtvCfgFallback').value,
           fallbackPlaylistId:  el.querySelector('#snxtvCfgFallbackPlSelect') ? el.querySelector('#snxtvCfgFallbackPlSelect').value : '',
+          audioVisualMode:     el.querySelector('#snxtvCfgAudioVisual').value,
           submissionsEnabled:  el.querySelector('#snxtvCfgSubmissionsEnabled').value === '1',
           updatedAt:           serverTimestamp(),
           updatedBy:           (_cu() || {}).uid || '',
@@ -2414,6 +2440,8 @@ const SNXTVStudio = {
   getAdapterQueue,
   setPlaylistQueue,
   isFounder: _isFounder,
+  // Channel settings accessor (used by TV viewer for audio-visual mode)
+  getSettings: () => Object.assign({}, _tvSettings),
   // Public submission API (any signed-in user)
   submitContent,
   // Stage 5: expose for debugging
