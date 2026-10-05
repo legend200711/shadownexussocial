@@ -1,28 +1,50 @@
 /**
- * SNX Channel Auth Bridge
+ * SHADOW NEXUS SOCIAL — Channel Auth Bridge
  * snx-ch-auth-bridge.js
  *
- * Bridges the 24-Hour Channel engine to the Shadow Nexus Social
- * authenticated session.  The SNS main app initialises Firebase
- * (project: horr-a08f4) and exposes:
+ * OWNERSHIP: Shadow Nexus Social
  *
- *   window._snxAuth          — Firebase Auth instance
+ * ── SNS-NATIVE TV REBUILD NOTE ──────────────────────────────────────────────
+ * The SNS TV has been rebuilt to use ONLY the SNS Firebase project (horr-a08f4).
+ * The separate remix-studio-4bf8a project is NO LONGER used for TV data.
+ * TV state, media, playlists, programs, and schedule now live in horr-a08f4
+ * collections: tv_state, tv_config, tv_media, tv_playlists, tv_programs.
+ *
+ * This bridge is retained for compatibility with:
+ *   - snx-ch-broadcast.js (channel.html legacy path)
+ *   - snx-ch-control.js (Founder studio legacy path)
+ * But the TV auth token bridge to remix-studio-4bf8a has been REMOVED.
+ * No custom token exchange is needed — the SNS auth session handles all TV writes.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * Bridges the SNS 24-Hour TV to the Shadow Nexus Social authenticated session.
+ * The SNS main app initialises Firebase (project: horr-a08f4) and exposes:
+ *
+ *   window._snxAuth          — Firebase Auth instance (SNS project)
  *   window._snxCurrentUser   — currently signed-in user (or null)
  *
  * This bridge exports a thin compatibility layer so snx-ch-control.js,
  * snx-ch-broadcast.js, and snx-ch-adapter.js can import auth helpers
  * without duplicating Firebase initialisation.
- *
- * Firestore data (channel state, media library, network_channels) lives
- * on the Aurenix project (remix-studio-4bf8a) via snx-ch-firebase.js.
- * Authentication is now SNS-only (horr-a08f4).
- *
- * Phase 1:  SNS auth  +  Aurenix Firestore
- * Phase 2 (future): fully migrate Firestore to SNS project too.
  */
 
 /* ── Re-export Aurenix Firestore client — db + helpers ONLY.
       auth is NOT re-exported from here; the SNS proxy below takes precedence. ── */
+import {
+  db, tvAuth,
+  doc, getDoc, setDoc, collection, query, where, orderBy,
+  limit, getDocs, onSnapshot, addDoc, updateDoc, deleteDoc,
+  serverTimestamp, increment, runTransaction, Timestamp,
+  onAuthStateChanged, signOut,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword,
+  sendPasswordResetEmail, updateProfile,
+  loadUserProfile, upsertUserProfile,
+  createSubmission, updateSubmission,
+  getUserSubmissions, getAllSubmissions, getApprovedSubmissions,
+  fetchStationState, subscribeStation, advanceStation,
+  submitReport, updateReport, getAllReports,
+} from './snx-ch-firebase.js';
+
 export {
   db,
   doc, getDoc, setDoc, collection, query, where, orderBy,
@@ -39,7 +61,7 @@ export {
   getUserSubmissions, getAllSubmissions, getApprovedSubmissions,
   fetchStationState, subscribeStation, advanceStation,
   submitReport, updateReport, getAllReports,
-} from './snx-ch-firebase.js';
+};
 
 /* ── SNS Auth proxy ──────────────────────────────────────────────────────── *
  *
@@ -102,3 +124,15 @@ export function onAuthChange(cb) {
 export function getUser() {
   return window._snxAuth?.currentUser ?? null;
 }
+
+/* ── TV Auth Bridge — REMOVED ────────────────────────────────────────────── *
+ *
+ * The bridge that signed the Aurenix (remix-studio-4bf8a) Firebase Auth
+ * instance using a custom token has been REMOVED as part of the SNS TV
+ * clean rebuild.
+ *
+ * The SNS TV now stores all data in horr-a08f4 (the SNS project) and uses
+ * the existing SNS auth session directly.  No custom token exchange is needed.
+ *
+ * The /auth/tv-token Worker endpoint has been deprecated (returns HTTP 410).
+ * ─────────────────────────────────────────────────────────────────────────── */

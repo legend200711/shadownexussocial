@@ -1732,5 +1732,68 @@ service cloud.firestore {
     //
     //   allowMainTvFeature is owner-writable (covered by isOwner() in creatorChannels).
 
+    // ════════════════════════════════════════════════════════════════════════
+    // SNS 24-HOUR TV — CLEAN REBUILD COLLECTIONS
+    // All in SNS project (horr-a08f4). No separate Firebase project needed.
+    // ════════════════════════════════════════════════════════════════════════
+    //
+    //   /tv_state/{channelId}     — live broadcast state (current item, queue, started_at)
+    //   /tv_config/{channelId}    — programming engine config (running, freq, history)
+    //   /tv_media/{mediaId}       — TV media library (references SNS R2 URLs)
+    //   /tv_playlists/{playlistId}— TV playlists
+    //   /tv_programs/{programId}  — TV programs (media or playlist references)
+    //   /tv_schedule/{slotId}     — TV schedule slots (managed via tv_state queue)
+    //
+    // Security model:
+    //   READ:  tv_state, tv_config — any signed-in user (all viewers need to read state)
+    //          tv_media — any signed-in user (for viewer guide and studio)
+    //          tv_playlists, tv_programs, tv_schedule — any signed-in user
+    //   WRITE: Founder only (enforced via isFounderEmail() — cannot be spoofed)
+    //   EXCEPTION: tv_state advancement fields can also be written by the SNS
+    //              Cloudflare Worker, which authenticates via Firebase service account.
+    //              The Worker only writes tv_state/{channelId} atomically.
+
+    // ── tv_state — live broadcast state ──────────────────────────────────────
+    match /tv_state/{channelId} {
+      allow read: if isSignedIn();
+      // Only Founder can write (Worker uses service account / admin SDK)
+      // Any signed-in user (all viewers) can trigger advancement via Worker.
+      // The Worker validates the request then writes here with admin credentials.
+      allow write: if isFounderEmail();
+    }
+
+    // ── tv_config — programming engine config ────────────────────────────────
+    match /tv_config/{channelId} {
+      allow read: if isSignedIn();
+      allow write: if isFounderEmail();
+    }
+
+    // ── tv_media — TV media library ──────────────────────────────────────────
+    //   Contains references to SNS R2 media. No sensitive data.
+    //   READ: any signed-in user (for media grid, schedule, TV Guide)
+    //   WRITE: Founder only
+    match /tv_media/{mediaId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── tv_playlists — TV playlists ──────────────────────────────────────────
+    match /tv_playlists/{playlistId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── tv_programs — TV programs ────────────────────────────────────────────
+    match /tv_programs/{programId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── tv_schedule — TV schedule slots ─────────────────────────────────────
+    match /tv_schedule/{slotId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
   }
 }

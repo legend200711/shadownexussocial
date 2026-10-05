@@ -1,48 +1,49 @@
 /**
- * SNX 24-Hour TV Adapter
+ * SHADOW NEXUS SOCIAL — 24-Hour TV Adapter
  * snx-ch-adapter.js
  *
- * Integrates the Aurenix 24-hour channel engine natively into
- * Shadow Nexus Social. Key responsibilities:
+ * OWNERSHIP: Shadow Nexus Social
  *
- *  1. Read window._snxCurrentUser — the authenticated SNS user.
- *     Never show a second login screen.
+ * Renders the SNS 24-Hour TV player natively inside Shadow Nexus Social.
+ * This module does NOT depend on any separate external channel engine.
+ * All TV state (channels, media, schedule, queue, Now Playing) belongs to
+ * and is served by Shadow Nexus Social.
  *
- *  2. Render the channel viewer/studio into #snxTvApp inside the
- *     SNS tvPage div — no separate HTML page, no Aurenix nav bar.
- *
- *  3. Expose window.snxTvInit() so index.html can call it when
- *     the user navigates to tvPage.
- *
- *  4. Expose window.snxTvTeardown() so media stops when leaving tvPage.
- *
- * Auth flow:
- *   SNS onAuthStateChanged → window._snxCurrentUser set
- *   → user taps "24-Hour TV" → navTo('tvPage') → snxTvInit()
- *   → adapter reads _snxCurrentUser → starts channel engine
- *   → NO second login, NO second Firebase init for auth
- *
- * Firestore data (channel state, media, etc.) still lives on the
- * Aurenix Firebase project (remix-studio-4bf8a) via snx-ch-firebase.js.
- * This is Phase 1; Phase 2 migrates that data to the SNS project.
+ * ── CLEAN SNS-NATIVE REBUILD ──────────────────────────────────────────────
+ * Firestore data now stored in the SNS project (horr-a08f4) via firebase-config.js.
+ * Collections: tv_state/ALTV · tv_config/ALTV · tv_media · tv_playlists · tv_programs
+ * Authentication: window._snxAuth (horr-a08f4) — same session as all SNS features.
+ * Storage: SNS Cloudflare R2 (yellow-term-11e6) — same as all other SNS uploads.
+ * No separate Firebase project. No Supabase. No service-account JSON.
+ * No external Engine. No new KV namespace.
+ * ─────────────────────────────────────────────────────────────────────────
  */
 
-/* ── Pull the Aurenix channel engine from snx-ch-firebase.js ── */
+/* ── SNS TV Core — SNS-native state, media, advancement ── */
+import {
+  TV_CHANNEL_ID, TV_ADVANCE_URL,
+  subscribeTvState, loadTvState,
+  requestTvAdvance, advanceTvNow,
+  computeElapsed, fmtTime as _fmtTimeCore,
+} from './snx-tv-core.js';
+
+/* ── SNS Firestore (horr-a08f4) — still used for network_channels, network_state (legacy path) ── */
 import {
   db,
   doc, getDoc, setDoc, collection, getDocs, onSnapshot,
   updateDoc, serverTimestamp, Timestamp, addDoc,
   query, orderBy, where,
-} from './snx-ch-firebase.js';
+} from './firebase-config.js';
 
-import { LIVE_TV_CHANNEL_ID } from './snx-ch-live-tv.js';
-import { supabase } from './snx-ch-supabase.js';
+/* LIVE_TV_CHANNEL_ID — still referenced by legacy channel list; keep compatible */
+const LIVE_TV_CHANNEL_ID = TV_CHANNEL_ID;
 
 /* ════════════════════════════════════════════════════
    CONSTANTS
 ════════════════════════════════════════════════════ */
 const FOUNDER_EMAIL  = 'christijerina46@gmail.com';
-const ADVANCE_WORKER_URL = 'https://aurenix-upload.nthntjrn.workers.dev/channel/advance';
+const ADVANCE_WORKER_URL  = 'https://yellow-term-11e6.nthntjrn.workers.dev/channel/advance';
+const UPLOAD_WORKER_URL   = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 
 /* ════════════════════════════════════════════════════
    STATE
@@ -282,72 +283,55 @@ function _renderNotLoggedIn() {
 
 /* ════════════════════════════════════════════════════
    CHANNEL SUBSCRIPTION
+   SNS-native rebuild: subscribes to tv_state/ALTV in SNS Firestore (horr-a08f4).
+   No dependency on remix-studio-4bf8a network_channels collection.
 ════════════════════════════════════════════════════ */
 function _subscribeChannels() {
   if (_channelsUnsub) _channelsUnsub();
-  const q = query(collection(db, 'network_channels'), orderBy('sort_order', 'asc'));
-  _channelsUnsub = onSnapshot(q, (snap) => {
-    const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(ch => ch.enabled !== false);
 
-    _channels = loaded;
-    console.log('[SNX-TV] Channels loaded:', loaded.length);
+  // Bootstrap the single SNS TV channel (ALTV) inline.
+  // Previously this loaded from network_channels in remix-studio-4bf8a —
+  // that collection no longer required. SNS TV has ONE canonical channel.
+  const ALTV_CHANNEL = {
+    id:         TV_CHANNEL_ID,
+    name:       'SHADOW NEXUS TV',
+    label:      'SHADOW NEXUS TV',
+    sort_order: 0,
+    enabled:    true,
+    color:      '#00AEEF',
+  };
 
-    if (!_networkReady) {
-      _networkReady = true;
-      // Shell was already built by _startWithUser before subscribeChannels was called.
-      // Only build it here if somehow it wasn't (shouldn't happen in normal flow).
-      if (!document.getElementById('ax-media-area')) {
-        _rebuildTvShell();
-        if (_isFounder) _renderFounderBar();
-      }
-      _channels.forEach(ch => _subscribeChannelState(ch.id));
-      _buildChannelList();
-      _buildEPGChannelTabs();
-      if (_channels[0]) {
-        _setActiveChannel(_channels[0].id);
-        console.log('[SNX-TV] Active channel synchronized');
-      }
-      _startTick();
-      console.log('[SNX-TV] Playback ready');
-    } else {
-      _buildChannelList();
-      _buildEPGChannelTabs();
-      _channels.forEach(ch => _subscribeChannelState(ch.id));
-      if (_tvActive) _startTick();
-    }
-  }, (err) => {
-    // ── CRITICAL: log exact error so the console makes the cause clear ──
-    // Most common cause: remix-studio-4bf8a Firestore rules deny unauthenticated
-    // reads on network_channels.  Fix: set  allow read: if true;  on that
-    // collection in the remix-studio-4bf8a Firebase console.
-    console.error(
-      '[24TV ERROR] network_channels query failed.',
-      'code:', err?.code,
-      'message:', err?.message,
-      '\nFix: ensure remix-studio-4bf8a Firestore rules allow',
-      '  match /network_channels/{id} { allow read: if true; }',
-    );
-    if (!_networkReady) {
-      _networkReady = true;
-      if (!document.getElementById('ax-media-area')) {
-        _rebuildTvShell();
-        if (_isFounder) _renderFounderBar();
-      }
-      // Show a readable error in the player area when channels can't be loaded.
-      const errCode = err?.code || 'unknown';
-      const npTitle = document.getElementById('ax-np-title');
-      const npArtist = document.getElementById('ax-np-artist');
-      const statusText = document.getElementById('snx-tv-status-text');
-      if (npTitle)  npTitle.textContent  = 'Channel data unavailable';
-      if (npArtist) npArtist.textContent = errCode === 'permission-denied'
-        ? 'Firestore permission denied — contact site admin'
-        : ('Error: ' + errCode);
-      if (statusText) statusText.textContent = 'ERROR';
-      if (_channels[0]) _setActiveChannel(_channels[0].id);
-      _startTick();
-    }
+  _channels = [ALTV_CHANNEL];
+  console.log('[SNX-TV] SNS-native channel initialized:', TV_CHANNEL_ID);
+
+  // Subscribe to SNS TV state (horr-a08f4 tv_state/ALTV)
+  _channelsUnsub = subscribeTvState(st => {
+    _channelStates[TV_CHANNEL_ID] = st;
+    console.log('[SNX-TV] TV state received — item:', st?.current_item?.title || 'none');
+
+    // Update channel dot
+    const dot = document.getElementById(`ax-ch-dot-${TV_CHANNEL_ID}`);
+    if (dot) dot.className = `ax-ch-status ${st?.current_item ? 'live' : 'idle'}`;
+
+    if (_activeChannel?.id === TV_CHANNEL_ID) _onActiveChannelUpdate(st);
   });
+
+  if (!_networkReady) {
+    _networkReady = true;
+    if (!document.getElementById('ax-media-area')) {
+      _rebuildTvShell();
+      if (_isFounder) _renderFounderBar();
+    }
+    _buildChannelList();
+    _buildEPGChannelTabs();
+    _setActiveChannel(TV_CHANNEL_ID);
+    _startTick();
+    console.log('[SNX-TV] SNS TV ready');
+  } else {
+    _buildChannelList();
+    _buildEPGChannelTabs();
+    if (_tvActive) _startTick();
+  }
 }
 
 /* ════════════════════════════════════════════════════
@@ -931,27 +915,25 @@ function _updateUpNext() {
    CHANNEL STATE SUBSCRIPTION
 ════════════════════════════════════════════════════ */
 function _subscribeChannelState(channelId) {
+  // SNS-native rebuild: TV state is now subscribed once in _subscribeChannels()
+  // via subscribeTvState() which reads tv_state/ALTV in horr-a08f4.
+  // This function is retained for API compatibility but is a no-op for ALTV
+  // since the subscription is already active.
+  if (channelId === TV_CHANNEL_ID) return; // already subscribed
   if (_channelUnsubs[channelId]) return;
-  _channelUnsubs[channelId] = onSnapshot(doc(db, 'network_state', channelId), (snap) => {
+  // Legacy path for any non-ALTV channel (retained for safety):
+  _channelUnsubs[channelId] = onSnapshot(doc(db, 'tv_state', channelId), (snap) => {
     const st = snap.exists() ? snap.data() : null;
-    if (_activeChannel?.id === channelId) console.log('[24TV] Channel state received — channel:', channelId, 'current_item:', st?.current_item?.title || 'none');
     _channelStates[channelId] = st;
-
-    // Update channel dot
     const dot = document.getElementById(`ax-ch-dot-${channelId}`);
     if (dot) dot.className = `ax-ch-status ${st?.current_item ? 'live' : 'idle'}`;
-
-    // Update EPG if this channel is visible
     const activeEPGTab = document.querySelector('.ax-epg-tab.active');
     if (activeEPGTab?.dataset.chid === channelId) _renderEPG(channelId);
-
     if (_activeChannel?.id === channelId) _onActiveChannelUpdate(st);
   }, (err) => {
-    console.warn(`[SNX-TV] Firestore error channel=${channelId} — resubscribing`, err?.message);
+    console.warn(`[SNX-TV] State error channel=${channelId}:`, err?.message);
     delete _channelUnsubs[channelId];
-    setTimeout(() => {
-      if (!_channelUnsubs[channelId]) _subscribeChannelState(channelId);
-    }, 3000);
+    setTimeout(() => { if (!_channelUnsubs[channelId]) _subscribeChannelState(channelId); }, 3000);
   });
 }
 
@@ -1082,6 +1064,7 @@ async function _loadMedia(item, elapsed) {
   video.style.display = 'none';
 
   _mediaEl = null; _mediaType = null;
+  _onerrorRetries = 0; // reset per-item retry counter for the new media item
 
   if (isImage) {
     thumb.innerHTML = `<img src="${_esc(item.url)}" alt="${_esc(item.title)}" style="width:100%;height:100%;object-fit:contain;">`;
@@ -1312,14 +1295,8 @@ async function _viewerRequestAdvance(channelId, currentItemId) {
   _viewerAdvancingId = currentItemId;
   _advancing = true;
   try {
-    const token = await _user?.getIdToken?.();
-    if (!token) { _advancing = false; return; }
-    const res = await fetch(ADVANCE_WORKER_URL, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channelId, currentItemId }),
-    });
-    if (!res.ok) console.warn(`[SNX-TV] advance ${res.status}`);
+    // Use SNS TV Core advancement — targets SNS Worker + horr-a08f4 Firestore
+    await requestTvAdvance(currentItemId);
   } catch (e) {
     console.warn('[SNX-TV] advance error:', e.message);
   } finally {
@@ -1678,21 +1655,45 @@ function _bindSubmitModal() {
     if (progWrap)  progWrap.style.display = '';
 
     try {
-      // Upload via Supabase (same as Aurenix viewer upload flow)
-      const ext      = (_subFile.name.split('.').pop() || 'bin').toLowerCase();
-      const fileName = `radio/${_user.uid}/${Date.now()}.${ext}`;
-      const { error } = await supabase.storage.from('aurenix-media').upload(fileName, _subFile, {
-        cacheControl: '3600',
-        upsert: false,
-        onUploadProgress: p => {
+      // Upload via SNS R2 Worker (same architecture as TV Studio, profile-music, nexus)
+      const isAudio = _subFile.type.startsWith('audio/');
+      const isImage = _subFile.type.startsWith('image/');
+      const endpoint = isAudio ? '/upload-music' : isImage ? '/upload-artwork' : '/';
+      const r2Path   = isAudio ? `music/${_user.uid}/${Date.now()}.${(_subFile.name.split('.').pop()||'bin').toLowerCase()}`
+                     : isImage ? `artwork/${_user.uid}/${Date.now()}.${(_subFile.name.split('.').pop()||'bin').toLowerCase()}`
+                     :           `tv/${_user.uid}/${Date.now()}.${(_subFile.name.split('.').pop()||'bin').toLowerCase()}`;
+      const idToken  = await _user.getIdToken(false);
+
+      const form = new FormData();
+      form.append('file', _subFile);
+      form.append('uid',  _user.uid);
+      form.append('path', r2Path);
+
+      const xhr = new XMLHttpRequest();
+      const uploadResult = await new Promise((resolve, reject) => {
+        xhr.open('POST', UPLOAD_WORKER_URL + endpoint, true);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
+        xhr.upload.onprogress = p => {
+          if (!p.lengthComputable) return;
           const pct = Math.round((p.loaded / p.total) * 100);
           if (progBar)   progBar.style.width = pct + '%';
           if (progPct)   progPct.textContent = pct + '%';
           if (progStatus) progStatus.textContent = 'Uploading…';
-        },
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try { resolve(JSON.parse(xhr.responseText)); }
+            catch { resolve({ url: null, key: r2Path }); }
+          } else {
+            reject(new Error(`Upload failed (HTTP ${xhr.status}): ${xhr.responseText.slice(0,200)}`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error during upload'));
+        xhr.send(form);
       });
-      if (error) throw error;
-      const { data: { publicUrl } } = supabase.storage.from('aurenix-media').getPublicUrl(fileName);
+
+      const publicUrl = uploadResult.url || `${UPLOAD_WORKER_URL}/${encodeURIComponent(r2Path)}`;
+      const fileName  = uploadResult.key || r2Path;
       if (progStatus) progStatus.textContent = 'Saving…';
 
       await addDoc(collection(db, 'media_submissions'), {

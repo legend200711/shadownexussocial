@@ -1,9 +1,12 @@
 /**
- * Aurenix — Firestore Client (channel data only)
+ * SHADOW NEXUS SOCIAL — TV Firestore Client
  * snx-ch-firebase.js
  *
- * Provides the Aurenix Firestore db instance and helpers for channel state,
- * media library, and queue data (Firebase project: remix-studio-4bf8a).
+ * OWNERSHIP: Shadow Nexus Social
+ *
+ * Provides the SNS Firestore db instance and helpers for TV channel state,
+ * media library, schedule, queue, and Now Playing data.
+ * Firebase project: remix-studio-4bf8a  (SNS TV Firestore)
  *
  * AUTHENTICATION NOTE:
  *   This file no longer manages authentication.  Auth is handled exclusively
@@ -12,10 +15,10 @@
  *
  *   Auth-related imports (getAuth, signInWithEmailAndPassword, etc.) are kept
  *   only because snx-ch-auth-bridge.js re-exports them for compatibility with
- *   modules that call onAuthStateChanged / signOut against the Aurenix db.
+ *   modules that call onAuthStateChanged / signOut against this db.
  *   In practice auth state always comes from the SNS session.
  *
- * Firebase project: remix-studio-4bf8a  (Firestore / channel data)
+ *   SNS TV does NOT require any separate external engine to access this data.
  */
 
 import { initializeApp, getApps }               from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
@@ -57,6 +60,11 @@ const _AURENIX_APP_NAME = 'aurenix-channel';
 const _app  = getApps().find(a => a.name === _AURENIX_APP_NAME)
            || initializeApp(firebaseConfig, _AURENIX_APP_NAME);
 const _aurenixAuth = getAuth(_app); // kept internally for onAuthStateChanged re-export
+
+// Export the Aurenix auth instance so snx-ch-auth-bridge.js can sign it in
+// with a Firebase custom token minted by the SNS Worker, giving the Firestore
+// SDK a valid request.auth when writing to remix-studio-4bf8a collections.
+export const tvAuth = _aurenixAuth;
 
 // Disable Firestore offline persistence for the channel-state listener.
 // The default IndexedDB persistence causes onSnapshot to deliver a stale

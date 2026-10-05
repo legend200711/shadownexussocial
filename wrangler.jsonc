@@ -33,8 +33,44 @@
     {
       "binding": "AI_RL",
       "id": "2b65e37116304cb88c861bae2fc5c7a4"
+    },
+    // ── SNS TV idempotency lock store ────────────────────────────────────────
+    // Used by the SNS 24-Hour TV scheduled advancement to prevent double-advance.
+    // REQUIRED before deployment:
+    //   npx wrangler kv namespace create SNX_TV_KV
+    //   Then replace the id below with the returned namespace ID.
+    // Until the namespace is created, the scheduler advances without KV locking
+    // (safe: Firestore state check is the secondary guard).
+    //
+    // Example:
+    //   npx wrangler kv namespace create SNX_TV_KV
+    //   → { id: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", title: "yellow-term-11e6-SNX_TV_KV" }
+    {
+      "binding": "SNX_TV_KV",
+      "id": "fb682e82606f4182bd4af6eaf7b4a5cc"
     }
   ],
+
+  // ── Cloudflare Cron Triggers: SNS TV 24/7 scheduled advancement ─────────
+  // Recommended frequency: every 1 minute.
+  //
+  // Why 1 minute?
+  //   SNS TV uses authoritative timestamps (started_at + duration_sec) to
+  //   determine what is currently playing.  The cron is a recovery mechanism,
+  //   not a real-time playback clock.  1-minute granularity means:
+  //     – Advancement is detected within 60s of an item ending
+  //     – Catch-up logic handles the exact elapsed position regardless of delay
+  //     – No excessive API calls to Firestore
+  //
+  // Cloudflare Workers Free plan: 100,000 requests/day limit (shared with fetch).
+  //   1-minute cron = 1,440 invocations/day — well within free tier.
+  //   Paid Workers plans have no invocation limits.
+  //
+  // ACTIVATION REQUIRED — DO NOT activate until authorized:
+  //   See MANUAL CLOUDFLARE STEP REQUIRED at the bottom of this file.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
 
   "vars": {
     "LIVEKIT_URL": "wss://chris-oxi8fwap.livekit.cloud",
@@ -44,6 +80,16 @@
 
   // ── Required secrets (set via `wrangler secret put`) ─────────────────────
   // FIREBASE_WEB_API_KEY  — already set; required for Firebase auth
+  //
+  // FIREBASE_SERVICE_KEY  — REQUIRED for SNS TV 24/7 scheduled advancement
+  //   This is a service account JSON for the SNS project (horr-a08f4).
+  //   *** NOT remix-studio-4bf8a — that project is no longer used by SNS TV. ***
+  //   The SNS TV rebuild (2026) stores all TV state in horr-a08f4.
+  //   Create: Firebase Console → horr-a08f4 → Project Settings →
+  //           Service Accounts → Generate new private key
+  //   Store:  wrangler secret put FIREBASE_SERVICE_KEY --name yellow-term-11e6
+  //   Without this key, the scheduled advancement and /channel/advance will
+  //   return { advanced: false, reason: "service_account_not_configured" }.
   //
   // Stage 2A secrets NO LONGER NEEDED (removed in Stage 2B):
   //   SHADOW_MODEL_ENDPOINT  — removed; Workers AI binding replaces this

@@ -1,14 +1,20 @@
 /**
- * AURENIX CHANNEL ENGINE
- * aurenix-channel-engine.js
+ * SHADOW NEXUS SOCIAL — Channel Programming Engine
+ * snx-ch-engine.js
+ *
+ * OWNERSHIP: Shadow Nexus Social
+ * STATUS: Not currently imported by any active SNS TV module.
+ *         Retained as a reference implementation for per-channel programming.
+ *         Does not make SNS TV depend on any separate external service.
  *
  * Generic 24/7 TV engine for every non-ALTV channel.
  * Each channel has fully independent state, programming, and commercial settings.
+ * All state is stored in SNS Firestore — no external engine dependency.
  *
- * Firestore:
+ * SNS Firestore:
  *   network_channels/{id}        — channel config (commercials, mode, anti-repeat…)
  *   network_state/{id}           — live playback state (current_item, started_at, queue…)
- *   network_ch_config/{id}       — per-channel engine config (mirrors channel_live_tv_config)
+ *   network_ch_config/{id}       — per-channel engine config
  *
  * Programming modes: 'random' | 'ordered' | 'shuffle'
  * Commercial modes:  ON (configurable) | OFF

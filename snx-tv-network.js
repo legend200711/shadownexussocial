@@ -326,77 +326,25 @@ function _startSubscriptions() {
 }
 
 /* ════════════════════════════════════
-   RENDER — STUDIO (Network-level cosmetic panel)
-   The actual channel studio controls are in snx-ch-control.js
-   and are accessed via the CHANNEL STUDIO button in the nav.
-   This panel is a clean cosmetic overview for the TV Studio tab.
+   RENDER — STUDIO
+   Mounts the SNS-native TV Studio (snx-tv-studio.js).
+   Uses SNS Firestore (horr-a08f4) exclusively.
+   No external engine. No separate Firebase project.
 ════════════════════════════════════ */
-function _renderStudioSection() {
+let _studioMounted = false;
+
+async function _renderStudioSection() {
   const el = document.getElementById('snx-tn-studio');
   if (!el) return;
-
-  // Read current now-playing from theater module's synced elements
-  const nowTitle = document.getElementById('snx-tnp-title')?.textContent?.trim() ||
-                   document.getElementById('ax-np-panel-title')?.textContent?.trim() || '—';
-  const nowSub   = document.getElementById('snx-tnp-meta')?.textContent?.trim() ||
-                   document.getElementById('ax-np-panel-meta')?.textContent?.trim() || '';
-  const upNext   = document.getElementById('snx-tnx-title')?.textContent?.trim() || '—';
-
-  // Determine channel status
-  const mediaEl   = document.getElementById('ax-video') || document.getElementById('ax-audio');
-  const isOnAir   = !!(mediaEl && (mediaEl.src || mediaEl.currentSrc) && !mediaEl.paused);
-
-  el.innerHTML = `
-    <div class="snx-tn-studio-header">
-      <div class="snx-tn-studio-title">TV STUDIO</div>
-      <div class="snx-tn-studio-sub">SHADOW NEXUS 24-HOUR TV · FOUNDER CONTROL</div>
-    </div>
-
-    <div class="snx-tn-studio-on-air">
-      <span class="snx-tn-studio-on-air-dot" aria-hidden="true"></span>
-      ${isOnAir ? 'ON AIR' : 'STANDBY'}
-    </div>
-
-    <div class="snx-tn-studio-card">
-      <div class="snx-tn-studio-card-label">CURRENT PROGRAM</div>
-      <div class="snx-tn-studio-card-value">${_esc(nowTitle)}</div>
-      ${nowSub ? `<div class="snx-tn-studio-card-sub">${_esc(nowSub)}</div>` : ''}
-    </div>
-
-    <div class="snx-tn-studio-card">
-      <div class="snx-tn-studio-card-label">UP NEXT</div>
-      <div class="snx-tn-studio-card-value">${_esc(upNext)}</div>
-    </div>
-
-    <div class="snx-tn-studio-card">
-      <div class="snx-tn-studio-card-label">CHANNEL STATUS</div>
-      <div class="snx-tn-studio-card-value" style="color:${isOnAir ? 'var(--snx-green)' : 'var(--snx-text-muted)'}">
-        ${isOnAir ? '● BROADCASTING' : '○ STANDBY'}
-      </div>
-    </div>
-
-    <div class="snx-tn-studio-section-label">PROGRAMMING</div>
-    <button class="snx-tn-studio-link-btn" onclick="if(window._snxOpenChannelStudio)window._snxOpenChannelStudio('live-tv')">
-      <span>Playlists &amp; Programs</span>
-      <span class="snx-tn-studio-link-btn-arrow">›</span>
-    </button>
-    <button class="snx-tn-studio-link-btn" onclick="if(window._snxOpenChannelStudio)window._snxOpenChannelStudio('library')">
-      <span>Media Library</span>
-      <span class="snx-tn-studio-link-btn-arrow">›</span>
-    </button>
-
-    <div class="snx-tn-studio-section-label">SCHEDULE</div>
-    <button class="snx-tn-studio-link-btn" onclick="if(window._snxOpenChannelStudio)window._snxOpenChannelStudio('schedule')">
-      <span>Manage Schedule</span>
-      <span class="snx-tn-studio-link-btn-arrow">›</span>
-    </button>
-
-    <div class="snx-tn-studio-section-label">SYSTEM</div>
-    <button class="snx-tn-studio-link-btn" onclick="if(window._snxOpenChannelStudio)window._snxOpenChannelStudio('dashboard')">
-      <span>Open Full Channel Studio</span>
-      <span class="snx-tn-studio-link-btn-arrow">›</span>
-    </button>
-  `;
+  if (_studioMounted) return;
+  _studioMounted = true;
+  try {
+    const { mountTvStudio } = await import('./snx-tv-studio.js');
+    mountTvStudio(el, _user);
+  } catch (err) {
+    console.warn('[SNX TV Studio] Load error:', err.message);
+    el.innerHTML = `<div style="padding:20px;color:#5a80a8;font-size:12px;">TV Studio failed to load: ${_esc(err.message)}</div>`;
+  }
 }
 
 /* ════════════════════════════════════

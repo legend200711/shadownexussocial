@@ -1,16 +1,24 @@
 /**
- * 24-HOUR CHANNEL BROADCAST ENGINE
+ * SHADOW NEXUS SOCIAL — 24-Hour TV Broadcast Player
  * snx-ch-broadcast.js
  *
- * Multi-channel 24/7 television network for Shadow Nexus Social.
+ * OWNERSHIP: Shadow Nexus Social
+ *
+ * Multi-channel 24/7 television broadcast player for Shadow Nexus Social.
  * Used by channel.html (standalone path).
  * When accessed via index.html, snx-ch-adapter.js is used instead.
  *
+ * This module does NOT depend on any separate external channel engine.
+ * All TV state — channels, media, queue, schedule, Now Playing — is
+ * owned by and stored in Shadow Nexus Social (Firestore + SNS R2 storage).
+ * The Cloudflare Worker (ADVANCE_WORKER_URL) is SNS infrastructure for
+ * server-side channel advancement; it is not an external engine owner.
+ *
  * Auth flow (channel.html standalone):
  *   1. onAuthChange fires (reads window._snxAuth — SNS Firebase).
- *   2. No user → show "sign in to Shadow Nexus Social" screen with link to index.html.
- *   3. User authenticated → load channels → show 24-Hour Channel.
- *   4. Founder → also show Channel Studio link.
+ *   2. No user → show "sign in to Shadow Nexus Social" screen.
+ *   3. User authenticated → load channels → show 24-Hour TV.
+ *   4. Founder → also show TV Studio link.
  */
 
 import {
@@ -25,17 +33,15 @@ import {
 import { LIVE_TV_CHANNEL_ID } from './snx-ch-live-tv.js';
 // All channel advancement (including ALTV) goes through the Cloudflare Worker.
 // liveTvChannelAdvance is no longer called from the broadcast player.
-import { supabase } from './snx-ch-supabase.js';
 
 /* ════════════════════════════════════
    CONSTANTS
 ════════════════════════════════════ */
 const FOUNDER_EMAIL  = 'christijerina46@gmail.com';
-const MEDIA_BUCKET   = 'aurenix-media';
 // Cloudflare Worker that provides the authoritative server-side advance endpoint.
 // Regular viewers POST here when their media ends so the channel advances even
 // when Founder Studio is not open.
-const ADVANCE_WORKER_URL = 'https://aurenix-upload.nthntjrn.workers.dev/channel/advance';
+const ADVANCE_WORKER_URL = 'https://yellow-term-11e6.nthntjrn.workers.dev/channel/advance';
 
 /* ════════════════════════════════════
    STATE
@@ -1933,7 +1939,8 @@ function _renderUpNext(items) {
 /* ════════════════════════════════════
    SUBMIT CONTENT MODAL
 ════════════════════════════════════ */
-const UPLOAD_WORKER_URL = 'https://aurenix-upload.nthntjrn.workers.dev';
+// SNS R2 Worker — same worker used by all SNS features (profile-music, nexus, live, etc.)
+const UPLOAD_WORKER_URL = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 
 function _subFmtSize(bytes) {
   if (!bytes) return '0 B';
@@ -1959,35 +1966,40 @@ function _subGuessType(mime, filename) {
 async function _subUploadFile(file, onProgress, onStatus) {
   if (!auth.currentUser) throw new Error('Not signed in — please log in again.');
   const idToken = await auth.currentUser.getIdToken(true);
+  const uid     = auth.currentUser.uid;
 
-  onStatus('AUTHENTICATING…');
-  const authRes = await fetch(UPLOAD_WORKER_URL + '/submission/authorize', {
-    method:  'POST',
-    headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ fileName: file.name, contentType: file.type || 'application/octet-stream', size: file.size }),
-  });
-  const authData = await authRes.json();
-  if (!authRes.ok || !authData.ok)
-    throw new Error(authData.error || `Authorization failed — HTTP ${authRes.status}`);
-
-  const { signedUrl, storagePath, publicUrl } = authData;
-  if (!signedUrl?.includes('/object/upload/sign/') || !signedUrl.includes('token='))
-    throw new Error('Worker returned an invalid signed URL. Please try again.');
+  // Choose endpoint by MIME type — same pattern as snx-ch-control.js / profile-music.js
+  const isAudio = file.type.startsWith('audio/');
+  const isImage = file.type.startsWith('image/');
+  const endpoint = isAudio ? '/upload-music' : isImage ? '/upload-artwork' : '/';
+  const ext      = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const r2Path   = `tv/${uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
 
   onStatus('UPLOADING…');
-  await new Promise((resolve, reject) => {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  form.append('path', r2Path);
+
+  const result = await new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('PUT', signedUrl);
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-    xhr.setRequestHeader('x-upsert', 'true');
+    xhr.open('POST', UPLOAD_WORKER_URL + endpoint, true);
+    xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
     xhr.upload.onprogress = e => { if (e.lengthComputable) onProgress(e.loaded, e.total); };
-    xhr.onload  = () => {
-      if (xhr.status >= 200 && xhr.status < 300) { onProgress(file.size, file.size); resolve(); }
-      else reject(new Error(`Upload failed — HTTP ${xhr.status}: ${xhr.responseText?.slice(0,200)}`));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress(file.size, file.size);
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch (_) { resolve({}); }
+      } else {
+        reject(new Error(`Upload failed — HTTP ${xhr.status}: ${xhr.responseText?.slice(0,200)}`));
+      }
     };
     xhr.onerror = () => reject(new Error('Upload failed — network error'));
-    xhr.send(file);
+    xhr.send(form);
   });
+
+  const publicUrl  = result.url  || result.publicUrl  || '';
+  const storagePath = result.key || result.storagePath || r2Path;
   return { storagePath, publicUrl };
 }
 

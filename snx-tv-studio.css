@@ -1,0 +1,745 @@
+/**
+ * SHADOW NEXUS SOCIAL — TV Studio CSS
+ * snx-tv-studio.css
+ *
+ * Visual system for TV Studio and TV Viewer.
+ * Inherits the SNS design language (dark background, blue accents, tight layout).
+ * Mobile-responsive by design.
+ */
+
+/* ════════════════════════════════════════════════════
+   DESIGN TOKENS (inherit from SNS palette)
+════════════════════════════════════════════════════ */
+:root {
+  --tvs-bg:         #02040a;
+  --tvs-surface:    #070d1a;
+  --tvs-panel:      #0c1525;
+  --tvs-border:     rgba(0, 174, 239, 0.14);
+  --tvs-border-hi:  rgba(0, 174, 239, 0.32);
+  --tvs-text:       #c8d0e8;
+  --tvs-text-dim:   #5a80a8;
+  --tvs-text-muted: #3a5070;
+  --tvs-blue:       #00AEEF;
+  --tvs-blue-dim:   rgba(0, 174, 239, 0.10);
+  --tvs-green:      #39FF14;
+  --tvs-red:        #ff3344;
+  --tvs-orange:     #f0a500;
+  --tvs-radius:     6px;
+  --tvs-radius-lg:  10px;
+}
+
+/* ════════════════════════════════════════════════════
+   TV VIEWER — player area (embedded in channel.html/index.html)
+════════════════════════════════════════════════════ */
+
+.snx-tv-viewer {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: var(--tvs-radius-lg);
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  max-height: 60vh;
+}
+
+.snx-tv-viewer video,
+.snx-tv-viewer audio {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ── Now Playing bar (viewer) ── */
+.snx-tv-np-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.snx-tv-np-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--tvs-green);
+  box-shadow: 0 0 8px rgba(57,255,20,0.6);
+  flex-shrink: 0;
+  animation: snx-tv-pulse 1.5s infinite;
+}
+@keyframes snx-tv-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.snx-tv-np-title  { font-size: 14px; font-weight: 700; color: var(--tvs-text); flex: 1; }
+.snx-tv-np-artist { font-size: 11px; color: var(--tvs-text-dim); }
+.snx-tv-np-upnext { font-size: 11px; color: var(--tvs-text-dim); }
+.snx-tv-np-upnext strong { color: var(--tvs-blue); }
+
+/* ── Progress bar (viewer) ── */
+.snx-tv-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+.snx-tv-progress-time {
+  font-size: 11px;
+  color: var(--tvs-text-dim);
+  white-space: nowrap;
+  width: 38px;
+}
+.snx-tv-progress-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.snx-tv-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--tvs-blue), var(--tvs-green));
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+/* ── Controls ── */
+.snx-tv-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.snx-tv-ctrl-btn {
+  background: var(--tvs-blue-dim);
+  border: 1px solid var(--tvs-border-hi);
+  border-radius: var(--tvs-radius);
+  color: var(--tvs-blue);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 6px 12px;
+  transition: background 0.15s;
+}
+.snx-tv-ctrl-btn:hover { background: rgba(0,174,239,0.18); }
+
+/* ── ON AIR badge ── */
+.snx-tv-on-air-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--tvs-green);
+  border: 1px solid rgba(57,255,20,0.35);
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: rgba(57,255,20,0.06);
+}
+.snx-tv-on-air-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--tvs-green);
+  box-shadow: 0 0 6px rgba(57,255,20,0.6);
+  animation: snx-tv-pulse 1.2s infinite;
+}
+
+/* ════════════════════════════════════════════════════
+   TV STUDIO — main shell
+════════════════════════════════════════════════════ */
+
+.snx-tvs {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 0 40px;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  color: var(--tvs-text);
+}
+
+.snx-tvs-header {
+  padding: 20px 16px 12px;
+  border-bottom: 1px solid var(--tvs-border);
+  margin-bottom: 0;
+}
+
+.snx-tvs-title {
+  font-size: clamp(18px, 3vw, 26px);
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  color: var(--tvs-blue);
+}
+
+.snx-tvs-sub {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--tvs-text-muted);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── Tab navigation ── */
+.snx-tvs-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 12px 16px 0;
+  border-bottom: 1px solid var(--tvs-border);
+  background: var(--tvs-bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.snx-tvs-nav-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--tvs-text-dim);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 8px 12px;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.snx-tvs-nav-btn:hover { color: var(--tvs-text); }
+.snx-tvs-nav-btn.active {
+  color: var(--tvs-blue);
+  border-bottom-color: var(--tvs-blue);
+}
+
+.snx-tvs-body { padding: 20px 16px; }
+
+/* ════════════════════════════════════════════════════
+   SECTIONS — shared
+════════════════════════════════════════════════════ */
+.snx-tvs-section { display: flex; flex-direction: column; gap: 16px; }
+
+.snx-tvs-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.snx-tvs-section-title {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--tvs-text);
+}
+
+.snx-tvs-section-meta {
+  font-size: 11px;
+  color: var(--tvs-text-dim);
+  margin-top: 2px;
+}
+
+.snx-tvs-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.snx-tvs-col-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--tvs-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.snx-tvs-empty {
+  color: var(--tvs-text-muted);
+  font-size: 12px;
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* ── Form elements ── */
+.snx-tvs-input, .snx-tvs-select, .snx-tvs-search {
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  color: var(--tvs-text);
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+.snx-tvs-input:focus, .snx-tvs-select:focus, .snx-tvs-search:focus {
+  border-color: var(--tvs-border-hi);
+}
+.snx-tvs-select option { background: var(--tvs-surface); }
+.snx-tvs-file-input { color: var(--tvs-text-dim); font-size: 12px; }
+
+.snx-tvs-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--tvs-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  margin-top: 8px;
+}
+
+.snx-tvs-form-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+.snx-tvs-form-row > * { flex: 1; min-width: 120px; }
+
+/* ── Buttons ── */
+.snx-tvs-btn {
+  background: var(--tvs-blue-dim);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  color: var(--tvs-blue);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 7px 14px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.snx-tvs-btn:hover { background: rgba(0,174,239,0.18); }
+.snx-tvs-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.snx-tvs-btn-primary {
+  background: rgba(0,174,239,0.18);
+  border-color: rgba(0,174,239,0.45);
+}
+.snx-tvs-btn-primary:hover { background: rgba(0,174,239,0.28); }
+
+.snx-tvs-btn-del { color: var(--tvs-red); border-color: rgba(255,51,68,0.3); background: rgba(255,51,68,0.06); }
+.snx-tvs-btn-del:hover { background: rgba(255,51,68,0.14); }
+
+.snx-tvs-btn-ok  { color: var(--tvs-green); border-color: rgba(57,255,20,0.3); background: rgba(57,255,20,0.06); }
+.snx-tvs-btn-ok:hover { background: rgba(57,255,20,0.14); }
+
+.snx-tvs-btn-sm {
+  background: var(--tvs-blue-dim);
+  border: 1px solid var(--tvs-border);
+  border-radius: 4px;
+  color: var(--tvs-blue);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+.snx-tvs-btn-sm:hover { background: rgba(0,174,239,0.18); }
+
+/* ── Status / feedback ── */
+.snx-tvs-status {
+  font-size: 11px;
+  color: var(--tvs-text-dim);
+  padding: 4px 0;
+}
+.snx-tvs-status-ok   { color: var(--tvs-green); }
+.snx-tvs-status-err  { color: var(--tvs-red); }
+.snx-tvs-status-warn { color: var(--tvs-orange); }
+
+.snx-tvs-err { font-size: 12px; color: var(--tvs-red); padding: 4px 0; }
+
+/* ── Progress bar (upload) ── */
+.snx-tvs-progress-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.snx-tvs-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--tvs-blue), var(--tvs-green));
+  width: 0%;
+  transition: width 0.2s;
+}
+
+/* ── Filter row ── */
+.snx-tvs-filter-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.snx-tvs-filter-row .snx-tvs-search { flex: 2; }
+.snx-tvs-filter-row .snx-tvs-select { flex: 1; min-width: 100px; }
+
+/* ════════════════════════════════════════════════════
+   MEDIA GRID
+════════════════════════════════════════════════════ */
+.snx-tvs-media-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.snx-tvs-media-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  transition: border-color 0.15s;
+}
+.snx-tvs-media-card:hover { border-color: var(--tvs-border-hi); }
+
+.snx-tvs-media-card-icon { font-size: 20px; flex-shrink: 0; }
+.snx-tvs-media-card-info { flex: 1; min-width: 0; }
+.snx-tvs-media-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tvs-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-tvs-media-card-meta { font-size: 11px; color: var(--tvs-text-dim); margin-top: 1px; }
+.snx-tvs-media-card-status { font-size: 10px; margin-top: 2px; }
+.snx-tvs-media-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.snx-tvs-status-approved          { color: var(--tvs-green); }
+.snx-tvs-status-pending_approval  { color: var(--tvs-orange); }
+.snx-tvs-status-rejected          { color: var(--tvs-red); }
+
+/* ════════════════════════════════════════════════════
+   PLAYLISTS
+════════════════════════════════════════════════════ */
+.snx-tvs-pl-list { display: flex; flex-direction: column; gap: 6px; }
+
+.snx-tvs-pl-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  flex-wrap: wrap;
+}
+
+.snx-tvs-pl-info { flex: 1; min-width: 0; }
+.snx-tvs-pl-name { font-size: 13px; font-weight: 600; color: var(--tvs-text); }
+.snx-tvs-pl-meta { font-size: 11px; color: var(--tvs-text-dim); }
+.snx-tvs-pl-actions { display: flex; gap: 4px; }
+
+/* Playlist editor */
+.snx-tvs-pl-editor {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.snx-tvs-pl-col { display: flex; flex-direction: column; gap: 6px; }
+
+.snx-tvs-pl-item, .snx-tvs-pl-lib-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+}
+.snx-tvs-pl-item-pos { font-size: 11px; color: var(--tvs-text-muted); width: 20px; flex-shrink: 0; }
+.snx-tvs-pl-item-info { flex: 1; min-width: 0; font-size: 12px; color: var(--tvs-text); }
+.snx-tvs-pl-item-meta { font-size: 10px; color: var(--tvs-text-dim); }
+.snx-tvs-pl-lib-info  { flex: 1; min-width: 0; font-size: 12px; color: var(--tvs-text); }
+
+/* ════════════════════════════════════════════════════
+   PROGRAMMING
+════════════════════════════════════════════════════ */
+.snx-tvs-prog-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  flex-wrap: wrap;
+}
+.snx-tvs-prog-info { flex: 1; min-width: 0; }
+.snx-tvs-prog-name { font-size: 13px; font-weight: 600; color: var(--tvs-text); }
+.snx-tvs-prog-meta { font-size: 11px; color: var(--tvs-text-dim); }
+.snx-tvs-prog-desc { font-size: 11px; color: var(--tvs-text-muted); margin-top: 2px; }
+
+/* ════════════════════════════════════════════════════
+   SCHEDULE
+════════════════════════════════════════════════════ */
+.snx-tvs-sched-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.snx-tvs-sched-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  margin-bottom: 4px;
+}
+.snx-tvs-sched-item.is-current { border-color: var(--tvs-green); background: rgba(57,255,20,0.06); }
+.snx-tvs-sched-pos  { font-size: 11px; color: var(--tvs-text-muted); width: 28px; flex-shrink: 0; }
+.snx-tvs-sched-info { flex: 1; min-width: 0; font-size: 12px; color: var(--tvs-text); }
+.snx-tvs-sched-meta { font-size: 10px; color: var(--tvs-text-dim); }
+
+.snx-tvs-sched-lib { display: flex; flex-direction: column; gap: 4px; }
+.snx-tvs-sched-lib-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+}
+
+/* ════════════════════════════════════════════════════
+   QUEUE
+════════════════════════════════════════════════════ */
+.snx-tvs-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius);
+  margin-bottom: 4px;
+}
+.snx-tvs-queue-item.is-current { border-color: var(--tvs-green); background: rgba(57,255,20,0.06); }
+.snx-tvs-queue-pos {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--tvs-text-muted);
+  width: 50px;
+  flex-shrink: 0;
+}
+.snx-tvs-queue-item.is-current .snx-tvs-queue-pos { color: var(--tvs-green); }
+
+/* ════════════════════════════════════════════════════
+   NOW PLAYING PANEL (studio)
+════════════════════════════════════════════════════ */
+.snx-tvs-np-panel {
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius-lg);
+  padding: 20px;
+}
+.snx-tvs-np-title  { font-size: 18px; font-weight: 800; color: var(--tvs-text); }
+.snx-tvs-np-artist { font-size: 13px; color: var(--tvs-text-dim); margin-top: 2px; }
+.snx-tvs-np-type   { font-size: 10px; letter-spacing: 1.5px; color: var(--tvs-text-muted); margin: 6px 0; text-transform: uppercase; }
+.snx-tvs-np-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.snx-tvs-np-elapsed, .snx-tvs-np-dur {
+  font-size: 11px;
+  color: var(--tvs-text-dim);
+  white-space: nowrap;
+  width: 38px;
+}
+.snx-tvs-np-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.snx-tvs-np-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--tvs-blue), var(--tvs-green));
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+.snx-tvs-np-upnext { font-size: 12px; color: var(--tvs-text-dim); margin: 8px 0; }
+.snx-tvs-np-upnext strong { color: var(--tvs-blue); }
+.snx-tvs-np-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ════════════════════════════════════════════════════
+   TV GUIDE
+════════════════════════════════════════════════════ */
+.snx-tvs-guide-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--tvs-border);
+}
+.snx-tvs-guide-row:last-child { border-bottom: none; }
+.snx-tvs-guide-row.is-current { background: rgba(57,255,20,0.04); padding-left: 8px; border-radius: var(--tvs-radius); }
+
+.snx-tvs-guide-time {
+  font-size: 11px;
+  color: var(--tvs-text-muted);
+  white-space: nowrap;
+  min-width: 100px;
+  padding-top: 1px;
+}
+.snx-tvs-guide-info { flex: 1; font-size: 13px; color: var(--tvs-text); }
+.snx-tvs-guide-meta { font-size: 10px; color: var(--tvs-text-dim); margin-top: 2px; }
+
+.snx-tvs-on-air-pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: var(--tvs-green);
+  border: 1px solid rgba(57,255,20,0.35);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+/* ════════════════════════════════════════════════════
+   SETTINGS
+════════════════════════════════════════════════════ */
+.snx-tvs-settings-group {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--tvs-border);
+  margin-bottom: 4px;
+}
+.snx-tvs-settings-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  color: var(--tvs-text-muted);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.snx-tvs-settings-group .snx-tvs-actions { flex-wrap: wrap; }
+
+/* ════════════════════════════════════════════════════
+   MODAL
+════════════════════════════════════════════════════ */
+.snx-tvs-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+
+.snx-tvs-modal {
+  background: var(--tvs-surface);
+  border: 1px solid var(--tvs-border-hi);
+  border-radius: var(--tvs-radius-lg);
+  padding: 24px;
+  max-width: 480px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snx-tvs-modal-title {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--tvs-text);
+  margin-bottom: 8px;
+}
+
+.snx-tvs-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* ════════════════════════════════════════════════════
+   GATE (studio security)
+════════════════════════════════════════════════════ */
+.snx-tvs-gate {
+  color: var(--tvs-text-dim);
+  font-size: 13px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+/* ════════════════════════════════════════════════════
+   UPLOAD FORM
+════════════════════════════════════════════════════ */
+.snx-tvs-upload-form {
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border);
+  border-radius: var(--tvs-radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ════════════════════════════════════════════════════
+   TOAST
+════════════════════════════════════════════════════ */
+.snx-tvs-toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--tvs-panel);
+  border: 1px solid var(--tvs-border-hi);
+  border-radius: var(--tvs-radius);
+  color: var(--tvs-text);
+  font-size: 13px;
+  padding: 10px 16px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.25s, transform 0.25s;
+  z-index: 10000;
+}
+.snx-tvs-toast.visible { opacity: 1; transform: translateY(0); }
+.snx-tvs-toast-err { border-color: rgba(255,51,68,0.4); color: var(--tvs-red); }
+
+/* ════════════════════════════════════════════════════
+   MOBILE RESPONSIVE
+════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .snx-tvs-nav { padding: 8px 8px 0; }
+  .snx-tvs-nav-btn { font-size: 9px; padding: 7px 8px; }
+  .snx-tvs-body { padding: 12px 10px; }
+
+  .snx-tvs-pl-editor,
+  .snx-tvs-sched-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .snx-tvs-section-head { flex-direction: column; }
+  .snx-tvs-actions { justify-content: flex-start; }
+
+  .snx-tv-viewer { max-height: 45vw; }
+  .snx-tv-np-bar { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+  .snx-tvs-guide-time { min-width: 80px; font-size: 10px; }
+
+  .snx-tvs-toast { right: 10px; left: 10px; text-align: center; }
+}
+
+@media (max-width: 380px) {
+  .snx-tvs-nav-btn { padding: 6px 6px; letter-spacing: 0; }
+  .snx-tvs-title { font-size: 16px; }
+}

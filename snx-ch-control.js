@@ -1,21 +1,29 @@
 /**
- * 24-HOUR CHANNEL STUDIO
- * aurenix-control.js
+ * SHADOW NEXUS SOCIAL — 24-Hour TV Studio
+ * snx-ch-control.js
  *
- * Founder-only. Loaded lazily when Founder clicks CHANNEL STUDIO.
+ * OWNERSHIP: Shadow Nexus Social
+ *
+ * Founder-only TV Studio for Shadow Nexus Social 24-Hour TV.
+ * Loaded lazily when Founder clicks TV STUDIO.
  * Authorization is enforced BOTH here (email check) AND in Firestore
  * Security Rules (isAdmin() function checks email + email_verified).
  *
- * Firestore collections:
- *   network_media/{id}     — media library (all uploads)
- *   network_state/{id}     — live playback state per channel
- *   network_channels/{id}  — channel definitions
- *   founder_stats/global   — broadcast statistics
+ * All TV state, media, schedules, playlists, queue, and Now Playing
+ * belong to and are stored by Shadow Nexus Social. No separate external
+ * engine is required for TV Studio to operate.
  *
- * Storage: Supabase aurenix-media bucket — uploads go via the secure
- *   Cloudflare Worker (UPLOAD_WORKER_URL) which verifies the Firebase
- *   ID token server-side and uses the Supabase service-role key.
- *   The service-role key NEVER touches browser JavaScript.
+ * SNS Firestore collections:
+ *   network_media/{id}           — media library (all uploads)
+ *   network_state/{id}           — live playback state per channel
+ *   network_channels/{id}        — channel definitions
+ *   founder_stats/global         — broadcast statistics
+ *   channel_live_tv_config/ALTV  — 24-Hour TV programming config
+ *   network_commercials/{id}     — commercial library
+ *
+ * SNS Storage: SNS R2 bucket (legend) — uploads go via the secure
+ *   SNS Cloudflare Worker (UPLOAD_WORKER_URL) which verifies the Firebase
+ *   ID token server-side. The service-role key NEVER touches browser JS.
  */
 
 import {
@@ -24,6 +32,10 @@ import {
   updateDoc, deleteDoc, onSnapshot, serverTimestamp,
   query, orderBy, where, limit,
 } from './snx-ch-auth-bridge.js';
+
+// SNS Firestore (horr-a08f4) — used ONLY to read the Founder's own SNS media
+// for the "Import from SNS" bridge. No user data is ever exposed cross-user.
+import { snsDb } from './snx-creator-channels.js';
 
 import {
   LIVE_TV_CHANNEL_ID,
@@ -42,33 +54,20 @@ import {
   isLiveTvEngineActive,
 } from './snx-ch-live-tv.js';
 
-// Supabase client is used ONLY for the delete action (anon DELETE policy
-// on storage.objects is kept intentionally). Uploads go through the
-// Cloudflare Worker instead — supabase is not used for INSERT here.
-import { supabase } from './snx-ch-supabase.js';
-
 /* ═══════════════════════════════════════
    CONSTANTS
 ═══════════════════════════════════════ */
 const FOUNDER_EMAIL = 'christijerina46@gmail.com';
-const MEDIA_BUCKET  = 'aurenix-media';
-// No client-side file-size cap is imposed.
-// The Supabase bucket file_size_limit (enforced by the Worker) is the real limit.
-// Surfacing the actual storage-provider error is better than an arbitrary app limit.
-const MAX_FILE_MB   = null; // intentionally unset — no artificial limit
+const MEDIA_BUCKET  = 'legend';   // SNS R2 bucket name (Cloudflare R2)
+const MAX_FILE_MB   = null; // no artificial client-side cap
 
 /**
- * URL of the deployed Cloudflare Worker that brokers uploads.
- * Set this to your Worker's URL after running:
- *   cd upload-worker && npx wrangler deploy
- *
- * Example: 'https://aurenix-upload.YOUR_SUBDOMAIN.workers.dev'
- *
- * The Worker verifies the Firebase ID token, confirms the Founder email,
- * then uploads to Supabase using the server-side service-role key.
- * Regular users are rejected at the Worker with HTTP 403.
+ * SNS Cloudflare R2 Worker — the same worker used by all other SNS features
+ * (profile music, social posts, live streaming, radio, etc.).
+ * Handles /upload-music (audio), /upload-artwork (image), and POST / (video).
+ * Files land in the SNS R2 bucket "legend"; metadata is saved to network_media.
  */
-const UPLOAD_WORKER_URL = 'https://aurenix-upload.nthntjrn.workers.dev';
+const UPLOAD_WORKER_URL = 'https://yellow-term-11e6.nthntjrn.workers.dev';
 
 // Channels are loaded from Firestore `network_channels` — NOT hardcoded.
 // _dbChannels is the live list; _channels() returns it.
@@ -491,6 +490,14 @@ function _buildFounderHTML() {
     <!-- ══ MEDIA LIBRARY ══ -->
     <div class="ax-ctrl-pane" id="ax-pane-library">
       <div class="ax-section-title">Media <span>Library</span></div>
+      <div style="background:rgba(0,174,239,0.07);border:1px solid rgba(0,174,239,0.2);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:200px;font-size:12px;color:var(--text-dim);line-height:1.6;">
+          <strong style="color:var(--blue-bright);">IMPORT FROM SNS MEDIA</strong><br>
+          Reference your existing Shadow Nexus Social audio and video directly — no re-upload, same R2 object.
+        </div>
+        <button class="ax-btn-sm" id="ax-sns-import-btn" style="white-space:nowrap;padding:8px 16px;font-weight:700;">☁ Import SNS Media</button>
+      </div>
+      <div id="ax-sns-import-status" style="display:none;font-size:11px;padding:6px 10px;border-radius:5px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);"></div>
       <div class="ax-lib-toolbar">
         <div class="ax-lib-filters" id="ax-lib-filter-row">
           ${LIB_FILTERS.map(f => `<button class="ax-btn-sm ax-lib-filter ${f.id === 'all' ? 'active' : ''}" data-type="${f.id}">${f.label}</button>`).join('')}
@@ -609,7 +616,7 @@ function _buildFounderHTML() {
           <div class="ax-security-row"><span>Auth Backend</span><span class="ax-security-val">Firebase Authentication</span></div>
           <div class="ax-security-row"><span>DB Authorization</span><span class="ax-security-val">Firestore Rules — isAdmin()</span></div>
           <div class="ax-security-row"><span>Email Verified</span><span class="ax-security-val" id="ax-sec-verified">checking…</span></div>
-          <div class="ax-security-row"><span>Storage Backend</span><span class="ax-security-val">Supabase (aurenix-media)</span></div>
+          <div class="ax-security-row"><span>Storage Backend</span><span class="ax-security-val">SNS R2 (legend)</span></div>
         </div>
         <div class="ax-security-card">
           <div class="ax-security-title">🔒 ACCESS CONTROLS</div>
@@ -627,15 +634,15 @@ function _buildFounderHTML() {
           <div class="ax-security-title">🔧 WORKER DIAGNOSTICS</div>
           <div class="ax-security-row"><span>Upload Worker URL</span><span class="ax-security-val" style="font-size:11px;word-break:break-all;">${UPLOAD_WORKER_URL}</span></div>
           <div class="ax-security-row"><span>Worker Status</span><span class="ax-security-val" id="ax-sec-worker">checking…</span></div>
-          <div class="ax-security-row"><span>SUPABASE_URL</span><span class="ax-security-val" id="ax-sec-sup-url">…</span></div>
-          <div class="ax-security-row"><span>SUPABASE_SERVICE_KEY</span><span class="ax-security-val" id="ax-sec-sup-key">…</span></div>
+          <div class="ax-security-row"><span>R2 Bucket</span><span class="ax-security-val" id="ax-sec-sup-url">…</span></div>
+          <div class="ax-security-row"><span>R2 Worker Auth</span><span class="ax-security-val" id="ax-sec-sup-key">…</span></div>
           <div class="ax-security-row"><span>FIREBASE_PROJECT_ID</span><span class="ax-security-val" id="ax-sec-fb-id">…</span></div>
           <div class="ax-security-row"><span>Bucket file_size_limit</span><span class="ax-security-val" id="ax-sec-bucket-limit">…</span></div>
           <div class="ax-security-row"><span>Effective Upload Limit</span><span class="ax-security-val" id="ax-sec-eff-limit">…</span></div>
           <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
             <button class="ax-btn-sm" id="ax-sec-recheck-btn">↺ Re-check Worker</button>
             <button class="ax-btn-sm" id="ax-sec-probe-limit-btn">🔍 Probe Upload Limit</button>
-            <button class="ax-btn-sm" id="ax-sec-fix-limit-btn" title="Raise project-level storage limit (requires SUPABASE_MANAGEMENT_TOKEN)">⬆ Set Storage Limit</button>
+            <button class="ax-btn-sm" id="ax-sec-fix-limit-btn" title="Inspect R2 bucket storage usage">⬆ Storage Info</button>
           </div>
           <div id="ax-sec-limit-result" style="margin-top:8px;font-size:11px;color:var(--text-dim);display:none;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;background:var(--surface-hi);border-radius:4px;padding:8px;"></div>
         </div>
@@ -655,9 +662,9 @@ function _buildFounderHTML() {
     <div class="ax-ctrl-pane" id="ax-pane-live-tv">
       <div class="ax-section-title">📡 <span>24-HOUR LIVE</span></div>
       <div style="background:rgba(255,45,85,0.08);border:1px solid rgba(255,45,85,0.25);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;line-height:1.7;color:var(--text-dim);">
-        <strong style="color:#ff2d55;">24-HOUR LIVE TV</strong> — 24/7 shared television broadcast. All viewers watch the same live position.
-        Random programs, automatic commercial breaks, Founder-controlled content pool.
-        This is the primary 24-Hour Channel.
+        <strong style="color:#ff2d55;">SHADOW NEXUS SOCIAL — 24-HOUR LIVE TV</strong> — 24/7 shared television broadcast owned and operated by Shadow Nexus Social.
+        All viewers watch the same live position. Random programs, automatic commercial breaks, Founder-controlled content pool.
+        State, schedule, queue, and Now Playing are stored in and served by Shadow Nexus Social.
       </div>
 
       <div class="ax-one-status-bar" id="ax-ltv-status-bar">
@@ -665,7 +672,7 @@ function _buildFounderHTML() {
           <span class="ax-one-live-dot" id="ax-ltv-live-dot"></span>
           <span id="ax-ltv-status-text">CHANNEL OFFLINE</span>
         </div>
-        <div style="font-size:11px;color:var(--text-dim);" id="ax-ltv-engine-state">Engine not started</div>
+        <div style="font-size:11px;color:var(--text-dim);" id="ax-ltv-engine-state">SNS TV — not broadcasting</div>
       </div>
 
       <div class="ax-one-section-label">LIVE CHANNEL CONTROL</div>
@@ -785,7 +792,7 @@ function _buildFounderHTML() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:24px;">
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;">
           <div style="font-size:11px;font-weight:700;letter-spacing:2px;color:var(--blue-bright);margin-bottom:6px;">☁ SHADOW NEXUS STORAGE</div>
-          <div style="font-size:13px;color:var(--text);margin-bottom:4px;">aurenix-media bucket</div>
+          <div style="font-size:13px;color:var(--text);margin-bottom:4px;">SNS R2 legend bucket</div>
           <div style="font-size:11px;color:var(--green);">✓ Active — all media stored here</div>
         </div>
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;">
@@ -799,13 +806,13 @@ function _buildFounderHTML() {
         <div style="font-size:15px;font-weight:900;letter-spacing:0.1em;color:var(--text);margin-bottom:12px;">SHADOW NEXUS MEDIA STORAGE</div>
         <div style="font-size:12px;color:var(--text-dim);line-height:1.8;">
           All media — audio, video, and images — is stored directly in Shadow Nexus.<br>
-          Upload via <strong style="color:var(--text);">Upload Center</strong>. Files are stored in the <code style="background:var(--surface-hi);padding:1px 4px;border-radius:3px;">aurenix-media</code> bucket.<br>
-          Access to media files requires authorization. The service-role key never reaches the browser.<br>
+          Upload via <strong style="color:var(--text);">Upload Center</strong>. Files are stored in the <code style="background:var(--surface-hi);padding:1px 4px;border-radius:3px;">legend</code> R2 bucket.<br>
+          Access to media files requires authorization. The Firebase ID token is verified server-side by the SNS Worker.<br>
           <strong style="color:var(--orange,#f0a500);">Supported formats:</strong> MP3, WAV, M4A, AAC, MP4, WebM, MOV, JPG, JPEG, PNG, WebP
         </div>
         <div style="margin-top:14px;padding:10px 14px;background:rgba(30,80,255,0.06);border:1px solid rgba(30,80,255,0.2);border-radius:6px;font-size:12px;color:var(--text-dim);">
           💡 To upload media: go to <strong style="color:var(--text);">Upload Center</strong>.
-          Files are stored in <code style="background:var(--surface-hi);padding:1px 4px;border-radius:3px;">aurenix-media/media/{uid}/</code> and require Founder authorization.
+          Files are stored in <code style="background:var(--surface-hi);padding:1px 4px;border-radius:3px;">legend/{uid}/{type}/</code> and require Founder authorization.
         </div>
       </div>
 
@@ -1402,7 +1409,7 @@ function _renderSubmissions() {
             ${_esc(s.artist || '')}${s.artist ? ' · ' : ''}${_esc(s.type || 'media')} · submitted by ${_esc(s.submitted_email || s.submitted_by || '?')}
           </div>
           ${s.file_name ? `<div style="font-size:11px;color:var(--text-dim);margin-top:3px;">📄 ${_esc(s.file_name)}</div>` : ''}
-          ${s.url && s.storage_path ? `<div style="font-size:10px;color:var(--text-dim);margin-top:3px;word-break:break-all;">☁ Supabase Storage · <code style="font-size:10px;">${_esc(s.storage_path)}</code></div>` : ''}
+          ${s.url && s.storage_path ? `<div style="font-size:10px;color:var(--text-dim);margin-top:3px;word-break:break-all;">☁ SNS R2 · <code style="font-size:10px;">${_esc(s.storage_path)}</code></div>` : ''}
           ${s.url && !s.storage_path ? `<div style="font-size:11px;color:var(--blue-bright);margin-top:4px;word-break:break-all;"><a href="${_esc(s.url)}" target="_blank" rel="noopener" style="color:var(--blue-bright);">🔗 ${_esc(s.url.slice(0,60))}${s.url.length > 60 ? '…' : ''}</a></div>` : ''}
           ${s.description ? `<div style="font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.5;">${_esc(s.description)}</div>` : ''}
           <div style="font-size:10px;color:var(--text-muted);margin-top:4px;">Rights confirmed: ${s.rights_confirmed ? '✓ YES' : '✗ NO'}</div>
@@ -1868,29 +1875,19 @@ async function _handleFiles(files) {
 }
 
 /**
- * Upload a single file using the Supabase signed-URL architecture:
+ * Upload a single file to SNS R2 storage via the SNS Cloudflare Worker.
  *
- *   Phase 1 — Worker /authorize (tiny JSON, no file body)
- *     → Firebase token verified server-side
- *     → Founder email confirmed from verified token
- *     → Worker PATCHes bucket file_size_limit to 500 MiB if needed
- *       (fixes "The object exceeded the maximum allowed size" HTTP 400)
- *     → Worker POSTs to /storage/v1/object/upload/sign/<bucket>/<path>
- *       using the service-role key
- *     → Supabase returns { url: "/object/upload/sign/<bucket>/<path>?token=..." }
- *     → Worker prepends supabaseUrl + "/storage/v1" — path is NOT rewritten
- *     → Returns signedUrl + storagePath + publicUrl + bucketLimitBytes
+ * Uses the same worker (yellow-term-11e6) as all other SNS uploads:
+ *   - Audio → POST /upload-music   (returns { url, key })
+ *   - Video/Image → POST /         (returns { url, key })
  *
- *   Phase 2 — PUT directly to Supabase signed URL (no Worker in the data path)
- *     → XHR PUT to /storage/v1/object/upload/sign/<bucket>/<path>?token=
- *     → No Authorization header needed — ?token= in URL is the authorisation
- *     → IMPORTANT: must PUT to /object/upload/sign/ NOT /object/sign/
- *       (/object/sign/ is the download path and returns HTTP 400 without Auth)
- *     → File never passes through the Worker → no Cloudflare request-body limit
- *     → Size limit is enforced by the Supabase bucket's file_size_limit (500 MiB)
- *     → Progress: TRANSFER 0–99% → FINALIZING (waiting for server response) → VERIFIED
+ * Phase 1 — XHR POST to the SNS R2 Worker (file included in the request body)
+ *   → Firebase token verified server-side
+ *   → File stored in SNS R2 bucket "legend" under {uid}/{type}/{filename}
+ *   → Returns { url, key }  (public CDN URL + R2 key)
  *
- *   Phase 3 — Firestore metadata record
+ * Phase 2 — Firestore metadata record written to network_media (TV Firestore)
+ *   → Same as before; existing media record structure unchanged
  */
 async function _uploadFile(file) {
   const listEl  = document.getElementById('ax-upload-list');
@@ -1919,36 +1916,30 @@ async function _uploadFile(file) {
         <span class="ax-upload-pct" id="pct-${itemKey}" style="white-space:nowrap;min-width:36px;text-align:right;">0%</span>
       </div>
       <span class="ax-upload-bytes" id="bytes-${itemKey}" style="font-size:10px;color:var(--text-dim,#6870a0);white-space:nowrap;"></span>
-      <span class="ax-upload-status" id="st-${itemKey}">AUTHENTICATING…</span>
-      <span class="ax-upload-dest" id="dest-${itemKey}">${MEDIA_BUCKET}</span>
+      <span class="ax-upload-status" id="st-${itemKey}">UPLOADING…</span>
+      <span class="ax-upload-dest" id="dest-${itemKey}">SNS R2</span>
     `;
     listEl.prepend(row);
   }
 
-  // setProgress: clamp visual bar at 99 % during transfer; only setProgress(total,total)
-  // (or the post-verify call) advances to 100 % so the bar never shows complete
-  // while Supabase is still processing the object server-side.
   const setProgress = (loaded, total) => {
-    // Cap at 99 % while bytes are still transferring so the bar clearly differs
-    // from the verified-complete state (100 %).  The storage finalization step
-    // advances to 100 % only after server confirmation.
     const rawPct = total > 0 ? Math.round(loaded / total * 100) : 0;
     const pct    = (loaded < total) ? Math.min(99, rawPct) : rawPct;
     const bar    = document.getElementById(`bar-${itemKey}`);
     const pctEl  = document.getElementById(`pct-${itemKey}`);
-    const bytes  = document.getElementById(`bytes-${itemKey}`);
-    if (bar)   bar.style.width   = pct + '%';
-    if (pctEl) pctEl.textContent = pct + '%';
-    if (bytes && total > 0) bytes.textContent = `${_fmtSize(loaded)} / ${_fmtSize(total)}`;
+    const bytesEl = document.getElementById(`bytes-${itemKey}`);
+    if (bar)     bar.style.width   = pct + '%';
+    if (pctEl)   pctEl.textContent = pct + '%';
+    if (bytesEl && total > 0) bytesEl.textContent = `${_fmtSize(loaded)} / ${_fmtSize(total)}`;
   };
   const setStatus = (msg, color = '') => {
     const el = document.getElementById(`st-${itemKey}`);
     if (el) { el.textContent = msg; if (color) el.style.color = color; }
   };
-  // storagePath is set once /authorize succeeds; used by intelligent retry.
-  let _storagePath   = null;
-  let _publicUrl     = null;
-  let _retryCallback = null; // set per-failure to the right recovery action
+  let _r2Key       = null;   // R2 object key (for delete on failure)
+  let _publicUrl   = null;   // CDN URL returned by the worker
+  let _storagePath = null;   // same as _r2Key — stored in network_media for reference
+  let _retryCallback = null;
 
   const addRetry = () => {
     const row = document.getElementById(itemKey);
@@ -1959,15 +1950,8 @@ async function _uploadFile(file) {
     btn.textContent = '↺ Retry';
     btn.style.marginLeft = '8px';
     btn.onclick = () => {
-      if (_retryCallback) {
-        // Intelligent retry: run only the failed phase
-        row.querySelector('.ax-retry-btn')?.remove();
-        _retryCallback();
-      } else {
-        // No smart callback — full re-upload
-        row.remove();
-        _uploadFile(file);
-      }
+      if (_retryCallback) { row.querySelector('.ax-retry-btn')?.remove(); _retryCallback(); }
+      else { row.remove(); _uploadFile(file); }
     };
     row.appendChild(btn);
   };
@@ -1978,194 +1962,71 @@ async function _uploadFile(file) {
     try { duration_sec = await _getMediaDuration(file); } catch (_) {}
   }
 
-  // ── Phase 1: Worker /authorize — get signed upload URL ───────────────
-  // Sends only a tiny JSON body (fileName, contentType, size).
-  // The file is NOT sent here. The Worker verifies the Firebase token and
-  // creates a Supabase signed upload URL using the service-role key.
-  let authResult;
+  // ── Phase 1: POST file to SNS R2 Worker ──────────────────────────────
+  // Same architecture as profile-music.js and studio.js — multipart FormData
+  // POST to the SNS R2 worker.  The worker verifies the Firebase ID token,
+  // stores the file in R2 bucket "legend", and returns { url, key }.
   try {
     if (!auth.currentUser) throw new Error('FIREBASE SESSION NOT FOUND — please sign in again');
     const idToken = await auth.currentUser.getIdToken(true);
+    const uid     = auth.currentUser.uid;
 
-    const res = await fetch(UPLOAD_WORKER_URL + '/authorize', {
-      method:  'POST',
-      headers: {
-        'Authorization': 'Bearer ' + idToken,
-        'Content-Type':  'application/json',
-      },
-      body: JSON.stringify({
-        fileName:    file.name,
-        contentType: file.type || 'application/octet-stream',
-        size:        file.size,
-      }),
+    // Choose endpoint and R2 path by file type
+    const ext     = (file.name.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const r2Path  = `tv/${uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+    const endpoint = isAudio ? '/upload-music' : isImage ? '/upload-artwork' : '/';
+
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('path', r2Path);
+
+    setStatus('UPLOADING…', '');
+    setProgress(0, file.size);
+
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', UPLOAD_WORKER_URL + endpoint, true);
+      xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable) {
+          setProgress(e.loaded, e.total);
+          if (e.loaded >= e.total) setStatus('FINALIZING…', 'var(--blue-bright)');
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(JSON.parse(xhr.responseText)); }
+          catch { reject(new Error('Invalid response from storage worker')); }
+        } else {
+          let errMsg = `R2 UPLOAD FAILED — HTTP ${xhr.status}`;
+          try { const d = JSON.parse(xhr.responseText); if (d.error) errMsg = d.error; } catch(_) {}
+          reject(new Error(errMsg));
+        }
+      };
+      xhr.onerror = () => reject(new Error('R2 UPLOAD FAILED — network error'));
+      xhr.send(form);
     });
 
-    const data = await res.json();
+    if (!result.url) throw new Error('R2 worker did not return a URL');
+    _publicUrl   = result.url;
+    _r2Key       = result.key || r2Path;
+    _storagePath = _r2Key;
 
-    if (res.status === 401) throw new Error(data.error || 'FIREBASE TOKEN INVALID — sign in again');
-    if (res.status === 403) throw new Error(data.error || 'FOUNDER NOT AUTHORIZED');
-    if (res.status === 413) throw new Error(`FILE TOO LARGE FOR STORAGE PROVIDER — ${data.error || ''}`);
-    if (res.status === 415) throw new Error(data.error || 'FILE TYPE NOT ALLOWED');
-    if (res.status === 503) throw new Error(data.error || 'WORKER CONFIGURATION ERROR');
-    if (!res.ok || !data.ok) throw new Error(data.error || `WORKER AUTHORIZATION FAILED — HTTP ${res.status}`);
-
-    authResult = data; // { signedUrl, storagePath, publicUrl }
-  } catch (authErr) {
-    setStatus('✗ AUTH FAILED — click retry', 'var(--red)');
-    addRetry();
-    _toast(authErr.message, 'err');
-    return;
-  }
-
-  // Store auth results so retry can use them
-  _storagePath = authResult.storagePath;
-  _publicUrl   = authResult.publicUrl;
-
-  // ── Phase 2: PUT directly to Supabase signed URL ──────────────────────
-  // The signed URL must be /storage/v1/object/upload/sign/<bucket>/<path>?token=...
-  // No Authorization header needed — the token in the URL is the authorisation.
-
-  // Guard: validate the signed URL before sending 93 MB to the wrong endpoint.
-  // If the URL is missing /object/upload/sign/ or token=, the PUT would hit an
-  // endpoint that requires Authorization and return HTTP 400.
-  const _surl = authResult.signedUrl || '';
-  if (!_surl.includes('/object/upload/sign/') || !_surl.includes('token=')) {
-    const _msg = `SIGNED URL INVALID — Worker returned unexpected URL format: ${_surl.slice(0, 120)}`;
-    setStatus('✗ SIGNED URL INVALID — click retry', 'var(--red)');
-    addRetry();
-    _toast(_msg, 'err');
-    console.error('[AURENIX UPLOAD] ' + _msg);
-    return;
-  }
-
-  setStatus('TRANSFERRING…', '');
-  setProgress(0, file.size);
-
-  try {
-    await _signedUpload(file, authResult.signedUrl, (loaded, total) => {
-      setProgress(loaded, total);
-      // When all bytes have been sent to Supabase, show FINALIZING state.
-      // The bar stays at 99 % until Supabase confirms the object was accepted.
-      if (total > 0 && loaded >= total) {
-        setStatus('FINALIZING…', 'var(--blue-bright)');
-      }
-    });
-    // PUT returned 2xx — Supabase accepted the object.
-    // Now advance bar to 100 % and show verified.
     setProgress(file.size, file.size);
     setStatus('✓ STORAGE VERIFIED — SAVING…', 'var(--blue-bright)');
+
   } catch (uploadErr) {
-    // The XHR completed (bytes transferred) but Supabase returned a non-2xx status.
-    // Determine whether this is a size-limit rejection or another error.
-
-    // Detect the "exceeded the maximum allowed size" error from Supabase HTTP 400.
-    // The raw error message from _signedUpload contains the Supabase response body,
-    // e.g.: "SUPABASE STORAGE UPLOAD FAILED — HTTP 400: The object exceeded the maximum..."
-    const rawErrMsg = uploadErr.message || '';
-    const isSizeLimitError =
-      rawErrMsg.toLowerCase().includes('exceeded the maximum') ||
-      rawErrMsg.toLowerCase().includes('maximum allowed size') ||
-      rawErrMsg.toLowerCase().includes('file size limit') ||
-      rawErrMsg.toLowerCase().includes('payload too large');
-
-    if (isSizeLimitError) {
-      // Surface a clear size-limit error — no need to verify storage.
-      //
-      // IMPORTANT: Supabase has TWO independent file-size limits:
-      //   A. Bucket file_size_limit  — per-bucket cap (Worker ensures this is 500 MB)
-      //   B. Project-level STORAGE_FILE_SIZE_LIMIT — global platform cap
-      //      (Supabase Dashboard → Storage → Configuration → "Upload File Size Limit")
-      //      Default on Free plan: 50 MB (cannot be raised without upgrading to Pro)
-      //
-      // Effective limit = min(A, B).  Even with bucket = 500 MB, if the project-level
-      // cap is 50 MB all files larger than 50 MB will be rejected by Supabase.
-      const fileMB   = Math.round(file.size / 1048576);
-      const bucketLimitBytes = authResult.bucketLimitBytes || 524_288_000; // 500 MiB
-      const bucketMB = Math.round(bucketLimitBytes / 1048576);
-
-      // Determine whether the file genuinely exceeds the configured bucket cap,
-      // or whether it is within the bucket cap but rejected by the lower project-level limit.
-      const genuinelyTooLarge = file.size > bucketLimitBytes;
-
-      let statusMsg, toastMsg;
-      if (genuinelyTooLarge) {
-        // File is larger than the configured per-file maximum — correct rejection.
-        statusMsg = `✕ VIDEO TOO LARGE — File: ${fileMB} MB | Maximum: ${bucketMB} MB`;
-        toastMsg  =
-          `VIDEO TOO LARGE — File size: ${fileMB} MB. Maximum allowed: ${bucketMB} MB. ` +
-          `Please use a smaller file.`;
-      } else {
-        // File is WITHIN the bucket cap but Supabase rejected it at the project level.
-        // Supabase has TWO independent limits:
-        //   A. Bucket file_size_limit (500 MB — this is fine)
-        //   B. Project-level "Upload File Size Limit" in the Supabase Dashboard
-        //      (Supabase Free plan default: 50 MB — this is what is rejecting the upload)
-        // AURENIX imposes NO application-level size or content gate beyond these.
-        // Fix: Supabase Dashboard → Storage → Configuration → Upload File Size Limit → 500 MB
-        //      (requires Supabase Pro plan; Free plan is hard-capped at 50 MB by Supabase)
-        statusMsg = `✕ SUPABASE PROJECT LIMIT TOO LOW — File: ${fileMB} MB exceeds Supabase project cap`;
-        toastMsg  =
-          `Upload blocked by Supabase (${fileMB} MB file). ` +
-          `The Storage bucket allows ${bucketMB} MB, but your Supabase project has a separate ` +
-          `"Upload File Size Limit" (Dashboard → Storage → Configuration) that is set below ${fileMB} MB. ` +
-          `On the Supabase Free plan this project-level cap is 50 MB and cannot be raised. ` +
-          `To upload files larger than 50 MB: upgrade to Supabase Pro (allows up to 5 GB). ` +
-          `The channel has no content or size gate — this limit is enforced by Supabase.`;
-      }
-
-      console.error('[AURENIX UPLOAD] Size limit rejection:', rawErrMsg,
-        '| fileMB:', fileMB, '| bucketMB:', bucketMB,
-        '| genuinelyTooLarge:', genuinelyTooLarge);
-      setStatus(statusMsg, 'var(--red)');
-      setProgress(0, file.size); // reset bar — the object was not stored
-      _retryCallback = null;
-      addRetry();
-      _toast(toastMsg, 'err');
-      return;
-    }
-
-    // Non-size error: before showing a hard failure, check whether the object
-    // actually landed in storage (handles unexpected 2xx/3xx mis-classification).
-    console.error('[AURENIX UPLOAD] PUT completed with error:', rawErrMsg,
-      '— verifying storage object before reporting failure…');
-    setStatus('VERIFYING STORAGE…', 'var(--blue-bright)');
-
-    let objectExists = false;
-    try {
-      if (!auth.currentUser) throw new Error('no session');
-      const verifyToken = await auth.currentUser.getIdToken(true);
-      const vRes = await fetch(UPLOAD_WORKER_URL + '/verify', {
-        method:  'POST',
-        headers: { 'Authorization': 'Bearer ' + verifyToken, 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ storagePath: authResult.storagePath }),
-      });
-      const vData = await vRes.json();
-      console.log('[AURENIX UPLOAD] /verify response:', JSON.stringify(vData));
-      objectExists = vRes.ok && vData.exists === true;
-    } catch (vErr) {
-      console.warn('[AURENIX UPLOAD] /verify request failed:', vErr.message);
-    }
-
-    if (objectExists) {
-      // Object IS in storage despite the non-2xx response — proceed to save metadata.
-      console.log('[AURENIX UPLOAD] Object found in storage — proceeding to save metadata');
-      setProgress(file.size, file.size);
-      setStatus('✓ STORAGE VERIFIED — SAVING…', 'var(--blue-bright)');
-      // fall through to Phase 3 below
-    } else {
-      // Object genuinely not in storage — show failure with smart retry.
-      const errMsg = rawErrMsg || 'SUPABASE STORAGE UPLOAD FAILED';
-      setStatus('✗ TRANSFER FAILED — click retry', 'var(--red)');
-      setProgress(0, file.size); // reset bar — nothing was stored
-      // Smart retry: re-request a fresh signed URL and re-upload (old token is single-use)
-      _retryCallback = () => { _uploadFile(file); };
-      addRetry();
-      _toast(errMsg, 'err');
-      return;
-    }
+    const errMsg = uploadErr.message || 'R2 UPLOAD FAILED';
+    setStatus('✗ UPLOAD FAILED — click retry', 'var(--red)');
+    setProgress(0, file.size);
+    _retryCallback = () => { _uploadFile(file); };
+    addRetry();
+    _toast(errMsg, 'err');
+    console.error('[SNX-TV UPLOAD] R2 upload failed:', errMsg);
+    return;
   }
 
-  // ── Phase 3: Firestore metadata record ───────────────────────────────
+  // ── Phase 2: Firestore metadata record ───────────────────────────────
   // Force-refresh token before writing so the Firestore SDK has a valid
   // session even after a long upload.
   try { await auth.currentUser?.getIdToken(true); } catch (_) {}
@@ -2174,31 +2035,32 @@ async function _uploadFile(file) {
     setStatus('SAVING MEDIA RECORD…', 'var(--blue-bright)');
     try {
       const docRef = await addDoc(collection(db, 'network_media'), {
-        title:        file.name.replace(/\.[^.]+$/, ''),
-        artist:       '',
-        creator:      _user.email,
-        description:  '',
-        category:     _uploadCategory,
-        type:         mediaType,
-        url:          _publicUrl,
-        storage_path: _storagePath,
+        title:           file.name.replace(/\.[^.]+$/, ''),
+        artist:          '',
+        creator:         _user.email,
+        description:     '',
+        category:        _uploadCategory,
+        type:            mediaType,
+        url:             _publicUrl,
+        storage_path:    _storagePath,   // R2 key: tv/{uid}/{timestamp}.{ext}
+        storage_backend: 'shadow_nexus_r2',
         duration_sec,
-        size_bytes:   file.size,
-        mime_type:    file.type || 'application/octet-stream',
+        size_bytes:      file.size,
+        mime_type:       file.type || 'application/octet-stream',
         // APPROVAL WORKFLOW: all uploads start as pending_approval.
         // Only the Founder can move this to 'approved'.
         // Only approved media can enter a channel or broadcast schedule.
-        status:       'pending_approval',
-        channel:      '',
-        tags:         [],
-        year:         new Date().getFullYear(),
-        uploaded_by:  _user.uid,
-        uploaded_at:  serverTimestamp(),
+        status:          'pending_approval',
+        channel:         '',
+        tags:            [],
+        year:            new Date().getFullYear(),
+        uploaded_by:     _user.uid,
+        uploaded_at:     serverTimestamp(),
       });
 
       setStatus('✓ UPLOADED  ✓ STORAGE VERIFIED  ✓ RECORD SAVED  — PENDING APPROVAL', 'var(--orange,#f0a500)');
       const destEl = document.getElementById(`dest-${itemKey}`);
-      if (destEl) destEl.textContent = `${MEDIA_BUCKET} › ${docRef.id}`;
+      if (destEl) destEl.textContent = `SNS R2 › ${docRef.id}`;
       _toast(`✓ Uploaded — pending Founder approval: ${file.name}`);
 
       // Always open the metadata modal after upload so the founder can set title,
@@ -2218,67 +2080,6 @@ async function _uploadFile(file) {
   };
 
   await _saveMetadata();
-}
-
-/**
- * Upload a file via a Supabase signed upload URL using a single XHR PUT.
- *
- * The signed URL contains a ?token= query parameter — no Authorization header
- * is sent by the browser.  Supabase validates the token server-side.
- *
- * XHR upload.onprogress fires frequently, giving byte-accurate progress.
- * On network error, the caller retries by requesting a fresh signed URL
- * from the Worker (the old signed URL is single-use and cannot be reused).
- *
- * @param {File}     file        — the file to upload
- * @param {string}   signedUrl   — signed upload URL from Worker /authorize
- * @param {function} onProgress  — callback(loadedBytes, totalBytes)
- */
-function _signedUpload(file, signedUrl, onProgress) {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-
-    // Log the URL path (not the full token) so browser console shows if it's wrong
-    const _urlPath = signedUrl.split('?')[0];
-    console.log('[AURENIX UPLOAD] PUT', _urlPath, '(token omitted)');
-
-    xhr.open('PUT', signedUrl, true);
-    // No Authorization header — the ?token= in the URL is the authorisation.
-    // Setting Content-Type is required for Supabase to store with the right MIME.
-    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-    // x-upsert: true — overwrite if an object at this path already exists
-    // (safe for retries; the signed URL token controls authorisation)
-    xhr.setRequestHeader('x-upsert', 'true');
-
-    xhr.upload.addEventListener('progress', e => {
-      if (e.lengthComputable) onProgress(e.loaded, e.total);
-    });
-
-    xhr.addEventListener('load', () => {
-      // Supabase signed-URL PUT returns 200 (new object) or 200 (upsert).
-      // Accept 200, 201, and 204 to handle any Supabase response variant.
-      if (xhr.status >= 200 && xhr.status < 300) {
-        console.log('[AURENIX UPLOAD] PUT succeeded — HTTP', xhr.status, _urlPath);
-        resolve();
-      } else {
-        // Surface the exact Supabase error message (never contains secrets)
-        let detail = xhr.responseText ? xhr.responseText.slice(0, 500) : '(empty response)';
-        try {
-          const j = JSON.parse(xhr.responseText);
-          detail = j.message || j.error || detail;
-        } catch (_) {}
-        const msg = `SUPABASE STORAGE UPLOAD FAILED — HTTP ${xhr.status}: ${detail}`;
-        console.error('[AURENIX UPLOAD] PUT failed —', _urlPath,
-          '— status:', xhr.status,
-          '— response:', xhr.responseText ? xhr.responseText.slice(0, 500) : '(empty)');
-        reject(new Error(msg));
-      }
-    });
-    xhr.addEventListener('error', () => reject(new Error('SUPABASE STORAGE UPLOAD FAILED — network error')));
-    xhr.addEventListener('abort', () => reject(new Error('SUPABASE STORAGE UPLOAD FAILED — upload aborted')));
-
-    xhr.send(file);
-  });
 }
 
 function _getMediaDuration(file) {
@@ -2434,7 +2235,259 @@ function _bindLibraryPane() {
       _renderLibrary();
     });
   });
+  document.getElementById('ax-sns-import-btn')?.addEventListener('click', _importSnsMedia);
 }
+
+/* ═══════════════════════════════════════
+   SNS MEDIA BRIDGE
+   Import the Founder's own SNS media into network_media by reference.
+   NO file copy — the same R2 object is used.
+   Only the authenticated Founder's own SNS media is readable.
+   Duplicate imports are blocked via sns_source_id dedup check.
+═══════════════════════════════════════ */
+
+/**
+ * Import the Founder's own SNS audio (profileMusic) and video
+ * (cloudStreamTracks) into TV network_media by reference.
+ *
+ * Security:
+ *  - Only runs when _isFounder is true (client-side gate).
+ *  - Reads only SNS media where ownerUid == _user.uid (Firestore rule + query).
+ *  - Firestore rules on horr-a08f4 require isSignedIn() to read profileMusic.
+ *  - Another user's private media is never accessible — the query is scoped by UID.
+ *  - Duplicate imports blocked by sns_source_id uniqueness check.
+ *
+ * Preserved fields per imported item:
+ *  url, storage_path (r2Key), title, artist, duration_sec, mime_type,
+ *  artwork (thumbnail_url), owner_uid, source: 'sns_import', sns_source_id.
+ */
+async function _importSnsMedia() {
+  if (!_isFounder || !_user) { _toast('Founder access required.', 'err'); return; }
+
+  const btn      = document.getElementById('ax-sns-import-btn');
+  const statusEl = document.getElementById('ax-sns-import-status');
+
+  const _setStatus = (msg, color = 'var(--text-dim)') => {
+    if (!statusEl) return;
+    statusEl.style.display = '';
+    statusEl.style.color   = color;
+    statusEl.textContent   = msg;
+  };
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  _setStatus('Reading your SNS media library…');
+
+  try {
+    const uid = _user.uid;
+
+    // ── 1. Gather SNS media from both collections ──────────────────────────
+    const snsItems = [];  // { id, title, artist, url, r2Key, duration, artUrl, mimeType, kind }
+
+    // (a) profileMusic — flat collection, ownerUid == uid
+    try {
+      const pmSnap = await getDocs(
+        query(
+          collection(snsDb, 'profileMusic'),
+          where('ownerUid', '==', uid),
+          orderBy('uploadedAt', 'desc'),
+          limit(500),
+        ),
+      );
+      pmSnap.docs.forEach(d => {
+        const s = d.data();
+        const url = s.musicUrl || s.downloadURL || s.url || '';
+        if (!url) return; // no playable URL — skip
+        snsItems.push({
+          sns_collection: 'profileMusic',
+          sns_source_id:  d.id,
+          title:         s.title || d.id,
+          artist:        s.artist || '',
+          url,
+          r2Key:         s.r2Key || s.audioR2Key || '',
+          duration_sec:  typeof s.duration === 'number' ? Math.round(s.duration) : 0,
+          thumbnail_url: s.artworkURL || s.artUrl || s.coverImage || '',
+          mime_type:     s.fileType || 'audio/mpeg',
+          kind:          'audio',
+          owner_uid:     uid,
+        });
+      });
+    } catch (e) {
+      // Index missing — retry without orderBy
+      try {
+        const pmSnap2 = await getDocs(
+          query(collection(snsDb, 'profileMusic'), where('ownerUid', '==', uid)),
+        );
+        pmSnap2.docs.forEach(d => {
+          const s = d.data();
+          const url = s.musicUrl || s.downloadURL || s.url || '';
+          if (!url) return;
+          snsItems.push({
+            sns_collection: 'profileMusic',
+            sns_source_id:  d.id,
+            title:         s.title || d.id,
+            artist:        s.artist || '',
+            url,
+            r2Key:         s.r2Key || s.audioR2Key || '',
+            duration_sec:  typeof s.duration === 'number' ? Math.round(s.duration) : 0,
+            thumbnail_url: s.artworkURL || s.artUrl || s.coverImage || '',
+            mime_type:     s.fileType || 'audio/mpeg',
+            kind:          'audio',
+            owner_uid:     uid,
+          });
+        });
+      } catch (e2) {
+        console.warn('[SNS Bridge] profileMusic fallback query failed:', e2.message);
+      }
+    }
+
+    // (b) cloudStreamTracks/{uid}/tracks — subcollection
+    try {
+      const cstSnap = await getDocs(
+        query(
+          collection(snsDb, 'cloudStreamTracks', uid, 'tracks'),
+          where('status', '==', 'ready'),
+          orderBy('uploadedAt', 'desc'),
+          limit(500),
+        ),
+      );
+      cstSnap.docs.forEach(d => {
+        const s = d.data();
+        const url = s.url || s.audioUrl || s.downloadURL || '';
+        if (!url) return;
+        snsItems.push({
+          sns_collection: 'cloudStreamTracks',
+          sns_source_id:  d.id,
+          title:         s.title || d.id,
+          artist:        s.artist || '',
+          url,
+          r2Key:         s.r2Key || '',
+          duration_sec:  typeof s.duration === 'number' ? Math.round(s.duration) :
+                         typeof s.durationSec === 'number' ? Math.round(s.durationSec) : 0,
+          thumbnail_url: s.artworkUrl || s.artUrl || s.coverImage || '',
+          mime_type:     s.mimeType || s.fileType || 'audio/mpeg',
+          kind:          'audio',
+          owner_uid:     uid,
+        });
+      });
+    } catch (e) {
+      try {
+        const cstSnap2 = await getDocs(
+          query(collection(snsDb, 'cloudStreamTracks', uid, 'tracks')),
+        );
+        cstSnap2.docs.forEach(d => {
+          const s = d.data();
+          const url = s.url || s.audioUrl || s.downloadURL || '';
+          if (!url) return;
+          snsItems.push({
+            sns_collection: 'cloudStreamTracks',
+            sns_source_id:  d.id,
+            title:         s.title || d.id,
+            artist:        s.artist || '',
+            url,
+            r2Key:         s.r2Key || '',
+            duration_sec:  typeof s.duration === 'number' ? Math.round(s.duration) :
+                           typeof s.durationSec === 'number' ? Math.round(s.durationSec) : 0,
+            thumbnail_url: s.artworkUrl || s.artUrl || s.coverImage || '',
+            mime_type:     s.mimeType || s.fileType || 'audio/mpeg',
+            kind:          'audio',
+            owner_uid:     uid,
+          });
+        });
+      } catch (e2) {
+        console.warn('[SNS Bridge] cloudStreamTracks fallback query failed:', e2.message);
+      }
+    }
+
+    if (!snsItems.length) {
+      _setStatus('No SNS media found. Upload audio to your profile or studio first.', 'var(--text-dim)');
+      if (btn) { btn.disabled = false; btn.textContent = '☁ Import SNS Media'; }
+      return;
+    }
+
+    _setStatus(`Found ${snsItems.length} SNS item(s). Checking for existing imports…`);
+
+    // ── 2. Build a dedup set from existing network_media sns_source_ids ──
+    const existingSourceIds = new Set(
+      _mediaLib
+        .filter(m => m.sns_source_id)
+        .map(m => m.sns_source_id),
+    );
+
+    const toImport = snsItems.filter(s => !existingSourceIds.has(s.sns_source_id));
+
+    if (!toImport.length) {
+      _setStatus(`All ${snsItems.length} SNS item(s) already imported. Nothing new to add.`, 'var(--green)');
+      if (btn) { btn.disabled = false; btn.textContent = '☁ Import SNS Media'; }
+      return;
+    }
+
+    _setStatus(`Importing ${toImport.length} new item(s) from SNS…`);
+
+    // ── 3. Write network_media records — reference only, no R2 re-upload ──
+    let imported = 0;
+    let failed   = 0;
+
+    for (const item of toImport) {
+      try {
+        const isVideo = item.mime_type.startsWith('video/');
+        await addDoc(collection(db, 'network_media'), {
+          // Core playback fields — same R2 object, no copy
+          title:            item.title,
+          artist:           item.artist,
+          creator:          _user.email || uid,
+          description:      '',
+          type:             isVideo ? 'video' : 'music',
+          category:         isVideo ? 'video' : 'music',
+          url:              item.url,
+          storage_path:     item.r2Key || '',
+          storage_backend:  'shadow_nexus_r2',
+          duration_sec:     item.duration_sec,
+          size_bytes:       0,
+          mime_type:        item.mime_type,
+          thumbnail_url:    item.thumbnail_url,
+          // Approval workflow — same as uploaded media
+          status:           'pending_approval',
+          channel:          '',
+          tags:             [],
+          year:             new Date().getFullYear(),
+          uploaded_by:      uid,
+          uploaded_at:      serverTimestamp(),
+          // SNS bridge metadata
+          source:           'sns_import',
+          sns_source_id:    item.sns_source_id,
+          sns_collection:   item.sns_collection,
+          owner_uid:        uid,
+        });
+        imported++;
+      } catch (writeErr) {
+        failed++;
+        console.warn('[SNS Bridge] network_media write failed:', writeErr.message, item.sns_source_id);
+      }
+    }
+
+    // ── 4. Report result ──────────────────────────────────────────────────
+    const skipped = snsItems.length - toImport.length;
+    const parts   = [];
+    if (imported) parts.push(`✓ ${imported} imported (pending approval)`);
+    if (skipped)  parts.push(`${skipped} already existed`);
+    if (failed)   parts.push(`${failed} failed`);
+
+    const color = failed > 0 ? 'var(--orange,#f0a500)' : 'var(--green)';
+    _setStatus(parts.join(' · '), color);
+    _toast(`SNS import: ${parts.join(', ')}`);
+
+    console.log('[SNS Bridge] Import complete:', { found: snsItems.length, imported, skipped, failed });
+
+  } catch (err) {
+    _setStatus('Import error: ' + (err.message || err), 'var(--red)');
+    _toast('SNS import error: ' + (err.message || err), 'err');
+    console.error('[SNS Bridge] _importSnsMedia error:', err);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '☁ Import SNS Media'; }
+  }
+}
+
+
 
 /* ═══════════════════════════════════════
    APPROVAL PANE
@@ -2485,7 +2538,7 @@ function _openApproveDestModal(mediaId) {
 
   // Reset storage selection UI
   modal.querySelectorAll('.ax-approve-dest-storage-btn').forEach(b => {
-    const isActive = b.dataset.storage === 'supabase';
+    const isActive = b.dataset.storage === 'shadow_nexus';
     b.classList.toggle('active', isActive);
     b.style.background   = isActive ? 'rgba(30,80,255,0.12)' : 'var(--surface)';
     b.style.borderColor  = isActive ? 'var(--blue-bright)' : 'var(--border)';
@@ -3111,46 +3164,20 @@ async function _checkWorkerHealth() {
   const workerEl = document.getElementById('ax-sec-worker');
   if (workerEl) { workerEl.textContent = 'checking…'; workerEl.style.color = ''; }
 
+  // Check SNS R2 Worker is reachable — GET / returns 200 with a plain text body
   try {
-    const res  = await fetch(UPLOAD_WORKER_URL + '/health');
-    const data = await res.json();
-
-    setCell('ax-sec-worker',  data.ok ? '✓ ONLINE' : `✗ ${data.error || 'NOT OK'}`, data.ok);
-    setCell('ax-sec-sup-url', data.SUPABASE_URL  || '?', data.SUPABASE_URL  === '✓ set');
-    setCell('ax-sec-sup-key', data.SUPABASE_SERVICE_KEY || '?', data.SUPABASE_SERVICE_KEY === '✓ set');
-    setCell('ax-sec-fb-id',   data.FIREBASE_PROJECT_ID  || '?', data.FIREBASE_PROJECT_ID  === '✓ set');
-
-    if (!data.ok) {
-      console.error('[SNX-CHANNEL] Worker health check failed:', data);
-    } else {
-      console.log('[SNX-CHANNEL] Worker healthy. Project:', data.FIREBASE_PROJECT_ID_value,
-                  'Supabase:', data.SUPABASE_URL_value);
-    }
+    const res = await fetch(UPLOAD_WORKER_URL + '/');
+    const ok  = res.ok;
+    setCell('ax-sec-worker', ok ? '✓ ONLINE (SNS R2)' : `✗ HTTP ${res.status}`, ok);
+    if (!ok) console.error('[SNX-CHANNEL] SNS R2 Worker health check failed — HTTP', res.status);
+    else     console.log('[SNX-CHANNEL] SNS R2 Worker reachable:', UPLOAD_WORKER_URL);
   } catch (err) {
     setCell('ax-sec-worker', '✗ UNREACHABLE — ' + err.message, false);
-    console.error('[SNX-CHANNEL] Worker /health fetch failed:', err);
+    console.error('[SNX-CHANNEL] SNS R2 Worker fetch failed:', err);
   }
-
-  // Also fetch /diagnose to show bucket file_size_limit
-  try {
-    const diagRes  = await fetch(UPLOAD_WORKER_URL + '/diagnose');
-    const diagData = await diagRes.json();
-    const bucketMB = diagData.bucket_file_size_limit_bytes
-      ? Math.round(diagData.bucket_file_size_limit_bytes / 1048576) + ' MB'
-      : '(not set)';
-    const bucketEl = document.getElementById('ax-sec-bucket-limit');
-    if (bucketEl) {
-      bucketEl.textContent = bucketMB;
-      bucketEl.style.color = diagData.bucket_file_size_limit_bytes >= 52428800
-        ? 'var(--green)' : 'var(--orange,#f90)';
-    }
-    // Effective limit not known without probing, hint user
-    const effEl = document.getElementById('ax-sec-eff-limit');
-    if (effEl && effEl.textContent === '…') {
-      effEl.textContent = `≤ ${bucketMB} (click 🔍 Probe to find exact limit)`;
-      effEl.style.color = 'var(--text-dim)';
-    }
-  } catch (_) {}
+  // Mark Supabase-specific cells as not applicable
+  ['ax-sec-sup-url','ax-sec-sup-key','ax-sec-fb-id','ax-sec-bucket-limit','ax-sec-eff-limit']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.textContent = 'N/A (SNS R2)'; });
 }
 
 /* ═══════════════════════════════════════
@@ -3500,8 +3527,19 @@ window._AXC = {
     if (!item) return;
     if (!confirm(`DELETE "${item.title}"?\n\nThis will permanently remove the file from storage and cannot be undone.`)) return;
     try {
-      if (item.storage_path) {
-        await supabase.storage.from(MEDIA_BUCKET).remove([item.storage_path]);
+      // Delete from SNS R2 storage using the SNS R2 worker (same as profile-music.js)
+      if (item.storage_path && auth.currentUser) {
+        try {
+          const delToken = await auth.currentUser.getIdToken(false);
+          const encodedKey = item.storage_path.split('/').map(encodeURIComponent).join('/');
+          await fetch(`${UPLOAD_WORKER_URL}/${encodedKey}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': 'Bearer ' + delToken },
+          });
+        } catch (delErr) {
+          console.warn('[SNX-TV] R2 delete best-effort failed:', delErr.message);
+          // Non-fatal — proceed to remove the Firestore record
+        }
       }
       await deleteDoc(doc(db, 'network_media', mediaId));
       _toast('Deleted: ' + item.title);
@@ -3911,8 +3949,8 @@ function _renderLiveTvStatus(running, paused) {
   if (dotEl)  dotEl.className  = `ax-one-live-dot ${running && !paused ? 'live' : ''}`;
   if (textEl) textEl.textContent = paused ? 'PAUSED' : (running ? 'BROADCASTING' : 'CHANNEL OFFLINE');
   if (stateEl) stateEl.textContent = _liveTvEngineRunning
-    ? (paused ? 'Engine active — paused' : 'Engine running — 24/7 mode')
-    : 'Engine not started — click START LIVE TV';
+    ? (paused ? 'SNS TV — paused' : 'SNS TV — broadcasting 24/7')
+    : 'SNS TV — not broadcasting — click START LIVE TV';
 }
 
 function _updateLiveTvBadge(live) {
@@ -4339,28 +4377,26 @@ async function _saveCommercial(modal, errEl) {
     };
 
     // ── Image upload (if new image selected) ───────────────────────────
+    // Uses SNS R2 Worker — same architecture as snx-ch-control _uploadFile()
     if (_commType === 'image' && _commImageFile) {
       if (!auth.currentUser) throw new Error('Please log in.');
-      const idToken = await auth.currentUser.getIdToken(true);
-      const authRes = await fetch(UPLOAD_WORKER_URL + '/authorize', {
+      const idToken  = await auth.currentUser.getIdToken(true);
+      const uid      = auth.currentUser.uid;
+      const ext      = (_commImageFile.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const r2Path   = `tv/${uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+      const form     = new FormData();
+      form.append('file', _commImageFile, _commImageFile.name);
+      form.append('path', r2Path);
+      const res = await fetch(UPLOAD_WORKER_URL + '/upload-artwork', {
         method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: _commImageFile.name, contentType: _commImageFile.type || 'image/jpeg', size: _commImageFile.size }),
+        headers: { 'Authorization': 'Bearer ' + idToken },
+        body: form,
       });
-      const authData = await authRes.json();
-      if (!authRes.ok || !authData.ok) throw new Error(authData.error || 'Image upload authorization failed');
-      // Upload image via signed URL
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('PUT', authData.signedUrl, true);
-        xhr.setRequestHeader('Content-Type', _commImageFile.type || 'image/jpeg');
-        xhr.setRequestHeader('x-upsert', 'true');
-        xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error('Image upload failed HTTP ' + xhr.status));
-        xhr.onerror = () => reject(new Error('Image upload network error'));
-        xhr.send(_commImageFile);
-      });
-      data.image_url    = authData.publicUrl;
-      data.storage_path = authData.storagePath;
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(resData.error || 'Image upload failed HTTP ' + res.status);
+      data.image_url         = resData.url || resData.publicUrl || '';
+      data.storage_path      = resData.key || resData.storagePath || r2Path;
+      data.storage_backend   = 'shadow_nexus_r2';
     }
 
     // ── Video upload (if new video selected) ────────────────────────────
@@ -4369,39 +4405,40 @@ async function _saveCommercial(modal, errEl) {
       const vidBar      = document.getElementById('ax-comm-vid-bar');
       const vidStatus   = document.getElementById('ax-comm-vid-status');
       if (vidProgress) vidProgress.style.display = '';
-      if (vidStatus)   vidStatus.textContent = 'Authorizing upload…';
+      if (vidStatus)   vidStatus.textContent = 'Uploading video…';
 
       if (!auth.currentUser) throw new Error('Please log in.');
-      const idToken = await auth.currentUser.getIdToken(true);
-      const authRes = await fetch(UPLOAD_WORKER_URL + '/authorize', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileName: _commVideoFile.name, contentType: _commVideoFile.type || 'video/mp4', size: _commVideoFile.size }),
-      });
-      const authData = await authRes.json();
-      if (!authRes.ok || !authData.ok) throw new Error(authData.error || 'Video upload authorization failed');
-      if (vidStatus) vidStatus.textContent = 'Uploading video…';
-      // Upload via signed URL with progress
-      await new Promise((resolve, reject) => {
+      const idToken  = await auth.currentUser.getIdToken(true);
+      const uid      = auth.currentUser.uid;
+      const ext      = (_commVideoFile.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const r2Path   = `tv/${uid}/${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`;
+      const form     = new FormData();
+      form.append('file', _commVideoFile, _commVideoFile.name);
+      form.append('path', r2Path);
+      const result = await new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('PUT', authData.signedUrl, true);
-        xhr.setRequestHeader('Content-Type', _commVideoFile.type || 'video/mp4');
-        xhr.setRequestHeader('x-upsert', 'true');
+        xhr.open('POST', UPLOAD_WORKER_URL + '/', true);
+        xhr.setRequestHeader('Authorization', 'Bearer ' + idToken);
         xhr.upload.onprogress = e => {
           if (e.lengthComputable && vidBar) {
             vidBar.style.width = Math.min(99, Math.round(e.loaded / e.total * 100)) + '%';
           }
         };
         xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) { if (vidBar) vidBar.style.width = '100%'; resolve(); }
-          else reject(new Error('Video upload failed HTTP ' + xhr.status + ': ' + xhr.responseText.slice(0,200)));
+          if (xhr.status >= 200 && xhr.status < 300) {
+            if (vidBar) vidBar.style.width = '100%';
+            try { resolve(JSON.parse(xhr.responseText)); } catch (_) { resolve({}); }
+          } else {
+            reject(new Error('Video upload failed HTTP ' + xhr.status + ': ' + xhr.responseText.slice(0,200)));
+          }
         };
         xhr.onerror = () => reject(new Error('Video upload network error'));
-        xhr.send(_commVideoFile);
+        xhr.send(form);
       });
       if (vidStatus) vidStatus.textContent = '✓ Video uploaded';
-      data.video_url    = authData.publicUrl;
-      data.storage_path = authData.storagePath;
+      data.video_url         = result.url || result.publicUrl || '';
+      data.storage_path      = result.key || result.storagePath || r2Path;
+      data.storage_backend   = 'shadow_nexus_r2';
       // Get duration
       try {
         const dur = await _getMediaDuration(_commVideoFile);

@@ -1,18 +1,28 @@
 /**
- * AURENIX LIVE TV — 24/7 Live Television Engine
- * aurenix-live-tv-engine.js
+ * SHADOW NEXUS SOCIAL — 24-Hour TV Programming Engine
+ * snx-ch-live-tv.js
  *
- * Primary 24/7 live television engine for AURENIX.
+ * OWNERSHIP: Shadow Nexus Social
+ *
+ * SNS-owned browser-side programming engine for the primary 24-Hour TV channel.
  * Channel ID: ALTV
- * Config collection: channel_live_tv_config
- * State: network_state/ALTV (shared broadcast — all viewers see the same position)
+ * Config collection: channel_live_tv_config  (SNS Firestore)
+ * State: network_state/ALTV  (SNS Firestore — shared broadcast state, all viewers)
+ *
+ * This engine runs in the Founder's browser tab when the Founder activates
+ * "START LIVE TV" from TV Studio. When no browser tab is open, the SNS
+ * Cloudflare Worker (ADVANCE_WORKER_URL) continues server-side channel
+ * advancement on behalf of Shadow Nexus Social TV.
  *
  * Supports:
- *   - Random programming from Founder-approved media pool
+ *   - Random programming from Founder-approved SNS media pool
  *   - Automatic commercial breaks (configurable frequency)
  *   - Per-channel media assignment (media.live_tv_assigned === true)
  *   - Shared broadcast state (late joiners see the live position, not from 0:00)
  *   - All controls: start/stop/pause/resume/skip/force break/randomize
+ *
+ * NOTE: This engine does NOT depend on any separate external engine service.
+ * All state is written directly to and read directly from SNS Firestore.
  */
 
 import {

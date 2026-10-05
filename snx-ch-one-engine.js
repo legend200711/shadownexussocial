@@ -1,27 +1,24 @@
 /**
- * AURENIX ONE — Live TV Programming Engine
- * aurenix-one-engine.js
+ * SNX CHANNEL A1 ENGINE (RETIRED — NO LONGER IMPORTED)
+ * snx-ch-one-engine.js
  *
- * Implements the 24/7 live-TV channel for AURENIX ONE (channel ID: A1).
+ * OWNERSHIP: Shadow Nexus Social
+ * STATUS: This file is not imported by any active SNS TV module.
+ *         The ALTV engine (snx-ch-live-tv.js) superseded this for the
+ *         primary 24-Hour TV channel. This file is retained as a reference
+ *         but does not run and does not make SNS TV depend on any separate
+ *         external service.
  *
- * How it works:
- *   - The Founder starts the channel engine from Founder Studio.
- *   - The engine picks a random approved program from the media library.
- *   - After each program ends, the engine is re-triggered by the
- *     broadcast's _advance() writing a sentinel "auto_advance" flag to
- *     network_state/A1 — OR via a live Firestore listener watching for
- *     the "needs_next" flag, which is set by the advance function.
- *   - The engine writes the next program + optional commercial break to
- *     network_state/A1.  All viewers read this shared state — there is
- *     no per-viewer playlist.
- *
+ * Original purpose: browser-side programming engine for channel A1.
+ * Channel ID: A1
  * Firestore collections used:
- *   network_state/A1          — live playback state (shared by all viewers)
- *   channel_one_config/A1     — engine settings (commercial freq, history)
- *   network_media/{id}        — the approved media pool
+ *   network_state/A1          — live playback state
+ *   channel_one_config/A1     — engine settings
+ *   network_media/{id}        — approved media pool
  *
- * Security: writes to network_state & channel_one_config require isAdmin().
- * Viewers only read network_state (public read).
+ * NOTE: Do NOT re-import this file to re-activate it without a
+ * deliberate architecture decision. SNS TV state and ownership belong
+ * to Shadow Nexus Social — see snx-ch-live-tv.js for the active engine.
  */
 
 import {
