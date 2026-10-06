@@ -857,12 +857,13 @@ function _attachTapOverlay() {
     var v = _el.video;
     if (!v) return;
 
-    // ── AUDIO FIX: Resume AudioContext BEFORE playing ────────────────────
-    // AudioContext starts SUSPENDED until a user gesture.
+    // ── AUDIO FIX: Build graph + resume AudioContext BEFORE playing ──────
+    // The Web Audio graph MUST be created from a user-gesture call stack so
+    // the browser allows AudioContext.resume() to succeed (required on iOS
+    // Safari and Chromium when autoplay policy is active).
     // createMediaElementSource() permanently routes all audio through the
     // Web Audio graph, so a suspended context = total silence.
-    // We await the resume() promise to guarantee the context is running
-    // before v.play() causes audio to flow through the graph.
+    _snxViz.ensureGraph(v);
     _resumeAudioContext().then(function () {
       // Ensure volume/gain is applied now that context is confirmed running.
       _applyVolume();
@@ -916,6 +917,10 @@ function _attachVolumeControls() {
     muteBtn.addEventListener('click', function () {
       _muted = !_muted;
       _saveVolumePrefs();
+      // Build the Web Audio graph from this user gesture if not yet built,
+      // then resume the AudioContext so audio flows through the graph.
+      var v = _el.video;
+      if (v) _snxViz.ensureGraph(v);
       _resumeAudioContext().then(function () { _applyVolume(); });
     });
   }
@@ -926,6 +931,10 @@ function _attachVolumeControls() {
       _volume = val / 100;
       _muted  = (val === 0);
       _saveVolumePrefs();
+      // Build the Web Audio graph from this user gesture if not yet built,
+      // then resume the AudioContext so audio flows through the graph.
+      var v = _el.video;
+      if (v) _snxViz.ensureGraph(v);
       _resumeAudioContext().then(function () { _applyVolume(); });
     });
   }
@@ -995,11 +1004,6 @@ function _renderPlayer(state) {
   if (!v) return;
 
   var item = state.current;
-
-  // ── Ensure Web Audio graph is built for this video element ──────────────
-  // Build it early — before the first play — so audio never has a frame
-  // where it bypasses the graph.  Safe to call on every render; idempotent.
-  _snxViz.ensureGraph(v);
 
   // ── Load media into element if URL changed (adapter/playlist mode only) ──
   // In scheduled mode, loadItemAt() handles the load+seek.
@@ -2105,8 +2109,10 @@ var _snxViz = (function () {
         var AudioCtx = window.AudioContext || window.webkitAudioContext;
         if (!AudioCtx) return;
         _audioCtx = new AudioCtx();
-        // AudioContext starts SUSPENDED — resume() is called from user-gesture
-        // handlers (_resumeAudioContext).  Do NOT try to resume here.
+        // This function is only called from user-gesture handlers (tap overlay,
+        // mute button, volume slider).  Resume immediately — the user gesture
+        // is on the call stack so the browser WILL allow it.
+        _audioCtx.resume().catch(function () {});
       }
 
       // Build the permanent graph: source → analyser → gain → destination.
@@ -2301,7 +2307,10 @@ var _snxViz = (function () {
     _ctx = _canvas.getContext('2d');
     if (!_ctx) return;
     _resizeCanvas();
-    if (!_connected && videoEl) _connectAnalyser(videoEl);
+    // Do NOT call _connectAnalyser here — start() is invoked from the render
+    // path (not a user gesture).  The graph is built only from user-gesture
+    // handlers (tap overlay, mute button, volume slider) via ensureGraph().
+    // The canvas animation runs; it will show silence until the graph is built.
     if (!_active) {
       _active = true;
       _raf = requestAnimationFrame(_draw);
