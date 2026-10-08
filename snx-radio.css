@@ -2202,6 +2202,13 @@
    DJ MIC CONTROLS v1.1  (added with microphone status + meter)
    ══════════════════════════════════════════════════════════════ */
 
+/* ── snxr-hidden rules for DJ mic elements (must mirror the go/end btn pattern) ── */
+.snxr-dj-mic-row.snxr-hidden    { display: none !important; }
+.snxr-dj-mic-btn.snxr-hidden    { display: none !important; }
+.snxr-dj-meter-wrap.snxr-hidden { display: none !important; }
+.snxr-dj-mic-blocked.snxr-hidden{ display: none !important; }
+.snxr-dj-mic-onair.snxr-hidden  { display: none !important; }
+
 /* Mic row — flex container below GO/END buttons, hidden until DJ is live */
 .snxr-dj-mic-row {
   display: flex;

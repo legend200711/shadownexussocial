@@ -30907,6 +30907,26 @@ window.switchAdminTab = function(tab) {
     /* DJ Mode controls (Founder only) */
     _ensureDjControls(wrap);
 
+    /* Load snx-radio-dj.js on demand (Founder only).
+       loadFeature('dj') is idempotent — safe on re-entry.
+       After load, init() is called if not already inited so the Firestore
+       DJ state subscription is active and UI callbacks are wired correctly. */
+    if (window.SNXFeatureLoader) {
+      window.SNXFeatureLoader.loadFeature('dj')
+        .then(function () {
+          if (window.SNXRadioDJ && typeof window.SNXRadioDJ.init === 'function') {
+            window.snxRadioDjStateChanged = _onDjStateChanged;
+            if (!window._snxDjInited) {
+              window._snxDjInited = true;
+              window.SNXRadioDJ.init();
+            }
+          }
+        })
+        .catch(function (err) {
+          console.warn('[SNX-RADIO-PAGE] DJ feature load failed:', err && err.message);
+        });
+    }
+
     /* RADIO STUDIO toggle */
     var btn = document.getElementById('snxrStudioToggleBtn');
     if (btn) {
@@ -31140,6 +31160,13 @@ window.switchAdminTab = function(tab) {
     'disconnected': { icon: '⚠',  text: 'MIC DISCONNECTED', color: '#ef4444', meter: false },
   };
 
+  /* Accurate per-status messages for the blocked/error notice. */
+  var _MIC_BLOCKED_MSGS = {
+    'blocked':      'Microphone access was denied. Enable microphone permission in your browser or site settings.',
+    'error':        'No microphone is available, or this browser does not support microphone access.',
+    'disconnected': 'Microphone disconnected. Reconnect your microphone and try again.',
+  };
+
   function _applyMicStatus(status) {
     var info     = _MIC_LABELS[status] || _MIC_LABELS['off'];
     var iconEl   = document.getElementById('snxrDjMicIcon');
@@ -31154,11 +31181,18 @@ window.switchAdminTab = function(tab) {
     /* Level meter: only visible when mic is ON */
     if (meterWrap) meterWrap.classList.toggle('snxr-hidden', !info.meter);
 
-    /* Blocked notice */
-    var isBlocked = (status === 'blocked' || status === 'error');
-    if (blockedEl) blockedEl.classList.toggle('snxr-hidden', !isBlocked);
+    /* Blocked / error notice — show with accurate message, hide otherwise */
+    var blockedMsg = _MIC_BLOCKED_MSGS[status] || null;
+    if (blockedEl) {
+      if (blockedMsg) {
+        blockedEl.textContent = blockedMsg;
+        blockedEl.classList.remove('snxr-hidden');
+      } else {
+        blockedEl.classList.add('snxr-hidden');
+      }
+    }
 
-    /* Mic toggle button: only when DJ is live and not blocked/error */
+    /* Mic toggle button: only when DJ is live and not blocked/error/connecting */
     if (micBtn) {
       var canToggle = _djIsLive() && status !== 'blocked' && status !== 'error' && status !== 'connecting';
       micBtn.classList.toggle('snxr-hidden', !canToggle);
@@ -31227,7 +31261,33 @@ window.switchAdminTab = function(tab) {
   function _onDjGoLive() {
     var msg = document.getElementById('snxrDjMsg');
     if (msg) { msg.textContent = 'Requesting microphone…'; msg.style.color = '#aaa'; }
-    if (!window.SNXRadioDJ) { if (msg) msg.textContent = '✗ DJ module not loaded'; return; }
+
+    /* If the DJ module hasn't loaded yet, load it now then retry.
+       This handles the race where the user taps the button before the
+       async loadFeature('dj') in _ensureFounderArea has completed. */
+    if (!window.SNXRadioDJ) {
+      if (window.SNXFeatureLoader) {
+        if (msg) { msg.textContent = 'Loading DJ module…'; msg.style.color = '#aaa'; }
+        window.SNXFeatureLoader.loadFeature('dj')
+          .then(function () {
+            if (window.SNXRadioDJ && typeof window.SNXRadioDJ.init === 'function') {
+              window.snxRadioDjStateChanged = _onDjStateChanged;
+              if (!window._snxDjInited) {
+                window._snxDjInited = true;
+                window.SNXRadioDJ.init();
+              }
+            }
+            _onDjGoLive(); // retry now that module is loaded
+          })
+          .catch(function (err) {
+            if (msg) { msg.textContent = '✗ DJ module failed to load'; msg.style.color = '#ef4444'; }
+          });
+      } else {
+        if (msg) { msg.textContent = '✗ DJ module not loaded'; msg.style.color = '#ef4444'; }
+      }
+      return;
+    }
+
     window.SNXRadioDJ.djStart(function(result) {
       if (!msg) return;
       if (result.error) {
