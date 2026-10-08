@@ -513,6 +513,8 @@ function _renderChannelPanel() {
     return;
   }
 
+  var isFounder = (global._snxRole || '') === 'founder';
+
   var html = '<div class="snx-tv-ch-list">';
   for (var i = 0; i < channels.length; i++) {
     var ch       = channels[i];

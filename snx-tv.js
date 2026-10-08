@@ -2075,6 +2075,9 @@ function _initStudio() {
     header.appendChild(btn);
   }
 
+  // Inject "Manage Channel" shortcut button into the channel bar footer
+  _injectChannelManageBtn();
+
   // Create studio overlay
   if (!document.getElementById('snxtvStudioOverlay')) {
     var overlay = document.createElement('div');
@@ -2093,6 +2096,40 @@ function _initStudio() {
   }
 }
 
+/**
+ * Inject quick-access management buttons into the channel bar footer.
+ * Founders see two buttons: "✏ Edit Channel" and "📋 Playlists".
+ * Called once when Studio is initialized.
+ */
+function _injectChannelManageBtn() {
+  var channelBar = document.getElementById('snxTvChannelBar');
+  if (!channelBar || document.getElementById('snxTvChManageRow')) return;
+
+  var row = document.createElement('div');
+  row.id = 'snxTvChManageRow';
+  row.className = 'snx-tv-ch-manage-row';
+  row.innerHTML =
+    '<button class="snx-tv-ch-manage-btn" id="snxTvChEditBtn" type="button">'
+    + '✏ Edit Channel'
+    + '</button>'
+    + '<button class="snx-tv-ch-manage-btn snx-tv-ch-manage-btn--alt" id="snxTvChPlaylistsBtn" type="button">'
+    + '📋 Playlists'
+    + '</button>';
+
+  channelBar.appendChild(row);
+
+  document.getElementById('snxTvChEditBtn').addEventListener('click', function () {
+    if (global.SNXTVStudio && typeof global.SNXTVStudio.openOnTab === 'function') {
+      global.SNXTVStudio.openOnTab('channels');
+    }
+  });
+  document.getElementById('snxTvChPlaylistsBtn').addEventListener('click', function () {
+    if (global.SNXTVStudio && typeof global.SNXTVStudio.openOnTab === 'function') {
+      global.SNXTVStudio.openOnTab('playlists');
+    }
+  });
+}
+
 /* ════════════════════════════════════════════════════════════
    ── AUTH INTEGRATION ──────────────────────────────────────
    Observes SNS auth events.
@@ -2103,8 +2140,19 @@ global.addEventListener('snxAuthStateChanged', function (e) {
   if (!user) return;
   // Ensure Studio is available for founder, and attach lifecycle events once
   _attachLifecycleEvents();
-  if ((global._snxRole || '') === 'founder' && _viewerReady) {
-    _initStudio();
+  if ((global._snxRole || '') === 'founder') {
+    if (_viewerReady) {
+      _initStudio();
+    } else {
+      // TV page not open yet — defer until pageOpen() runs and sets _viewerReady.
+      // We retry via a small poll so the Studio button appears as soon as the
+      // viewer is ready, regardless of navigation order.
+      (function _retryInitStudio() {
+        if (_studioInjected) return;
+        if (!_viewerReady) { setTimeout(_retryInitStudio, 400); return; }
+        _initStudio();
+      })();
+    }
   }
 });
 

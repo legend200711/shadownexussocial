@@ -260,18 +260,49 @@ function _renderChannelSelectorInHeader() {
   if (!_container) return;
   const sel = _container.querySelector('#snxtvChannelSel');
   if (!sel) return;
-  const ch = _activeChannel();
   // Rebuild options
-  const channels = _buildChannelOptions();
-  sel.innerHTML = channels;
+  sel.innerHTML = _buildChannelOptions();
   sel.value = _activeChannelId || 'default';
 }
 
 function _buildChannelOptions() {
-  const all = [{ id: 'default', name: 'Shadow Nexus TV' }, ..._tvChannels.filter(c => c.id !== 'default')];
+  const all = _getAllChannels();
   return all.map(c =>
     `<option value="${_esc(c.id)}">${_esc(c.name || c.id)}</option>`
   ).join('');
+}
+
+/**
+ * Return the merged channel list: preset channels + Firestore channels,
+ * deduplicated. Preset channels are always present even before Firestore seeding.
+ * The 'default' entry is the legacy alias for snx-ch-shadow-nexus-tv.
+ */
+function _getAllChannels() {
+  // Start with preset channel definitions from the viewer channel system
+  const presets = (global.SNXTVChannels && global.SNXTVChannels.PRESET_CHANNELS)
+    ? global.SNXTVChannels.PRESET_CHANNELS.slice()
+    : [];
+  // Merge with Firestore channels (_tvChannels): Firestore data wins for fields
+  const seen = new Set();
+  const result = [];
+  // Add 'default' alias first for backward compatibility
+  result.push({ id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV (Default)' });
+  seen.add('default');
+  // Presets
+  for (const p of presets) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    // If Firestore has an updated version of this preset, use that
+    const fsVersion = _tvChannels.find(c => c.id === p.id);
+    result.push(fsVersion || p);
+  }
+  // Any extra Firestore channels not in the preset list (user-created via Studio)
+  for (const c of _tvChannels) {
+    if (seen.has(c.id)) continue;
+    seen.add(c.id);
+    result.push(c);
+  }
+  return result;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2755,10 +2786,8 @@ function _renderChannelsPanel() {
   const el = _container && _container.querySelector('#snxtvChannelsPanel');
   if (!el) return;
 
-  const channels = [
-    { id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV (Default)', status: 'active', _isDefault: true },
-    ..._tvChannels.filter(c => c.id !== 'default')
-  ];
+  // Use merged list so presets always appear even before Firestore seeding
+  const channels = _getAllChannels();
 
   el.innerHTML = `
 <div class="snxtv-section">
@@ -2771,19 +2800,23 @@ function _renderChannelsPanel() {
     The shared media library is available to all channels.
   </div>
   <div id="snxtvChannelList">
-    ${channels.map(ch => `
-    <div class="snxtv-pl-row" style="${ch.id === (_activeChannelId || 'default') ? 'border-left:3px solid #00d4ff;' : ''}">
+    ${channels.map(ch => {
+      const isActive = ch.id === (_activeChannelId || 'default');
+      const isLegacyDefault = ch.id === 'default';
+      return `
+    <div class="snxtv-pl-row" style="${isActive ? 'border-left:3px solid #00d4ff;' : ''}">
       <div class="snxtv-pl-info">
-        <div class="snxtv-pl-name">${_esc(ch.name || ch.id)}</div>
-        <div class="snxtv-pl-meta">${_esc(ch.description || '')}${ch._isDefault ? ' · Default channel' : ''} · ${_esc(ch.status || 'active')}</div>
+        <div class="snxtv-pl-name">${ch.logoEmoji ? ch.logoEmoji + ' ' : ''}${_esc(ch.name || ch.id)}</div>
+        <div class="snxtv-pl-meta">${_esc(ch.description || '')}${isLegacyDefault ? ' · Legacy alias' : (ch.isPreset ? ' · Preset' : '')} · ${_esc(ch.status || 'active')}</div>
       </div>
       <div class="snxtv-pl-actions">
-        ${!ch._isDefault ? `
+        ${!isLegacyDefault ? `
         <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm snxtv-ch-edit" data-id="${_esc(ch.id)}">✏ Edit</button>
-        <button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-ch-delete" data-id="${_esc(ch.id)}">🗑</button>
+        ${!ch.isPreset ? `<button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-ch-delete" data-id="${_esc(ch.id)}">🗑</button>` : ''}
         ` : '<span style="font-size:10px;color:rgba(255,255,255,0.3);">Built-in</span>'}
       </div>
-    </div>`).join('')}
+    </div>`;
+    }).join('')}
   </div>
 </div>`;
 
@@ -2843,6 +2876,10 @@ async function _openCreateChannelModal() {
     if (global.SNXTV && typeof global.SNXTV._refreshChannelSelector === 'function') {
       global.SNXTV._refreshChannelSelector();
     }
+    // Also notify SNXTVChannels so its Firestore listener picks up the new channel
+    if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
+      global.SNXTVChannels.refresh();
+    }
   } catch (e) {
     _toast('Could not create channel: ' + e.message);
   }
@@ -2850,10 +2887,12 @@ async function _openCreateChannelModal() {
 
 async function _openEditChannelModal(channelId) {
   if (!channelId || channelId === 'default') {
-    _toast('The default Shadow Nexus TV channel cannot be edited here.');
+    _toast('The legacy "default" alias channel cannot be edited here. Edit "Shadow Nexus TV" from the channels list.');
     return;
   }
-  const ch = _tvChannels.find(c => c.id === channelId);
+  // Look in merged list so preset channels are always found
+  const allChannels = _getAllChannels();
+  const ch = allChannels.find(c => c.id === channelId) || _tvChannels.find(c => c.id === channelId);
   if (!ch) { _toast('Channel not found.'); return; }
 
   const newName = prompt('Channel Name:', ch.name || '');
@@ -2861,18 +2900,24 @@ async function _openEditChannelModal(channelId) {
   const newDesc = prompt('Description:', ch.description || '');
   if (newDesc === null) return; // cancelled
 
-  const { doc, updateDoc, serverTimestamp } = _fs();
+  const { doc, setDoc, serverTimestamp } = _fs();
   const db = _db();
   if (!db) return;
   try {
-    await updateDoc(doc(db, COLL_TV_CHANNELS, channelId), {
+    // Use setDoc + merge:true so this works even if the doc doesn't exist yet
+    // (covers preset channels that haven't been seeded to Firestore yet)
+    await setDoc(doc(db, COLL_TV_CHANNELS, channelId), {
       name:        newName.trim() || ch.name,
       description: newDesc.trim(),
       updatedAt:   serverTimestamp(),
-    });
+    }, { merge: true });
     _toast('✓ Channel updated.');
     _renderChannelSelectorInHeader();
     if (_activeTab === 'channels') _renderChannelsPanel();
+    // Notify the viewer channel panel so it reflects the new name
+    if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
+      global.SNXTVChannels.refresh();
+    }
   } catch (e) {
     _toast('Update failed: ' + e.message);
   }
@@ -2925,10 +2970,7 @@ const SNXTVStudio = {
   // Multi-channel API
   setChannel,
   getActiveChannelId: () => _activeChannelId || 'default',
-  getChannels: () => [
-    { id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV' },
-    ..._tvChannels.filter(c => c.id !== 'default')
-  ],
+  getChannels: () => _getAllChannels(),
   // Stage 5: expose for debugging
   _getPrograms: () => _tvPrograms.slice(),
   _getSchedule: () => _tvSchedule.slice(),
@@ -2938,6 +2980,16 @@ const SNXTVStudio = {
   show() {
     const overlay = document.getElementById('snxtvStudioOverlay');
     if (overlay) overlay.classList.add('snxtv-studio-overlay--open');
+  },
+
+  /** Show the studio overlay and immediately navigate to the given tab */
+  openOnTab(tab) {
+    const overlay = document.getElementById('snxtvStudioOverlay');
+    if (overlay) overlay.classList.add('snxtv-studio-overlay--open');
+    if (_mounted && tab) {
+      // Small delay so the overlay is visible before we switch tab
+      setTimeout(() => _switchTab(tab), 60);
+    }
   },
 
   /** Hide the studio overlay */
