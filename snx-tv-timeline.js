@@ -875,6 +875,15 @@ const SNXTVTimeline = {
   getChannels,
   // Get current active channel ID
   getActiveChannelId: function () { return _activeChannelId || 'default'; },
+  // Optimistically inject a newly-created channel into the local cache so
+  // getChannels() returns it immediately, before the Firestore onSnapshot fires.
+  injectChannel: function (ch) {
+    if (!ch || !ch.id) return;
+    if (!_channels[ch.id]) {
+      _channels[ch.id] = Object.assign({}, ch);
+      _notifySubscribers();
+    }
+  },
 };
 
 global.SNXTVTimeline = SNXTVTimeline;

@@ -2824,6 +2824,13 @@ async function _openCreateChannelModal() {
       _tvChannels = _tvChannels.concat([newChannel]);
     }
 
+    // Also inject into the Timeline cache so _refreshChannelSelector (which reads
+    // from SNXTVTimeline.getChannels()) picks up the new channel immediately,
+    // before the Firestore onSnapshot callback fires.
+    if (global.SNXTVTimeline && typeof global.SNXTVTimeline.injectChannel === 'function') {
+      global.SNXTVTimeline.injectChannel(newChannel);
+    }
+
     _toast('✓ Channel created: ' + name.trim());
 
     // Update the Studio header channel selector
