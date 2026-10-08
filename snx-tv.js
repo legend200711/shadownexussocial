@@ -1328,15 +1328,26 @@ var _activeChannelId = null;
  * @param {string} channelId
  */
 function _switchChannel(channelId) {
-  var newId = channelId || null;
+  // 'snx-ch-shadow-nexus-tv' is the viewer ID for the default/legacy channel.
+  // Map it to null so Timeline continues to serve the default content stream.
+  var newId = (channelId === 'snx-ch-shadow-nexus-tv') ? null
+            : (channelId || null);
+
+  // For display purposes track the full ID (including the preset label)
+  var displayId = channelId || 'snx-ch-shadow-nexus-tv';
+
   if (_activeChannelId === newId) {
     // Still re-render panel so active state is shown correctly
-    if (_viewerReady) _renderChannelPanel();
+    if (_viewerReady && global.SNXTVChannels) global.SNXTVChannels.refresh();
     return;
   }
   _activeChannelId = newId;
-  // Persist the new channel selection
-  _saveChannelPref(_activeChannelId || 'default');
+  // Persist via SNXTVChannels (canonical) — also writes localStorage
+  if (global.SNXTVChannels && typeof global.SNXTVChannels.setSelectedId === 'function') {
+    global.SNXTVChannels.setSelectedId(displayId);
+  } else {
+    _saveChannelPref(displayId);
+  }
 
   // Stop current playback cleanly
   var v = _el.video;
@@ -1382,7 +1393,13 @@ function _switchChannel(channelId) {
   _applyVolume();
 
   // Re-render the channel panel so active dot moves to newly selected channel
-  if (_viewerReady) _renderChannelPanel();
+  if (_viewerReady) {
+    if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
+      global.SNXTVChannels.refresh();
+    } else {
+      _renderChannelPanel();
+    }
+  }
 
   // Restart the timeline mode so it resolves the new channel
   _unsubTimeline && (function() { try { _unsubTimeline(); } catch(_){} _unsubTimeline = null; })();
@@ -1451,47 +1468,43 @@ function _initChannelSelector() {
     }
   }
 
-  _renderChannelPanel();
+  // Delegate to SNXTVChannels.init() — the canonical channel manager.
+  // It starts the Firestore listener, builds the channel list (presets + user),
+  // chooses the selected channel, and renders the panel.
+  if (global.SNXTVChannels && typeof global.SNXTVChannels.init === 'function') {
+    global.SNXTVChannels.init(function (channelId) {
+      // Called when user taps a channel card
+      _resumeAudioContext().then(function () { _applyVolume(); });
+      _switchChannel(channelId);
+    });
+  } else {
+    // SNXTVChannels not loaded yet — fallback to preset-only rendering
+    _renderChannelPanel();
+  }
 }
 
 /**
- * Re-render the channel panel cards.
- * Called on init, on channel switch, and when channel list changes.
+ * Re-render the channel panel.
+ * Delegates to SNXTVChannels (canonical) if available.
+ * Used as fallback when SNXTVChannels hasn't loaded yet.
  */
 function _renderChannelPanel() {
+  if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
+    global.SNXTVChannels.refresh();
+    return;
+  }
+
+  // Inline fallback (only runs if SNXTVChannels is not loaded)
   var channels = _getChannels();
-  var activeId = _activeChannelId || 'default';
-
-  if (global.SNXTVChannels && typeof global.SNXTVChannels.buildChannelPanel === 'function') {
-    global.SNXTVChannels.buildChannelPanel(channels, activeId, function (id) {
-      _resumeAudioContext().then(function () { _applyVolume(); });
-      _switchChannel(id);
-      _saveChannelPref(id || 'default');
-    });
-  } else {
-    // Fallback: render inline if SNXTVChannels hasn't loaded yet
-    _renderChannelPanelFallback(channels, activeId);
-  }
-
-  // Also sync the hidden <select> for legacy/Studio compatibility
-  var sel = _el.channelSelector;
-  if (sel) {
-    sel.innerHTML = channels.map(function (ch) {
-      return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
-    }).join('');
-    sel.value = activeId;
-  }
-}
-
-/** Inline fallback renderer if SNXTVChannels hasn't loaded yet */
-function _renderChannelPanelFallback(channels, activeId) {
-  var panel = document.getElementById('snxTvChannelPanel');
+  var activeId = _activeChannelId || 'snx-ch-shadow-nexus-tv';
+  var panel    = document.getElementById('snxTvChannelPanel');
   if (!panel) return;
+
   var html = '<div class="snx-tv-ch-list">';
   for (var i = 0; i < channels.length; i++) {
-    var ch = channels[i];
+    var ch       = channels[i];
     var isActive = ch.id === activeId;
-    var emoji = ch.logoEmoji || '📺';
+    var emoji    = ch.logoEmoji || '📺';
     html += '<button class="snx-tv-ch-btn' + (isActive ? ' snx-tv-ch-btn--active' : '') + '"'
       + ' data-channel-id="' + _esc(ch.id) + '" type="button">'
       + '<span class="snx-tv-ch-emoji">' + emoji + '</span>'
@@ -1503,23 +1516,29 @@ function _renderChannelPanelFallback(channels, activeId) {
   }
   html += '</div>';
   panel.innerHTML = html;
-  // Bind buttons
   var buttons = panel.querySelectorAll('.snx-tv-ch-btn');
   for (var j = 0; j < buttons.length; j++) {
     (function (btn) {
       btn.addEventListener('click', function () {
-        var id = btn.dataset.channelId === 'default' ? null : btn.dataset.channelId;
+        var id = btn.dataset.channelId;
         _resumeAudioContext().then(function () { _applyVolume(); });
         _switchChannel(id);
-        _saveChannelPref(id || 'default');
       });
     })(buttons[j]);
+  }
+
+  // Sync hidden <select>
+  var sel = _el.channelSelector;
+  if (sel) {
+    sel.innerHTML = channels.map(function (ch) {
+      return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
+    }).join('');
+    sel.value = activeId;
   }
 }
 
 /**
- * Re-render the viewer channel panel without re-binding the toggle.
- * Called by _onTimelineChange when the channel list changes (e.g. new channel created).
+ * Re-render the viewer channel panel — called by _onTimelineChange and Studio.
  */
 function _refreshChannelSelector() {
   _renderChannelPanel();
@@ -1537,10 +1556,21 @@ function pageOpen() {
   // Show Submit Content button for any signed-in user
   _initSubmitArea();
 
-  // Restore persisted channel selection from localStorage (survives refresh)
+  // Restore persisted channel selection.
+  // SNXTVChannels is the canonical store for the selected channel ID.
+  // Fall back to _loadChannelPref() if SNXTVChannels hasn't loaded yet.
   if (!_activeChannelId) {
-    var savedChannel = _loadChannelPref();
-    if (savedChannel && savedChannel !== 'default') {
+    var savedChannel = null;
+    if (global.SNXTVChannels && typeof global.SNXTVChannels.getSelectedId === 'function') {
+      savedChannel = global.SNXTVChannels.getSelectedId();
+    }
+    if (!savedChannel) savedChannel = _loadChannelPref();
+    // 'default' and 'snx-ch-shadow-nexus-tv' both mean the legacy default channel.
+    // Only set _activeChannelId for a non-default named channel.
+    var isDefaultChannel = !savedChannel
+                        || savedChannel === 'default'
+                        || savedChannel === 'snx-ch-shadow-nexus-tv';
+    if (!isDefaultChannel) {
       _activeChannelId = savedChannel;
       // Tell Timeline and Studio about the restored channel
       if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
