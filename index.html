@@ -11722,10 +11722,20 @@ body.arcade-fs-ios body::after { display:none !important; }
     </div>
   </div>
 
-  <!-- ── CHANNEL SELECTOR (Viewer) ── -->
-  <div class="snx-tv-channel-bar" id="snxTvChannelBar" style="display:none;">
-    <span class="snx-tv-channel-bar-label">📺</span>
-    <select class="snx-tv-channel-sel" id="snxTvChannelSelect" title="Switch Channel">
+  <!-- ── CHANNEL PANEL (Viewer) — always visible, card-based selector ── -->
+  <div class="snx-tv-channel-bar" id="snxTvChannelBar">
+    <div class="snx-tv-ch-header">
+      <span class="snx-tv-ch-header-label">CHANNELS</span>
+      <button class="snx-tv-ch-toggle" id="snxTvChToggle" type="button" aria-label="Toggle channel list">▼</button>
+    </div>
+    <div class="snx-tv-ch-content" id="snxTvChContent">
+      <!-- populated by SNXTVChannels.buildChannelPanel() -->
+      <div id="snxTvChannelPanel">
+        <div class="snx-tv-ch-loading">Loading channels…</div>
+      </div>
+    </div>
+    <!-- Hidden <select> kept for programmatic/legacy compatibility -->
+    <select class="snx-tv-channel-sel" id="snxTvChannelSelect" title="Switch Channel" style="display:none;">
       <option value="default">Shadow Nexus TV</option>
     </select>
   </div>
@@ -25551,6 +25561,8 @@ function _supportStopCanvas() {
 <script src="snx-tv-timeline.js?v=SNS-2026-TV-STAGE6-002"></script>
 <!-- ── Shadow Nexus 24-Hour TV — Stage 6: TV Core + Viewer + Audio Fix ── -->
 <script src="snx-tv.js?v=SNS-2026-TV-STAGE6-002"></script>
+<!-- ── Shadow Nexus 24-Hour TV — Channel Seeder + Panel Builder (Rebuild) ── -->
+<script src="snx-tv-channels.js?v=SNS-2026-TV-CH-REBUILD-001"></script>
 
 <script>
 /* ═══════════════════════════════════════════════════════════════════════

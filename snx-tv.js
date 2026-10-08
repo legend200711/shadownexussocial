@@ -1328,8 +1328,15 @@ var _activeChannelId = null;
  * @param {string} channelId
  */
 function _switchChannel(channelId) {
-  if (_activeChannelId === channelId) return; // already on this channel
-  _activeChannelId = channelId;
+  var newId = channelId || null;
+  if (_activeChannelId === newId) {
+    // Still re-render panel so active state is shown correctly
+    if (_viewerReady) _renderChannelPanel();
+    return;
+  }
+  _activeChannelId = newId;
+  // Persist the new channel selection
+  _saveChannelPref(_activeChannelId || 'default');
 
   // Stop current playback cleanly
   var v = _el.video;
@@ -1362,17 +1369,20 @@ function _switchChannel(channelId) {
 
   // Tell SNXTVTimeline to reload for the new channel
   if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
-    global.SNXTVTimeline.setChannel(channelId);
+    global.SNXTVTimeline.setChannel(_activeChannelId);
   }
 
   // Tell SNXTVStudio to switch its channel context
   if (global.SNXTVStudio && typeof global.SNXTVStudio.setChannel === 'function') {
-    global.SNXTVStudio.setChannel(channelId);
+    global.SNXTVStudio.setChannel(_activeChannelId);
   }
 
   // Re-apply volume (channel switch must not mute audio)
   _resumeAudioContext();
   _applyVolume();
+
+  // Re-render the channel panel so active dot moves to newly selected channel
+  if (_viewerReady) _renderChannelPanel();
 
   // Restart the timeline mode so it resolves the new channel
   _unsubTimeline && (function() { try { _unsubTimeline(); } catch(_){} _unsubTimeline = null; })();
@@ -1380,69 +1390,139 @@ function _switchChannel(channelId) {
   _opened = true;
 }
 
-/* ── Viewer channel selector — populated from SNXTVTimeline.getChannels() ── */
-var _channelSelectorInited = false;
+/* ── Viewer channel selector — card-based panel (Rebuild) ── */
 
 /**
- * Rebuild the viewer channel selector options and show/hide the channel bar.
- * Safe to call repeatedly — rebuilds options every time, binds the change
- * listener only once.
+ * Channel persistence — save/restore via localStorage so refresh remembers the channel.
  */
-function _initChannelSelector() {
-  var bar = document.getElementById('snxTvChannelBar');
-  var sel = _el.channelSelector;
-  if (!sel) return;
+function _saveChannelPref(channelId) {
+  try { localStorage.setItem('snxTvActiveChannel', channelId || 'default'); } catch (e) {}
+}
 
-  // Get channel list from SNXTVTimeline or SNXTVStudio
-  var channels = [];
-  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getChannels === 'function') {
-    channels = global.SNXTVTimeline.getChannels();
-  } else if (global.SNXTVStudio && typeof global.SNXTVStudio.getChannels === 'function') {
-    channels = global.SNXTVStudio.getChannels();
-  }
-
-  // Only show channel bar when there are 2+ channels
-  if (bar) bar.style.display = (channels.length > 1) ? '' : 'none';
-
-  // Rebuild options every call so newly-created channels appear immediately
-  sel.innerHTML = channels.map(function (ch) {
-    return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
-  }).join('');
-  sel.value = _activeChannelId || 'default';
-
-  // Bind the change listener only once
-  if (_channelSelectorInited) return;
-  _channelSelectorInited = true;
-
-  sel.addEventListener('change', function () {
-    var id = sel.value === 'default' ? null : sel.value;
-    _resumeAudioContext().then(function () { _applyVolume(); });
-    _switchChannel(id);
-  });
+function _loadChannelPref() {
+  try { return localStorage.getItem('snxTvActiveChannel') || 'default'; } catch (e) { return 'default'; }
 }
 
 /**
- * Re-render the viewer channel selector without re-binding events.
- * Called by _onTimelineChange when the channel list changes (e.g. new channel created).
+ * Get the canonical channel list from Timeline or Studio.
+ * Always includes the 'default' virtual channel first.
  */
-function _refreshChannelSelector() {
-  var bar = document.getElementById('snxTvChannelBar');
-  var sel = _el.channelSelector;
-  if (!sel) return;
-
+function _getChannels() {
   var channels = [];
   if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getChannels === 'function') {
     channels = global.SNXTVTimeline.getChannels();
   } else if (global.SNXTVStudio && typeof global.SNXTVStudio.getChannels === 'function') {
     channels = global.SNXTVStudio.getChannels();
   }
+  // Ensure 'default' is always present
+  if (!channels.some(function (c) { return c.id === 'default'; })) {
+    channels = [{ id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV', logoEmoji: '📺' }].concat(channels);
+  }
+  return channels;
+}
 
-  if (bar) bar.style.display = (channels.length > 1) ? '' : 'none';
+/**
+ * Rebuild the viewer channel panel UI and wire up the toggle.
+ * Safe to call repeatedly — always re-renders the card list.
+ * Binds the collapse toggle only once per page lifecycle.
+ */
+var _channelToggleInited = false;
 
-  sel.innerHTML = channels.map(function (ch) {
-    return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
-  }).join('');
-  sel.value = _activeChannelId || 'default';
+function _initChannelSelector() {
+  // Wire up collapse toggle once
+  if (!_channelToggleInited) {
+    _channelToggleInited = true;
+    var toggleBtn = document.getElementById('snxTvChToggle');
+    var content   = document.getElementById('snxTvChContent');
+    if (toggleBtn && content) {
+      toggleBtn.addEventListener('click', function () {
+        var collapsed = content.classList.toggle('collapsed');
+        toggleBtn.classList.toggle('collapsed', collapsed);
+        toggleBtn.textContent = collapsed ? '▶' : '▼';
+      });
+    }
+    // Also make the header row (label) toggle the panel
+    var header = document.querySelector('.snx-tv-ch-header');
+    if (header) {
+      header.addEventListener('click', function (e) {
+        if (e.target === toggleBtn) return; // already handled
+        if (toggleBtn) toggleBtn.click();
+      });
+    }
+  }
+
+  _renderChannelPanel();
+}
+
+/**
+ * Re-render the channel panel cards.
+ * Called on init, on channel switch, and when channel list changes.
+ */
+function _renderChannelPanel() {
+  var channels = _getChannels();
+  var activeId = _activeChannelId || 'default';
+
+  if (global.SNXTVChannels && typeof global.SNXTVChannels.buildChannelPanel === 'function') {
+    global.SNXTVChannels.buildChannelPanel(channels, activeId, function (id) {
+      _resumeAudioContext().then(function () { _applyVolume(); });
+      _switchChannel(id);
+      _saveChannelPref(id || 'default');
+    });
+  } else {
+    // Fallback: render inline if SNXTVChannels hasn't loaded yet
+    _renderChannelPanelFallback(channels, activeId);
+  }
+
+  // Also sync the hidden <select> for legacy/Studio compatibility
+  var sel = _el.channelSelector;
+  if (sel) {
+    sel.innerHTML = channels.map(function (ch) {
+      return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
+    }).join('');
+    sel.value = activeId;
+  }
+}
+
+/** Inline fallback renderer if SNXTVChannels hasn't loaded yet */
+function _renderChannelPanelFallback(channels, activeId) {
+  var panel = document.getElementById('snxTvChannelPanel');
+  if (!panel) return;
+  var html = '<div class="snx-tv-ch-list">';
+  for (var i = 0; i < channels.length; i++) {
+    var ch = channels[i];
+    var isActive = ch.id === activeId;
+    var emoji = ch.logoEmoji || '📺';
+    html += '<button class="snx-tv-ch-btn' + (isActive ? ' snx-tv-ch-btn--active' : '') + '"'
+      + ' data-channel-id="' + _esc(ch.id) + '" type="button">'
+      + '<span class="snx-tv-ch-emoji">' + emoji + '</span>'
+      + '<span class="snx-tv-ch-info">'
+      +   '<span class="snx-tv-ch-name">' + _esc(ch.name || ch.id) + '</span>'
+      + '</span>'
+      + (isActive ? '<span class="snx-tv-ch-active-dot"></span>' : '')
+      + '</button>';
+  }
+  html += '</div>';
+  panel.innerHTML = html;
+  // Bind buttons
+  var buttons = panel.querySelectorAll('.snx-tv-ch-btn');
+  for (var j = 0; j < buttons.length; j++) {
+    (function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.dataset.channelId === 'default' ? null : btn.dataset.channelId;
+        _resumeAudioContext().then(function () { _applyVolume(); });
+        _switchChannel(id);
+        _saveChannelPref(id || 'default');
+      });
+    })(buttons[j]);
+  }
+}
+
+/**
+ * Re-render the viewer channel panel without re-binding the toggle.
+ * Called by _onTimelineChange when the channel list changes (e.g. new channel created).
+ */
+function _refreshChannelSelector() {
+  _renderChannelPanel();
 }
 
 /**
@@ -1457,7 +1537,22 @@ function pageOpen() {
   // Show Submit Content button for any signed-in user
   _initSubmitArea();
 
-  // Populate the viewer channel selector
+  // Restore persisted channel selection from localStorage (survives refresh)
+  if (!_activeChannelId) {
+    var savedChannel = _loadChannelPref();
+    if (savedChannel && savedChannel !== 'default') {
+      _activeChannelId = savedChannel;
+      // Tell Timeline and Studio about the restored channel
+      if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
+        global.SNXTVTimeline.setChannel(_activeChannelId);
+      }
+      if (global.SNXTVStudio && typeof global.SNXTVStudio.setChannel === 'function') {
+        global.SNXTVStudio.setChannel(_activeChannelId);
+      }
+    }
+  }
+
+  // Populate the viewer channel panel (card-based)
   _initChannelSelector();
 
   // Start timeline listener and try scheduled mode
@@ -2276,6 +2371,49 @@ var _snxViz = (function () {
     _ctx.fillText('SHADOW NEXUS TV', w * 0.5, h * 0.89);
     _ctx.globalAlpha   = 1;
     _ctx.textAlign     = 'left';
+
+    // Now Playing overlay — title and artist drawn on top of visualizer
+    var _item = _state.current;
+    if (_item) {
+      var _title  = _item.title  || '';
+      var _artist = _item.artist || '';
+      var _maxW   = w * 0.82;
+
+      // Title
+      if (_title) {
+        var _tSize = Math.max(11, Math.min(16, Math.round(w * 0.028)));
+        _ctx.font         = '700 ' + _tSize + 'px system-ui,sans-serif';
+        _ctx.fillStyle    = 'rgba(220,240,255,0.90)';
+        _ctx.globalAlpha  = 0.9;
+        _ctx.textAlign    = 'center';
+        _ctx.shadowBlur   = 8;
+        _ctx.shadowColor  = 'rgba(0,100,200,0.7)';
+        var _titleText    = _title;
+        while (_ctx.measureText(_titleText).width > _maxW && _titleText.length > 4) {
+          _titleText = _titleText.slice(0, -4) + '…';
+        }
+        _ctx.fillText(_titleText, w * 0.5, h * 0.14);
+        _ctx.shadowBlur = 0;
+      }
+
+      // Artist
+      if (_artist) {
+        var _aSize = Math.max(9, Math.min(13, Math.round(w * 0.022)));
+        _ctx.font         = '600 ' + _aSize + 'px system-ui,sans-serif';
+        _ctx.fillStyle    = 'rgba(0,174,239,0.75)';
+        _ctx.globalAlpha  = 0.75;
+        _ctx.textAlign    = 'center';
+        var _artistText   = _artist;
+        while (_ctx.measureText(_artistText).width > _maxW && _artistText.length > 4) {
+          _artistText = _artistText.slice(0, -4) + '…';
+        }
+        _ctx.fillText(_artistText, w * 0.5, h * 0.14 + (_title ? Math.round(w * 0.032) : 0));
+      }
+
+      _ctx.globalAlpha = 1;
+      _ctx.textAlign   = 'left';
+      _ctx.shadowBlur  = 0;
+    }
   }
 
   function _resizeCanvas() {

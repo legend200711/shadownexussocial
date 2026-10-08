@@ -119,9 +119,15 @@
   object-fit: contain;
   background: #000;
   display: none;
+  z-index: 2;         /* above fallback/bg, below overlays */
 }
 
-.snx-tv-video.visible { display: block; }
+/* When visible, video MUST render — ensure no opacity or pointer-event overrides */
+.snx-tv-video.visible {
+  display: block;
+  opacity: 1;
+  visibility: visible;
+}
 
 /* ── Cinematic Artwork Panel ── */
 .snx-tv-artwork {
@@ -132,6 +138,7 @@
   display: none;
   background: #020408;
   overflow: hidden;
+  z-index: 2;
 }
 
 .snx-tv-artwork.visible { display: block; }
@@ -230,6 +237,7 @@
   height: 100%;
   display: none;
   background: #020408;
+  z-index: 2;
 }
 
 .snx-tv-visualizer.visible { display: block; }
@@ -1466,14 +1474,8 @@
 }
 
 /* ── Viewer Channel selector bar ── */
-.snx-tv-channel-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  background: rgba(0,20,50,0.5);
-  border-bottom: 1px solid rgba(0,212,255,0.12);
-}
+/* Old dropdown channel bar — superseded by the card panel styles below.
+   Kept only for backward compat with any residual references. */
 .snx-tv-channel-bar-label {
   font-size: 14px;
   opacity: 0.7;
@@ -1521,4 +1523,187 @@
   font-size: 12px;
   font-weight: 600;
   color: #e8f4ff;
+}
+
+
+/* ══════════════════════════════════════════════════════════
+   CHANNEL PANEL — Viewer Channel Selector (Rebuild)
+   Replaces old dropdown-only channel bar with a card-based
+   channel list that is always visible and easy to tap on mobile.
+   ══════════════════════════════════════════════════════════ */
+
+/* Outer channel bar container — replaces old hidden bar */
+.snx-tv-channel-bar {
+  border-bottom: 1px solid rgba(0, 174, 239, 0.12);
+  background: rgba(3, 8, 22, 0.7);
+}
+
+/* Collapsible header row */
+.snx-tv-ch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 7px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.snx-tv-ch-header-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 2.5px;
+  color: rgba(0, 174, 239, 0.55);
+  text-transform: uppercase;
+}
+
+.snx-tv-ch-toggle {
+  background: none;
+  border: none;
+  color: rgba(0, 174, 239, 0.45);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  transition: transform 0.2s;
+}
+
+.snx-tv-ch-toggle.collapsed {
+  transform: rotate(-90deg);
+}
+
+/* Collapsible content area */
+.snx-tv-ch-content {
+  overflow: hidden;
+  max-height: 260px;  /* about 4-5 channels before scroll */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  transition: max-height 0.25s ease;
+}
+
+.snx-tv-ch-content.collapsed {
+  max-height: 0;
+}
+
+/* Channel list — horizontal scrolling on mobile */
+.snx-tv-ch-list {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 10px;
+}
+
+/* Individual channel button */
+.snx-tv-ch-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(0, 174, 239, 0.18);
+  border-radius: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+  color: inherit;
+  min-width: 130px;
+  flex: 1 1 130px;
+  max-width: 200px;
+  position: relative;
+  touch-action: manipulation;
+}
+
+.snx-tv-ch-btn:hover {
+  background: rgba(0, 50, 120, 0.45);
+  border-color: rgba(0, 174, 239, 0.4);
+}
+
+.snx-tv-ch-btn--active {
+  background: rgba(0, 60, 140, 0.55) !important;
+  border-color: rgba(0, 174, 239, 0.65) !important;
+  box-shadow: 0 0 12px rgba(0, 174, 239, 0.2);
+}
+
+.snx-tv-ch-emoji {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.snx-tv-ch-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.snx-tv-ch-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #c8e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.3px;
+}
+
+.snx-tv-ch-desc {
+  font-size: 9px;
+  color: rgba(120, 170, 210, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.2px;
+}
+
+.snx-tv-ch-active-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00AEEF;
+  box-shadow: 0 0 6px rgba(0, 174, 239, 0.9);
+  animation: snxTvLivePulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+/* Loading / empty state */
+.snx-tv-ch-loading,
+.snx-tv-ch-empty {
+  padding: 10px 16px;
+  font-size: 11px;
+  color: rgba(0, 174, 239, 0.4);
+  letter-spacing: 0.5px;
+}
+
+/* ── Mobile: single row horizontal scroll ── */
+@media (max-width: 480px) {
+  .snx-tv-ch-list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 6px 12px 8px;
+    gap: 6px;
+  }
+  .snx-tv-ch-list::-webkit-scrollbar { display: none; }
+
+  .snx-tv-ch-btn {
+    min-width: 110px;
+    max-width: 140px;
+    flex-shrink: 0;
+    padding: 7px 10px;
+    gap: 6px;
+  }
+
+  .snx-tv-ch-emoji  { font-size: 16px; }
+  .snx-tv-ch-name   { font-size: 11px; }
+  .snx-tv-ch-desc   { display: none; }
+
+  .snx-tv-ch-content {
+    max-height: 100px; /* just one scrolling row */
+  }
 }
