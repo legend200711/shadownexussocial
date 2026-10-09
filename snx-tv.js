@@ -124,9 +124,9 @@
     return addDoc(col, data);
   }
 
-  function _fsOnSnapshot(ref, cb) {
+  function _fsOnSnapshot(ref, cb, onError) {
     const { onSnapshot } = _fs();
-    if (onSnapshot) return onSnapshot(ref, cb);
+    if (onSnapshot) return onSnapshot(ref, cb, onError || undefined);
     return () => {};
   }
 
@@ -196,8 +196,24 @@
         }
       } catch (e) {
         console.warn(LOG, 'channels snapshot error', e);
+        _showGuideError('Could not load channels.');
       }
+    }, err => {
+      console.warn(LOG, 'channels snapshot permission error', err);
+      _showGuideError(
+        err && err.code === 'permission-denied'
+          ? 'Sign in to view channels.'
+          : 'Could not load channels. Please refresh.'
+      );
     });
+  }
+
+  function _showGuideError(msg) {
+    const grid = _el('snxTvGuideGrid');
+    if (grid) {
+      grid.innerHTML =
+        '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' + msg + '</div>';
+    }
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -911,12 +927,25 @@
     }
 
     _ensurePageDom();
-    _subscribeChannels();
 
-    if (_isFounder()) {
-      _showStudioBar();
+    // Defer Firestore subscription and founder UI until Firebase Auth has resolved.
+    // Without this guard, navigating to tvPage before onAuthStateChanged fires causes
+    // all Firestore reads/writes to run as unauthenticated, triggering permission-denied
+    // on both the channels snapshot and the create-channel setDoc.
+    const _open = () => {
+      _subscribeChannels();
+      if (_isFounder()) {
+        _showStudioBar();
+      } else {
+        _hideStudioBar();
+      }
+    };
+
+    if (global._snxOnAuthReady) {
+      global._snxOnAuthReady(_open);
     } else {
-      _hideStudioBar();
+      // Fallback: _snxOnAuthReady not available (e.g. standalone test), run immediately.
+      _open();
     }
   }
 
