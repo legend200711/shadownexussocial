@@ -419,6 +419,11 @@
       if (vid) vid.style.display = 'none';
       aud.muted = false;
       aud.volume = aud.volume > 0 ? aud.volume : 1;
+      // crossOrigin must be set BEFORE src — required for createMediaElementSource
+      // to receive cross-origin audio data through the Web Audio graph.
+      // Without this the browser fetches the file as an opaque non-CORS response
+      // and the AudioContext cannot read its decoded audio, producing silence.
+      aud.crossOrigin = 'anonymous';
       aud.src = item.url;
       aud.load();
       console.log(LOG, 'playing audio', item.title || item.fileName, item.url);
@@ -1788,7 +1793,7 @@
       '<div class="snx-tv-player-wrap" id="snxTvPlayerWrap">',
         '<div id="snxTvPlayerInner" style="width:100%;height:100%;position:relative;">',
           '<video id="snxTvVideo" data-snx-media-exempt="1" playsinline webkit-playsinline preload="metadata" style="display:none;"></video>',
-          '<audio id="snxTvAudio" preload="none"></audio>',
+          '<audio id="snxTvAudio" preload="none" crossorigin="anonymous"></audio>',
           '<canvas id="snxTvVisualizer"></canvas>',
           '<div class="snx-tv-viz-overlay" id="snxTvVizOverlay">',
             '<div class="snx-tv-viz-title"></div>',
