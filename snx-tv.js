@@ -190,6 +190,8 @@
         _channels.sort((a, b) => (a.order || 0) - (b.order || 0));
         _renderGuide();
         _renderStudioChannels();
+        _updateChannelSelect();          // repopulate Add Media channel picker
+        _renderAddMediaChannelPicker();  // refresh tappable channel cards in Add Media tab
         // Auto-select first channel if none selected
         if (!_activeChannel && _channels.length > 0) {
           _selectChannel(_channels[0].id);
@@ -742,14 +744,7 @@
     if (!ch) return;
     _studioChannel = ch;
     _switchStudioTab('media');
-
-    const title = _el('snxTvStudioMediaPaneTitle');
-    if (title) title.textContent = 'Media for: ' + ch.name;
-
-    // Populate channel selector in upload form
-    const sel = _el('snxTvUploadChannelId');
-    if (sel) sel.value = channelId;
-
+    _renderAddMediaChannelPicker();   // highlight selection + refresh label
     _loadStudioMedia(channelId);
   }
 
@@ -818,10 +813,15 @@
     const title     = titleInput  ? titleInput.value.trim()   : '';
     const artist    = artistInput ? artistInput.value.trim()  : '';
     const mediaKind = kindSel     ? kindSel.value             : 'video';
-    const channelId = chIdEl      ? chIdEl.value.trim()       : (_studioChannel && _studioChannel.id) || '';
+    // Use _studioChannel as the authoritative source; hidden <select> is the fallback
+    const channelId = (_studioChannel && _studioChannel.id) ||
+                      (chIdEl && chIdEl.value.trim()) || '';
 
     if (!file)      { _showStatus('snxTvUploadStatus', 'Please select a file.', 'err'); return; }
-    if (!channelId) { _showStatus('snxTvUploadStatus', 'Please select a channel.', 'err'); return; }
+    if (!channelId) {
+      _showStatus('snxTvUploadStatus', '⚠ Tap a channel in Step 1 above to select it first.', 'err');
+      return;
+    }
 
     _showStatus('snxTvUploadStatus', 'Uploading…', 'info');
     const prog = _el('snxTvUploadProgressWrap');
@@ -1047,10 +1047,21 @@
 
         /* Media pane */
         '<div class="snx-tv-studio-pane" data-pane="media">',
-          '<div id="snxTvStudioMediaPaneTitle" style="font-size:13px;font-weight:700;color:#c8e8ff;margin-bottom:14px;">Select a channel from the Channels tab</div>',
+
+          /* ── Step 1: Channel picker ── */
+          '<p style="font-size:11px;color:#5a8aaa;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin:0 0 8px;">Step 1 — Select a Channel</p>',
+          /* Selection status label */
+          '<div id="snxTvAddMediaChLabel" style="font-size:13px;font-weight:600;color:#4a7a9a;margin-bottom:10px;padding:8px 10px;background:rgba(0,20,50,0.5);border:1px solid rgba(0,174,239,0.15);border-radius:8px;">',
+            'No channels yet — create one on the Channels tab.',
+          '</div>',
+          /* Tappable channel cards container */
+          '<div id="snxTvAddMediaChPicker" style="margin-bottom:16px;"></div>',
+          /* Hidden <select> kept for upload fallback */
+          '<select id="snxTvUploadChannelId" style="display:none;"></select>',
+
+          /* ── Step 2: Upload form ── */
+          '<p style="font-size:11px;color:#5a8aaa;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin:0 0 8px;">Step 2 — Upload Media</p>',
           '<div class="snx-tv-upload-form">',
-            '<label for="snxTvUploadChannelId" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Channel</label>',
-            '<select id="snxTvUploadChannelId" style="margin:4px 0 8px;"></select>',
             '<label for="snxTvUploadKind" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Media Type</label>',
             '<select id="snxTvUploadKind" style="margin:4px 0 8px;">',
               '<option value="video">Video</option>',
@@ -1070,7 +1081,9 @@
             '</div>',
             '<div class="snx-tv-status" id="snxTvUploadStatus"></div>',
           '</div>',
-          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;">Channel Media</p>',
+
+          /* ── Step 3: Media list for selected channel ── */
+          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;" id="snxTvStudioMediaPaneTitle">Select a channel above</p>',
           '<ul class="snx-tv-media-list" id="snxTvStudioMediaList"></ul>',
         '</div>',
 
@@ -1100,20 +1113,92 @@
     const btn = _el('snxTvPlayBtn');
     if (btn) btn.addEventListener('click', _onPlayOverlayClick);
 
-    /* Populate channel select in upload form reactively */
+    /* Populate channel select and channel picker in Add Media tab */
     _updateChannelSelect();
+    _renderAddMediaChannelPicker();
   }
 
-  /* Populate the channel <select> in upload form whenever channels change */
+  /* Populate the hidden channel <select> (kept for upload fallback) */
   function _updateChannelSelect() {
     const sel = _el('snxTvUploadChannelId');
     if (!sel) return;
-    const prevVal = sel.value;
     sel.innerHTML = _channels.map(ch =>
       '<option value="' + _esc(ch.id) + '">' + _esc(ch.name) + '</option>'
     ).join('');
-    if (prevVal && _channels.find(c => c.id === prevVal)) sel.value = prevVal;
-    else if (_studioChannel) sel.value = _studioChannel.id;
+    if (_studioChannel && _channels.find(c => c.id === _studioChannel.id)) {
+      sel.value = _studioChannel.id;
+    }
+  }
+
+  /* Render tappable channel-selection cards inside the Add Media pane */
+  function _renderAddMediaChannelPicker() {
+    const container = _el('snxTvAddMediaChPicker');
+    const label     = _el('snxTvAddMediaChLabel');
+    const mediaTitle= _el('snxTvStudioMediaPaneTitle');
+
+    // Update the selected-channel label above the upload form
+    if (label) {
+      if (_studioChannel) {
+        label.innerHTML =
+          '<span style="color:#00AEEF;">✔ Selected Channel:</span> ' +
+          '<strong style="color:#e0f0ff;">' + _esc(_studioChannel.name) + '</strong>';
+        label.style.color = '#c8e8ff';
+      } else {
+        label.textContent = _channels.length
+          ? '⬆ Tap a channel below to select it before uploading.'
+          : 'No channels yet — create one on the Channels tab.';
+        label.style.color = '#4a7a9a';
+      }
+    }
+
+    // Update media pane title (above media list)
+    if (mediaTitle) {
+      mediaTitle.textContent = _studioChannel
+        ? 'Media for: ' + _studioChannel.name
+        : 'Select a channel below';
+    }
+
+    // Sync hidden <select>
+    _updateChannelSelect();
+
+    if (!container) return;
+
+    if (_channels.length === 0) {
+      container.innerHTML =
+        '<p style="color:#4a7a9a;font-size:13px;margin:0 0 12px;">No channels yet.</p>';
+      return;
+    }
+
+    container.innerHTML = _channels.map(ch => {
+      const selected  = _studioChannel && _studioChannel.id === ch.id;
+      const artStyle  = ch.artworkUrl ? 'background-image:url(' + _esc(ch.artworkUrl) + ');background-size:cover;background-position:center;' : '';
+      return (
+        '<div class="snx-tv-channel-card' + (selected ? ' active-channel snx-tv-amch-selected' : '') + '" ' +
+        'data-ch-id="' + _esc(ch.id) + '" ' +
+        'role="button" tabindex="0" ' +
+        'style="margin-bottom:8px;' + (selected ? 'border-color:rgba(0,174,239,0.90);box-shadow:0 0 18px rgba(0,174,239,0.30);' : '') + '" ' +
+        'onclick="window.SNXTv.studioSelectChannel(' + _json(ch.id) + ')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \')window.SNXTv.studioSelectChannel(' + _json(ch.id) + ')">' +
+          '<div class="snx-tv-ch-art" style="' + artStyle + '">' + (ch.artworkUrl ? '' : '📺') + '</div>' +
+          '<div class="snx-tv-ch-info">' +
+            '<div class="snx-tv-ch-name">' + _esc(ch.name) + '</div>' +
+            '<div class="snx-tv-ch-meta">' + _esc(ch.description || '') + '</div>' +
+          '</div>' +
+          (selected
+            ? '<span class="snx-tv-ch-badge playing">✔ Selected</span>'
+            : '<span class="snx-tv-ch-badge">Select</span>') +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  /* Studio: Select a channel from the Add Media picker (does NOT navigate away) */
+  function _studioSelectChannel(channelId) {
+    const ch = _channels.find(c => c.id === channelId);
+    if (!ch) return;
+    _studioChannel = ch;
+    _renderAddMediaChannelPicker();   // re-render highlights + label
+    _loadStudioMedia(channelId);      // refresh media list for this channel
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1143,6 +1228,7 @@
     studioCreateChannel:  _studioCreateChannel,
     studioDeleteChannel:  _studioDeleteChannel,
     studioOpenChannel:    _studioOpenChannel,
+    studioSelectChannel:  _studioSelectChannel,
     studioDeleteMedia:    _studioDeleteMedia,
     studioUploadMedia:    _studioUploadMedia,
 

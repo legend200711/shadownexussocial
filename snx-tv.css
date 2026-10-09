@@ -283,6 +283,13 @@
   box-shadow: 0 0 22px rgba(0,100,220,0.30), inset 0 0 14px rgba(0,80,200,0.08);
   background: rgba(0,30,80,0.55);
 }
+/* Add-Media picker: selected card gets a stronger highlight */
+.snx-tv-channel-card.snx-tv-amch-selected {
+  border-color: #00AEEF;
+  box-shadow: 0 0 26px rgba(0,174,239,0.45), inset 0 0 16px rgba(0,100,220,0.12);
+  background: rgba(0,40,100,0.60);
+  outline: none;
+}
 .snx-tv-ch-art {
   width: 42px;
   height: 42px;
