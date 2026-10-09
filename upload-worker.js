@@ -2170,7 +2170,94 @@ async function handleBroadcastStatus(request, env, cors, sec) {
 }
 
 
-// ── TV Media Upload (Founder only) ─────────────────────────────────────────
+// ── TV Media Upload to Central Library (Founder only) ────────────────────
+//
+//   POST /tv/upload-media-library
+//     Authorization: Bearer <firebase-id-token>
+//     FormData: { file, mediaKind ('video'|'audio'|'image'), title, artist }
+//
+//   No channelId required. File is stored under tv/library/{mediaKind}/...
+//   Firestore metadata doc is created by the client (snx-tv.js) after success.
+//
+async function handleTvUploadLibrary(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let founderUid;
+  try { founderUid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.status || 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let formData;
+  try { formData = await request.formData(); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid form data: ' + e.message }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const file      = formData.get('file');
+  const mediaKind = formData.get('mediaKind') || 'audio';
+  const title     = (formData.get('title')  || '').slice(0, 200);
+  const artist    = (formData.get('artist') || '').slice(0, 200);
+  if (!file || typeof file === 'string') {
+    return new Response(JSON.stringify({ error: 'No file received' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  if (!['video', 'audio', 'image'].includes(mediaKind)) {
+    return new Response(JSON.stringify({ error: 'mediaKind must be video, audio, or image' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let mime = file.type || '';
+  const extMime = mimeFromExt(file.name);
+  if (!mime || mime === 'application/octet-stream') mime = extMime || mime;
+  const kindOk =
+    (mediaKind === 'video' && mime.startsWith('video/')) ||
+    (mediaKind === 'audio' && (mime.startsWith('audio/') || mime === 'application/octet-stream')) ||
+    (mediaKind === 'image' && mime.startsWith('image/'));
+  if (!kindOk) {
+    return new Response(JSON.stringify({ error: 'File type "' + mime + '" does not match mediaKind "' + mediaKind + '"' }), {
+      status: 415, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const sizeLimit =
+    mediaKind === 'video' ? MAX_SIZE_VIDEO :
+    mediaKind === 'audio' ? MAX_SIZE_AUDIO :
+    MAX_SIZE_IMAGE;
+  const buffer = await file.arrayBuffer();
+  if (buffer.byteLength > sizeLimit) {
+    const limitMB = Math.round(sizeLimit / 1024 / 1024);
+    return new Response(JSON.stringify({ error: 'File too large (max ' + limitMB + ' MB for ' + mediaKind + ')' }), {
+      status: 413, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const ts       = Date.now();
+  const safeName = (file.name || 'upload').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  // Store under tv/library/ — no channelId in the path
+  const key       = 'tv/library/' + mediaKind + '/' + ts + '_' + safeName;
+  const cleanMime = (mime || 'application/octet-stream').split(';')[0].trim();
+  try {
+    await env.BUCKET.put(key, buffer, {
+      httpMetadata:   { contentType: cleanMime },
+      customMetadata: { uploaderUid: founderUid, originalName: file.name, title, artist, mediaKind }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'R2 upload failed: ' + e.message }), {
+      status: 500, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const publicUrl = 'https://yellow-term-11e6.nthntjrn.workers.dev/' + key;
+  return new Response(JSON.stringify({ url: publicUrl, key, mediaKind, title, artist }), {
+    status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+  });
+}
+
+// ── TV Media Upload (legacy — channel-scoped, kept for backward compat) ───
 //
 //   POST /tv/upload-media
 //     Authorization: Bearer <firebase-id-token>
@@ -2348,6 +2435,7 @@ export default {
 
 
     // ── TV Media endpoints (Founder only) ──
+    if (url.pathname === '/tv/upload-media-library') return handleTvUploadLibrary(request, env, cors, sec);
     if (url.pathname === '/tv/upload-media') return handleTvUpload(request, env, cors, sec);
     if (url.pathname === '/tv/delete-media') return handleTvDeleteMedia(request, env, cors, sec);
 

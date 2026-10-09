@@ -633,3 +633,121 @@
 @media (max-width: 380px) {
   .snx-tv-guide-grid { grid-template-columns: 1fr; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   MEDIA LIBRARY — SNS-2026-TV-LIBRARY-001
+   Library list rows, filters, bulk bar, channel badges, overlays
+════════════════════════════════════════════════════════════════ */
+
+/* ── Library list row ── */
+.snx-tv-lib-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(0,174,239,0.08);
+  transition: background 0.15s;
+  border-radius: 6px;
+  margin-bottom: 2px;
+}
+.snx-tv-lib-row:hover { background: rgba(0,60,120,0.18); }
+.snx-tv-lib-row.selected { background: rgba(0,174,239,0.12); border: 1px solid rgba(0,174,239,0.28); }
+
+/* ── Checkbox ── */
+.snx-tv-lib-check {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+.snx-tv-lib-check input[type=checkbox] {
+  accent-color: #00AEEF;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+/* ── Channel assignment badges (inside library row) ── */
+.snx-tv-lib-ch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.snx-tv-lib-ch-badge {
+  display: inline-block;
+  background: rgba(0,174,239,0.15);
+  border: 1px solid rgba(0,174,239,0.30);
+  color: #88ccff;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* ── Row action buttons ── */
+.snx-tv-lib-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  align-items: center;
+}
+
+/* ── XS button size ── */
+.snx-tv-btn.snx-tv-btn-xs {
+  padding: 4px 7px;
+  font-size: 11px;
+  min-width: 0;
+}
+
+/* ── Library filter buttons ── */
+.snx-tv-lib-filter-btn {
+  background: rgba(0,20,50,0.6);
+  border: 1px solid rgba(0,174,239,0.20);
+  color: #5a8aaa;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.3px;
+}
+.snx-tv-lib-filter-btn:hover { border-color: rgba(0,174,239,0.45); color: #c8e8ff; }
+.snx-tv-lib-filter-btn.active {
+  background: rgba(0,174,239,0.18);
+  border-color: rgba(0,174,239,0.60);
+  color: #00AEEF;
+}
+
+/* ── Assign channel label in assign-to-channel dialog ── */
+.snx-tv-assign-ch-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(0,20,50,0.5);
+  border: 1px solid rgba(0,174,239,0.15);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #c8e8ff;
+  transition: border-color 0.15s, background 0.15s;
+}
+.snx-tv-assign-ch-label:hover {
+  border-color: rgba(0,174,239,0.40);
+  background: rgba(0,40,90,0.5);
+}
+.snx-tv-assign-ch-label input[type=checkbox] {
+  accent-color: #00AEEF;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   END LIBRARY ADDITIONS
+════════════════════════════════════════════════════════════════ */

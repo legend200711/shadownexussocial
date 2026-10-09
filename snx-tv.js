@@ -1,17 +1,19 @@
 /**
  * snx-tv.js
  * Shadow Nexus Social — 24-Hour TV Network
- * Build: SNS-2026-TV-REBUILD-001
+ * Build: SNS-2026-TV-LIBRARY-001
  *
  * Exposes: window.SNXTv
  *
  * Architecture:
  *   - Channels stored in Firestore /tv_channels/{channelId}
- *   - Media stored in Firestore /tv_media/{mediaId}  (references R2 URLs)
- *   - Playback is entirely client-side: queue is built from channel's media,
- *     advances on <video>/<audio> ended / error events.
- *   - Founder authentication: window._snxRole === 'founder' (set by SNS auth)
- *   - Uploads via POST /tv/upload-media on the Cloudflare Worker (Founder only)
+ *   - Central media library in Firestore /tv_library/{mediaId}  (no channelId)
+ *   - Channel assignments in Firestore /tv_channel_items/{itemId}
+ *       { channelId, mediaId, order, addedAt }
+ *   - Legacy /tv_media/{mediaId} docs still played if present (backward compat)
+ *   - Playback: builds queue from tv_channel_items → resolves via tv_library
+ *   - Uploads via POST /tv/upload-media-library on the Cloudflare Worker
+ *   - Founder authentication: window._snxRole === 'founder'
  *
  * Safety:
  *   - Does NOT touch Radio, Live, Shadow Reaper, or any other SNS feature.
@@ -28,45 +30,48 @@
      CONSTANTS
   ════════════════════════════════════════════════════════════ */
 
-  const BUILD     = 'SNS-2026-TV-REBUILD-001';
-  const WORKER    = 'https://yellow-term-11e6.nthntjrn.workers.dev';
-  const LOG       = '[SNX-TV]';
+  const BUILD  = 'SNS-2026-TV-LIBRARY-001';
+  const WORKER = 'https://yellow-term-11e6.nthntjrn.workers.dev';
+  const LOG    = '[SNX-TV]';
 
   /* Firestore collection names */
-  const COL_CHANNELS = 'tv_channels';
-  const COL_MEDIA    = 'tv_media';
+  const COL_CHANNELS     = 'tv_channels';
+  const COL_LIBRARY      = 'tv_library';        // central media library
+  const COL_CH_ITEMS     = 'tv_channel_items';  // channel ↔ media assignments
+  const COL_MEDIA_LEGACY = 'tv_media';          // legacy — read-only for backward compat
 
   /* Media kind → emoji */
   const KIND_ICON = { video: '🎬', audio: '🎵', image: '🖼' };
-
-  /* Default channel created if none exist */
-  const DEFAULT_CHANNEL = {
-    id: 'shadow-nexus-tv',
-    name: 'Shadow Nexus TV',
-    description: '24-Hour continuous television',
-    artworkUrl: '',
-    mediaKind: 'video',
-    order: 0,
-    createdAt: Date.now(),
-  };
 
   /* ════════════════════════════════════════════════════════════
      STATE
   ════════════════════════════════════════════════════════════ */
 
-  let _channels = [];     // Array of channel objects (sorted by order)
-  let _activeChannel = null;  // currently selected channel object
-  let _mediaQueue    = [];    // ordered media for active channel
-  let _queueIdx      = 0;     // current position in queue
+  let _channels      = [];
+  let _activeChannel = null;
+  let _mediaQueue    = [];   // resolved media objects for active channel
+  let _queueIdx      = 0;
   let _playing       = false;
   let _autoplayBlocked = false;
-  let _channelsUnsub = null;  // Firestore listener cleanup
-  let _mediaUnsub    = null;
+  let _channelsUnsub   = null;
+  let _chItemsUnsub    = null;  // assignment listener for active channel
+  let _libraryCache    = {};    // mediaId → media doc (avoids redundant reads)
+
+  /* Studio state */
   let _studioOpen    = false;
-  let _studioTab     = 'channels';
-  let _studioChannel = null;  // channel selected inside studio
-  let _studioMedia   = [];    // media for _studioChannel
-  let _studioMediaUnsub = null;
+  let _studioTab     = 'library';  // 'library' | 'channels'
+  let _studioChannel = null;       // channel selected inside channel-content tab
+  let _libraryAll    = [];         // all tv_library docs (real-time)
+  let _libraryUnsub  = null;
+  let _libFilter     = 'all';      // 'all' | 'audio' | 'video' | 'image'
+  let _libSearch     = '';
+  let _libSelected   = new Set();  // selected mediaIds in library
+  let _chContentItems = [];        // tv_channel_items for _studioChannel
+  let _chContentUnsub = null;
+  let _studioMediaUnsub = null;    // alias kept for legacy cleanup
+
+  /* Preview */
+  let _previewOpen = false;
 
   /* ════════════════════════════════════════════════════════════
      FIREBASE HELPERS — wraps window._snxFirestore (modular v12)
@@ -124,9 +129,9 @@
     return addDoc(col, data);
   }
 
-  function _fsOnSnapshot(ref, cb, onError) {
+  function _fsOnSnapshot(ref, cb, onErr) {
     const { onSnapshot } = _fs();
-    if (onSnapshot) return onSnapshot(ref, cb, onError || undefined);
+    if (onSnapshot) return onSnapshot(ref, cb, onErr || undefined);
     return () => {};
   }
 
@@ -144,7 +149,6 @@
   }
 
   function _getIdToken() {
-    // Use the Firebase auth instance set by SNS main script (window.auth or window._snxAuth)
     const authInst = global.auth || global._snxAuth;
     const user = authInst && authInst.currentUser;
     if (!user) return Promise.reject(new Error('Not authenticated'));
@@ -156,25 +160,28 @@
   ════════════════════════════════════════════════════════════ */
 
   function _el(id) { return document.getElementById(id); }
-
-  function _setHtml(id, html) {
-    const el = _el(id);
-    if (el) el.innerHTML = html;
-  }
-
-  function _show(id) { const el = _el(id); if (el) el.style.display = ''; }
-  function _hide(id) { const el = _el(id); if (el) el.style.display = 'none'; }
+  function _setHtml(id, html) { const e = _el(id); if (e) e.innerHTML = html; }
+  function _show(id) { const e = _el(id); if (e) e.style.display = ''; }
+  function _hide(id) { const e = _el(id); if (e) e.style.display = 'none'; }
 
   function _showStatus(id, msg, type) {
     const el = _el(id);
     if (!el) return;
     el.textContent = msg;
-    el.className   = 'snx-tv-status visible ' + (type || 'info');
-    if (type === 'ok') setTimeout(() => { el.classList.remove('visible'); }, 4000);
+    el.className = 'snx-tv-status visible ' + (type || 'info');
+    if (type === 'ok') setTimeout(() => el.classList.remove('visible'), 4000);
   }
 
+  function _esc(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _json(val) { return JSON.stringify(val); }
+
   /* ════════════════════════════════════════════════════════════
-     CHANNELS — Load & Listen
+     CHANNELS — subscribe & render guide
   ════════════════════════════════════════════════════════════ */
 
   function _subscribeChannels() {
@@ -189,10 +196,8 @@
         snap.forEach(d => _channels.push({ id: d.id, ...d.data() }));
         _channels.sort((a, b) => (a.order || 0) - (b.order || 0));
         _renderGuide();
-        _renderStudioChannels();
-        _updateChannelSelect();          // repopulate Add Media channel picker
-        _renderAddMediaChannelPicker();  // refresh tappable channel cards in Add Media tab
-        // Auto-select first channel if none selected
+        _renderStudioChannelList();
+        _renderChContentChannelPicker();
         if (!_activeChannel && _channels.length > 0) {
           _selectChannel(_channels[0].id);
         }
@@ -201,7 +206,7 @@
         _showGuideError('Could not load channels.');
       }
     }, err => {
-      console.warn(LOG, 'channels snapshot permission error', err);
+      console.warn(LOG, 'channels snapshot error', err);
       _showGuideError(
         err && err.code === 'permission-denied'
           ? 'Sign in to view channels.'
@@ -212,45 +217,119 @@
 
   function _showGuideError(msg) {
     const grid = _el('snxTvGuideGrid');
-    if (grid) {
-      grid.innerHTML =
-        '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' + msg + '</div>';
-    }
+    if (grid) grid.innerHTML = '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' + msg + '</div>';
   }
 
   /* ════════════════════════════════════════════════════════════
-     MEDIA — Load for active channel
+     CENTRAL MEDIA LIBRARY — subscribe (founder only)
   ════════════════════════════════════════════════════════════ */
 
-  function _subscribeMedia(channelId) {
-    if (_mediaUnsub) { _mediaUnsub(); _mediaUnsub = null; }
+  function _subscribeLibrary() {
+    if (_libraryUnsub) return; // already subscribed
+
+    const col = _fsCollection(COL_LIBRARY);
+    const q   = _fsQuery(col, _fsOrderBy('createdAt', 'desc'));
+
+    _libraryUnsub = _fsOnSnapshot(q, snap => {
+      _libraryAll = [];
+      snap.forEach(d => {
+        const item = { id: d.id, ...d.data() };
+        _libraryAll.push(item);
+        _libraryCache[item.id] = item; // keep cache fresh
+      });
+      _renderLibrary();
+    }, err => {
+      console.warn(LOG, 'library snapshot error', err);
+    });
+  }
+
+  function _unsubscribeLibrary() {
+    if (_libraryUnsub) { _libraryUnsub(); _libraryUnsub = null; }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PLAYBACK — subscribe to channel items, resolve library docs
+  ════════════════════════════════════════════════════════════ */
+
+  function _subscribeChannelItems(channelId) {
+    if (_chItemsUnsub) { _chItemsUnsub(); _chItemsUnsub = null; }
     _mediaQueue = [];
     _queueIdx   = 0;
 
-    const col = _fsCollection(COL_MEDIA);
+    const col = _fsCollection(COL_CH_ITEMS);
     const q   = _fsQuery(col,
       _fsWhere('channelId', '==', channelId),
       _fsOrderBy('order', 'asc')
     );
 
-    _mediaUnsub = _fsOnSnapshot(q, snap => {
+    _chItemsUnsub = _fsOnSnapshot(q, async snap => {
       try {
-        _mediaQueue = [];
-        snap.forEach(d => _mediaQueue.push({ id: d.id, ...d.data() }));
-        _mediaQueue.sort((a, b) => (a.order || 0) - (b.order || 0));
+        const items = [];
+        snap.forEach(d => items.push({ _assignId: d.id, ...d.data() }));
+        items.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+        // Resolve each assignment to its full media doc
+        const resolved = [];
+        for (const item of items) {
+          const mediaId = item.mediaId;
+          if (!mediaId) continue;
+          let media = _libraryCache[mediaId];
+          if (!media) {
+            // fetch once and cache
+            try {
+              const { getDoc } = _fs();
+              const docSnap = await getDoc(_fsDoc(COL_LIBRARY, mediaId));
+              if (docSnap.exists()) {
+                media = { id: docSnap.id, ...docSnap.data() };
+                _libraryCache[mediaId] = media;
+              }
+            } catch (_) { /* skip unresolvable */ }
+          }
+          if (media) {
+            resolved.push({ ...media, _assignId: item._assignId, _order: item.order });
+          }
+        }
+
+        // If no new-style items, try legacy tv_media for backward compat
+        if (resolved.length === 0) {
+          _subscribeLegacyMedia(channelId);
+          return;
+        }
+
+        _mediaQueue = resolved;
         _onMediaQueueUpdated();
       } catch (e) {
-        console.warn(LOG, 'media snapshot error', e);
+        console.warn(LOG, 'channel items snapshot error', e);
       }
+    }, err => {
+      console.warn(LOG, 'channel items error', err);
+      // Fall back to legacy collection
+      _subscribeLegacyMedia(channelId);
+    });
+  }
+
+  /* Legacy fallback: reads tv_media where channelId == channelId */
+  function _subscribeLegacyMedia(channelId) {
+    if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
+
+    const col = _fsCollection(COL_MEDIA_LEGACY);
+    const q   = _fsQuery(col,
+      _fsWhere('channelId', '==', channelId),
+      _fsOrderBy('order', 'asc')
+    );
+
+    _studioMediaUnsub = _fsOnSnapshot(q, snap => {
+      const items = [];
+      snap.forEach(d => items.push({ id: d.id, ...d.data() }));
+      items.sort((a, b) => (a.order || 0) - (b.order || 0));
+      _mediaQueue = items;
+      _onMediaQueueUpdated();
     });
   }
 
   function _onMediaQueueUpdated() {
-    if (_mediaQueue.length === 0) {
-      _showWaiting();
-      return;
-    }
-    // If nothing is playing, start from beginning
+    if (_mediaQueue.length === 0) { _showWaiting(); return; }
+    _clearWaiting();
     if (!_playing) {
       _queueIdx = 0;
       _playItem(_mediaQueue[0]);
@@ -268,17 +347,14 @@
     _stopPlayback();
     _activeChannel = ch;
 
-    // Update guide highlight
     document.querySelectorAll('.snx-tv-channel-card').forEach(el => {
       el.classList.toggle('active-channel', el.dataset.chId === channelId);
     });
 
-    // Update channel badge
     const badge = _el('snxTvChannelBadge');
     if (badge) badge.textContent = ch.name;
 
-    // Subscribe to this channel's media
-    _subscribeMedia(channelId);
+    _subscribeChannelItems(channelId);
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -300,15 +376,14 @@
   function _playItem(item) {
     if (!item) { _showWaiting(); return; }
     _playing = true;
+    _clearWaiting();
 
     const vid = _getVideoEl();
     const aud = _getAudioEl();
 
-    // Update Now Playing
     _renderNowPlaying(item);
 
     if (item.mediaKind === 'video') {
-      // Hide visualizer, show video
       _hideVisualizer();
       if (!vid) return;
       vid.style.display = 'block';
@@ -317,7 +392,6 @@
       vid.load();
       _tryPlay(vid);
     } else if (item.mediaKind === 'audio') {
-      // Show visualizer, play audio
       if (!aud) return;
       if (vid) vid.style.display = 'none';
       aud.src = item.url;
@@ -325,11 +399,9 @@
       _showVisualizer(item);
       _tryPlay(aud);
     } else if (item.mediaKind === 'image') {
-      // Show image as artwork in player
       _stopPlayback();
-      _playing = true; // mark as "playing" so UI is happy
+      _playing = true;
       _showImageItem(item);
-      // Advance after a fixed duration (e.g. 10 seconds)
       setTimeout(_advanceQueue, 10000);
     }
   }
@@ -346,7 +418,6 @@
           _showPlayOverlay();
         } else {
           console.warn(LOG, 'play error', err.message);
-          // Try without audio
           mediaEl.muted = true;
           mediaEl.play().catch(() => {});
           _showPlayOverlay();
@@ -367,18 +438,15 @@
     if (vid) vid.style.display = 'none';
     _hideVisualizer();
     const wrap = _el('snxTvPlayerInner');
-    if (wrap) {
-      // Remove existing waiting msg
-      const old = wrap.querySelector('.snx-tv-waiting');
-      if (!old) {
-        const w = document.createElement('div');
-        w.className = 'snx-tv-waiting';
-        w.innerHTML =
-          '<div class="snx-tv-waiting-icon">📺</div>' +
-          '<div class="snx-tv-waiting-text">No content available on this channel.<br>' +
-          (_isFounder() ? 'Open TV Studio to add media.' : 'Check back soon.') + '</div>';
-        wrap.appendChild(w);
-      }
+    if (wrap && !wrap.querySelector('.snx-tv-waiting')) {
+      const w = document.createElement('div');
+      w.className = 'snx-tv-waiting';
+      w.innerHTML =
+        '<div class="snx-tv-waiting-icon">📺</div>' +
+        '<div class="snx-tv-waiting-text">No content on this channel.<br>' +
+        (_isFounder() ? 'Open TV Studio → Media Library to add media.' : 'Check back soon.') +
+        '</div>';
+      wrap.appendChild(w);
     }
     _renderNowPlaying(null);
   }
@@ -416,13 +484,12 @@
   }
 
   /* ════════════════════════════════════════════════════════════
-     VISUALIZER (audio without custom artwork)
+     VISUALIZER
   ════════════════════════════════════════════════════════════ */
 
-  let _vizCtx = null;
-  let _vizAnalyser = null;
   let _vizAudioCtx = null;
   let _vizSource   = null;
+  let _vizAnalyser = null;
   let _vizFrame    = null;
   let _vizRunning  = false;
 
@@ -432,10 +499,8 @@
     const canvas  = _el('snxTvVisualizer');
     const overlay = _el('snxTvVizOverlay');
     if (!canvas) return;
-    canvas.classList.add('active');
 
     if (item.artworkUrl) {
-      // Use artwork image instead of canvas waveform
       canvas.classList.remove('active');
       const wrap = _el('snxTvPlayerInner');
       if (wrap) {
@@ -449,10 +514,12 @@
         img.src = item.artworkUrl;
         img.alt = item.title || 'Album artwork';
       }
+    } else {
+      canvas.classList.add('active');
     }
 
     if (overlay) {
-      overlay.querySelector('.snx-tv-viz-title').textContent = item.title  || 'Unknown Track';
+      overlay.querySelector('.snx-tv-viz-title').textContent  = item.title  || 'Unknown Track';
       overlay.querySelector('.snx-tv-viz-artist').textContent = item.artist || '';
     }
 
@@ -471,24 +538,18 @@
     _vizRunning = true;
     const aud = _getAudioEl();
     if (!canvas || !aud) return;
-
     try {
-      if (!_vizAudioCtx) {
-        _vizAudioCtx = new (global.AudioContext || global.webkitAudioContext)();
-      }
+      if (!_vizAudioCtx) _vizAudioCtx = new (global.AudioContext || global.webkitAudioContext)();
       if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
       _vizSource   = _vizAudioCtx.createMediaElementSource(aud);
       _vizAnalyser = _vizAudioCtx.createAnalyser();
       _vizAnalyser.fftSize = 128;
       _vizSource.connect(_vizAnalyser);
       _vizAnalyser.connect(_vizAudioCtx.destination);
-    } catch (e) {
-      console.warn(LOG, 'AudioContext error:', e.message);
-    }
+    } catch (e) { console.warn(LOG, 'AudioContext error:', e.message); }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) { _vizRunning = false; return; }
-    _vizCtx = ctx;
 
     function draw() {
       if (!_vizRunning) return;
@@ -496,11 +557,8 @@
       const W = canvas.width  = canvas.offsetWidth  || 320;
       const H = canvas.height = canvas.offsetHeight || 180;
       ctx.clearRect(0, 0, W, H);
-
-      // Background
       ctx.fillStyle = '#020812';
       ctx.fillRect(0, 0, W, H);
-
       if (_vizAnalyser) {
         const data = new Uint8Array(_vizAnalyser.frequencyBinCount);
         _vizAnalyser.getByteFrequencyData(data);
@@ -513,7 +571,6 @@
           ctx.fillRect(x, H - h, barW, h);
         });
       } else {
-        // Idle wave if no analyser
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(0,174,239,0.3)';
         ctx.lineWidth = 2;
@@ -534,17 +591,11 @@
   }
 
   /* ════════════════════════════════════════════════════════════
-     PLAY OVERLAY (autoplay blocked)
+     PLAY OVERLAY
   ════════════════════════════════════════════════════════════ */
 
-  function _showPlayOverlay() {
-    const ol = _el('snxTvPlayOverlay');
-    if (ol) ol.classList.add('visible');
-  }
-  function _hidePlayOverlay() {
-    const ol = _el('snxTvPlayOverlay');
-    if (ol) ol.classList.remove('visible');
-  }
+  function _showPlayOverlay() { const o = _el('snxTvPlayOverlay'); if (o) o.classList.add('visible'); }
+  function _hidePlayOverlay() { const o = _el('snxTvPlayOverlay'); if (o) o.classList.remove('visible'); }
 
   function _onPlayOverlayClick() {
     _hidePlayOverlay();
@@ -556,20 +607,18 @@
     if (!el) return;
     el.muted = false;
     el.play().catch(() => {});
-    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') {
-      _vizAudioCtx.resume().catch(() => {});
-    }
+    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') _vizAudioCtx.resume().catch(() => {});
   }
 
   /* ════════════════════════════════════════════════════════════
-     NOW PLAYING RENDER
+     NOW PLAYING
   ════════════════════════════════════════════════════════════ */
 
   function _renderNowPlaying(item) {
-    const npTitle  = _el('snxTvNpTitle');
-    const npSub    = _el('snxTvNpSub');
-    const npArt    = _el('snxTvNpArt');
-    const npChannel= _el('snxTvNpChannel');
+    const npTitle   = _el('snxTvNpTitle');
+    const npSub     = _el('snxTvNpSub');
+    const npArt     = _el('snxTvNpArt');
+    const npChannel = _el('snxTvNpChannel');
 
     if (!item) {
       if (npTitle) npTitle.textContent = 'Nothing playing';
@@ -579,8 +628,8 @@
       return;
     }
 
-    if (npTitle) npTitle.textContent = item.title  || item.fileName || 'Untitled';
-    if (npSub)   npSub.textContent   = item.artist || (item.mediaKind === 'video' ? 'Video' : '');
+    if (npTitle)   npTitle.textContent   = item.title  || item.fileName || 'Untitled';
+    if (npSub)     npSub.textContent     = item.artist || (item.mediaKind === 'video' ? 'Video' : '');
     if (npChannel && _activeChannel) npChannel.textContent = _activeChannel.name;
     if (npArt) {
       const art = item.artworkUrl || (_activeChannel && _activeChannel.artworkUrl) || '';
@@ -595,7 +644,7 @@
   }
 
   /* ════════════════════════════════════════════════════════════
-     TV GUIDE RENDER
+     TV GUIDE RENDER (public viewers)
   ════════════════════════════════════════════════════════════ */
 
   function _renderGuide() {
@@ -605,16 +654,15 @@
     if (_channels.length === 0) {
       grid.innerHTML =
         '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' +
-        (_isFounder() ? 'No channels yet. Use TV Studio to create one.' : 'No channels available.') +
+        (_isFounder() ? 'No channels yet. Open TV Studio to create one.' : 'No channels available.') +
         '</div>';
       return;
     }
 
     grid.innerHTML = _channels.map(ch => {
-      const isActive  = _activeChannel && _activeChannel.id === ch.id;
-      const artStyle  = ch.artworkUrl ? 'background-image:url(' + ch.artworkUrl + ');' : '';
-      const artContent= ch.artworkUrl ? '' : '📺';
-      const mediaCount= '';  // optional: ch.mediaCount || ''
+      const isActive   = _activeChannel && _activeChannel.id === ch.id;
+      const artStyle   = ch.artworkUrl ? 'background-image:url(' + _esc(ch.artworkUrl) + ');' : '';
+      const artContent = ch.artworkUrl ? '' : '📺';
       return (
         '<div class="snx-tv-channel-card' + (isActive ? ' active-channel' : '') + '" ' +
         'data-ch-id="' + _esc(ch.id) + '" ' +
@@ -624,28 +672,22 @@
           '<div class="snx-tv-ch-art" style="' + artStyle + '">' + artContent + '</div>' +
           '<div class="snx-tv-ch-info">' +
             '<div class="snx-tv-ch-name">' + _esc(ch.name) + '</div>' +
-            '<div class="snx-tv-ch-meta">' + (ch.description || '') + '</div>' +
+            '<div class="snx-tv-ch-meta">' + _esc(ch.description || '') + '</div>' +
           '</div>' +
           (isActive
             ? '<span class="snx-tv-ch-badge playing"><span class="snx-tv-onair-dot"></span>ON</span>'
-            : '<span class="snx-tv-ch-badge">CH ' + (ch.order !== undefined ? ch.order + 1 : '') + '</span>') +
+            : '<span class="snx-tv-ch-badge">CH ' + ((ch.order !== undefined ? ch.order + 1 : '')) + '</span>') +
         '</div>'
       );
     }).join('');
   }
 
   /* ════════════════════════════════════════════════════════════
-     TV STUDIO — only Founder
+     TV STUDIO BAR & PANEL (founder only)
   ════════════════════════════════════════════════════════════ */
 
-  function _showStudioBar() {
-    const bar = _el('snxTvStudioBar');
-    if (bar) bar.style.display = '';
-  }
-  function _hideStudioBar() {
-    const bar = _el('snxTvStudioBar');
-    if (bar) bar.style.display = 'none';
-  }
+  function _showStudioBar() { _show('snxTvStudioBar'); }
+  function _hideStudioBar() { _hide('snxTvStudioBar'); }
 
   function _toggleStudio() {
     _studioOpen = !_studioOpen;
@@ -653,7 +695,10 @@
     if (panel) panel.classList.toggle('open', _studioOpen);
     const btn = _el('snxTvStudioToggleBtn');
     if (btn) btn.textContent = _studioOpen ? '✕ Close Studio' : '📺 TV Studio';
-    if (_studioOpen) _renderStudioChannels();
+    if (_studioOpen) {
+      _subscribeLibrary();
+      _switchStudioTab(_studioTab || 'library');
+    }
   }
 
   function _switchStudioTab(tab) {
@@ -664,11 +709,459 @@
     document.querySelectorAll('.snx-tv-studio-pane').forEach(el => {
       el.classList.toggle('active', el.dataset.pane === tab);
     });
+    if (tab === 'library') _renderLibrary();
+    if (tab === 'channels') _renderStudioChannelList();
+    if (tab === 'channel-content') _renderChContentChannelPicker();
   }
 
-  /* ── Studio: Channels tab ── */
+  /* ════════════════════════════════════════════════════════════
+     MEDIA LIBRARY — render
+  ════════════════════════════════════════════════════════════ */
 
-  function _renderStudioChannels() {
+  function _filteredLibrary() {
+    let items = _libraryAll.slice();
+    if (_libFilter !== 'all') {
+      items = items.filter(m => m.mediaKind === _libFilter);
+    }
+    if (_libSearch) {
+      const q = _libSearch.toLowerCase();
+      items = items.filter(m =>
+        (m.title  || '').toLowerCase().includes(q) ||
+        (m.artist || '').toLowerCase().includes(q) ||
+        (m.fileName || '').toLowerCase().includes(q)
+      );
+    }
+    return items;
+  }
+
+  function _renderLibrary() {
+    const list = _el('snxTvLibraryList');
+    if (!list) return;
+
+    const items = _filteredLibrary();
+
+    if (items.length === 0) {
+      list.innerHTML =
+        '<li style="color:#4a7a9a;font-size:13px;padding:12px 0;text-align:center;">' +
+        (_libraryAll.length === 0
+          ? 'No media yet. Use Upload Music/Audio or Upload Video above.'
+          : 'No results match your filter or search.') +
+        '</li>';
+      return;
+    }
+
+    list.innerHTML = items.map(m => {
+      const sel = _libSelected.has(m.id);
+      // Build channel assignment badges
+      const chNames = _getChannelsForMedia(m.id);
+      const chBadges = chNames.length
+        ? chNames.map(n => '<span class="snx-tv-lib-ch-badge">' + _esc(n) + '</span>').join('')
+        : '<span style="color:#3a5a7a;font-size:11px;">Not assigned</span>';
+
+      return (
+        '<li class="snx-tv-lib-row' + (sel ? ' selected' : '') + '" data-media-id="' + _esc(m.id) + '">' +
+          '<label class="snx-tv-lib-check" title="Select">' +
+            '<input type="checkbox" ' + (sel ? 'checked' : '') + ' ' +
+              'onchange="window.SNXTv.libToggleSelect(' + _json(m.id) + ',this.checked)">' +
+          '</label>' +
+          '<span class="snx-tv-media-row-icon">' + (KIND_ICON[m.mediaKind] || '📁') + '</span>' +
+          '<div class="snx-tv-media-row-info">' +
+            '<div class="snx-tv-media-row-title">' + _esc(m.title || m.fileName || 'Untitled') + '</div>' +
+            '<div class="snx-tv-media-row-meta">' +
+              (m.artist ? _esc(m.artist) + ' · ' : '') +
+              _esc(m.mediaKind || '') +
+              (m.duration ? ' · ' + _formatDuration(m.duration) : '') +
+            '</div>' +
+            '<div class="snx-tv-lib-ch-tags">' + chBadges + '</div>' +
+          '</div>' +
+          '<div class="snx-tv-lib-row-actions">' +
+            '<button class="snx-tv-btn snx-tv-btn-xs" ' +
+              'onclick="window.SNXTv.libPreview(' + _json(m.id) + ')" title="Preview">▶</button>' +
+            '<button class="snx-tv-btn snx-tv-btn-xs snx-tv-btn-primary" ' +
+              'onclick="window.SNXTv.libEditTitle(' + _json(m.id) + ')" title="Edit">✏</button>' +
+            '<button class="snx-tv-btn snx-tv-btn-xs snx-tv-btn-success" ' +
+              'onclick="window.SNXTv.libAddToChannel(' + _json(m.id) + ')" title="Add to Channel">+Ch</button>' +
+            '<button class="snx-tv-btn snx-tv-btn-xs snx-tv-btn-danger" ' +
+              'onclick="window.SNXTv.libDeleteMedia(' + _json(m.id) + ')" title="Delete from library">🗑</button>' +
+          '</div>' +
+        '</li>'
+      );
+    }).join('');
+
+    // Update bulk-action bar
+    _renderLibBulkBar();
+  }
+
+  function _renderLibBulkBar() {
+    const bar = _el('snxTvLibBulkBar');
+    if (!bar) return;
+    if (_libSelected.size === 0) {
+      bar.style.display = 'none';
+      return;
+    }
+    bar.style.display = 'flex';
+    const countEl = _el('snxTvLibSelCount');
+    if (countEl) countEl.textContent = _libSelected.size + ' selected';
+  }
+
+  function _getChannelsForMedia(mediaId) {
+    // Scan loaded channel items (all channels) — we keep a global map
+    return _allChItemChannelNames[mediaId] || [];
+  }
+
+  // Map of mediaId → [channelName, ...] populated by _subscribeAllChItems
+  let _allChItemChannelNames = {};
+  let _allChItemsUnsub = null;
+
+  function _subscribeAllChItems() {
+    if (_allChItemsUnsub) return;
+    const col = _fsCollection(COL_CH_ITEMS);
+    _allChItemsUnsub = _fsOnSnapshot(col, snap => {
+      _allChItemChannelNames = {};
+      snap.forEach(d => {
+        const data = d.data();
+        const ch = _channels.find(c => c.id === data.channelId);
+        if (!ch) return;
+        if (!_allChItemChannelNames[data.mediaId]) _allChItemChannelNames[data.mediaId] = [];
+        if (!_allChItemChannelNames[data.mediaId].includes(ch.name)) {
+          _allChItemChannelNames[data.mediaId].push(ch.name);
+        }
+      });
+      _renderLibrary(); // refresh badges
+    }, () => {});
+  }
+
+  function _formatDuration(secs) {
+    if (!secs || isNaN(secs)) return '';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return m + ':' + String(s).padStart(2, '0');
+  }
+
+  /* ── Library: select / deselect ── */
+
+  function _libToggleSelect(mediaId, checked) {
+    if (checked) _libSelected.add(mediaId);
+    else _libSelected.delete(mediaId);
+    _renderLibBulkBar();
+  }
+
+  /* ── Library: filter / search ── */
+
+  function _libSetFilter(filter) {
+    _libFilter = filter;
+    document.querySelectorAll('.snx-tv-lib-filter-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === filter);
+    });
+    _renderLibrary();
+  }
+
+  function _libSetSearch(val) {
+    _libSearch = val.trim();
+    _renderLibrary();
+  }
+
+  /* ── Library: edit title / artist ── */
+
+  function _libEditTitle(mediaId) {
+    const m = _libraryAll.find(x => x.id === mediaId);
+    if (!m) return;
+    const newTitle = prompt('Edit title:', m.title || '');
+    if (newTitle === null) return;
+    const newArtist = prompt('Edit artist:', m.artist || '');
+    if (newArtist === null) return;
+    _fsUpdateDoc(_fsDoc(COL_LIBRARY, mediaId), {
+      title:  newTitle.trim().slice(0, 200),
+      artist: newArtist.trim().slice(0, 200),
+    }).catch(e => alert('Update failed: ' + e.message));
+  }
+
+  /* ── Library: preview ── */
+
+  function _libPreview(mediaId) {
+    const m = _libraryAll.find(x => x.id === mediaId);
+    if (!m || !m.url) return;
+
+    const overlay = _el('snxTvPreviewOverlay');
+    if (!overlay) return;
+
+    overlay.style.display = 'flex';
+    _previewOpen = true;
+
+    const title = _el('snxTvPreviewTitle');
+    const body  = _el('snxTvPreviewBody');
+    if (title) title.textContent = m.title || m.fileName || 'Preview';
+    if (body) {
+      if (m.mediaKind === 'video') {
+        body.innerHTML = '<video src="' + _esc(m.url) + '" controls autoplay style="width:100%;max-height:60vh;"></video>';
+      } else if (m.mediaKind === 'audio') {
+        body.innerHTML =
+          (m.artworkUrl ? '<img src="' + _esc(m.artworkUrl) + '" style="width:100%;max-height:200px;object-fit:contain;margin-bottom:10px;">' : '') +
+          '<audio src="' + _esc(m.url) + '" controls autoplay style="width:100%;"></audio>';
+      } else {
+        body.innerHTML = '<img src="' + _esc(m.url) + '" style="width:100%;max-height:60vh;object-fit:contain;">';
+      }
+    }
+  }
+
+  function _closePreview() {
+    const overlay = _el('snxTvPreviewOverlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      const body = _el('snxTvPreviewBody');
+      if (body) body.innerHTML = '';
+    }
+    _previewOpen = false;
+  }
+
+  /* ── Library: delete ── */
+
+  function _libDeleteMedia(mediaId) {
+    const m = _libraryAll.find(x => x.id === mediaId);
+    if (!m) return;
+    // Check if still assigned to any channel
+    const assigned = _allChItemChannelNames[mediaId] || [];
+    const msg = assigned.length
+      ? 'This media is currently assigned to: ' + assigned.join(', ') + '.\n\nDeleting it from the library will NOT remove the file from storage, but it will disappear from those channels.\n\nContinue?'
+      : 'Delete "' + (m.title || m.fileName || 'this item') + '" from the library? The R2 file is kept in storage.';
+    if (!confirm(msg)) return;
+    _fsDeleteDoc(_fsDoc(COL_LIBRARY, mediaId))
+      .then(() => {
+        _libSelected.delete(mediaId);
+        _renderLibBulkBar();
+      })
+      .catch(e => alert('Delete failed: ' + e.message));
+  }
+
+  /* ── Library: Add to Channel (single item) ── */
+
+  function _libAddToChannel(mediaId) {
+    _libSelected.clear();
+    _libSelected.add(mediaId);
+    _openAddToChannelDialog([mediaId]);
+  }
+
+  /* ── Library: Bulk Add to Channel ── */
+
+  function _libBulkAddToChannel() {
+    if (_libSelected.size === 0) return;
+    _openAddToChannelDialog(Array.from(_libSelected));
+  }
+
+  /* ── Add to Channel dialog ── */
+
+  function _openAddToChannelDialog(mediaIds) {
+    if (_channels.length === 0) { alert('No channels exist yet. Create a channel first.'); return; }
+
+    const overlay = _el('snxTvAssignOverlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    const list = _el('snxTvAssignChList');
+    if (list) {
+      list.innerHTML = _channels.map(ch => (
+        '<label class="snx-tv-assign-ch-label">' +
+          '<input type="checkbox" value="' + _esc(ch.id) + '"> ' +
+          '<span>' + _esc(ch.name) + '</span>' +
+        '</label>'
+      )).join('');
+    }
+
+    const confirmBtn = _el('snxTvAssignConfirmBtn');
+    if (confirmBtn) {
+      confirmBtn.onclick = () => _confirmAddToChannel(mediaIds);
+    }
+
+    const cancelBtn = _el('snxTvAssignCancelBtn');
+    if (cancelBtn) {
+      cancelBtn.onclick = _closeAssignDialog;
+    }
+
+    const countEl = _el('snxTvAssignMediaCount');
+    if (countEl) countEl.textContent = mediaIds.length + ' item' + (mediaIds.length > 1 ? 's' : '');
+  }
+
+  function _closeAssignDialog() {
+    const overlay = _el('snxTvAssignOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  async function _confirmAddToChannel(mediaIds) {
+    const list  = _el('snxTvAssignChList');
+    const status = _el('snxTvAssignStatus');
+    if (!list) return;
+
+    const checked = Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(el => el.value);
+    if (checked.length === 0) {
+      if (status) { status.textContent = 'Select at least one channel.'; status.style.color = '#ff6655'; }
+      return;
+    }
+
+    if (status) { status.textContent = 'Assigning…'; status.style.color = '#00AEEF'; }
+
+    let added = 0;
+    let dupes  = 0;
+
+    for (const channelId of checked) {
+      // Get existing assignments for this channel to check order + duplicates
+      let maxOrder = -1;
+      try {
+        const col = _fsCollection(COL_CH_ITEMS);
+        const q   = _fsQuery(col, _fsWhere('channelId', '==', channelId), _fsOrderBy('order', 'desc'));
+        const snap = await _fsGetDocs(q);
+        snap.forEach(d => {
+          const ord = d.data().order || 0;
+          if (ord > maxOrder) maxOrder = ord;
+        });
+        // Build set of already-assigned mediaIds for duplicate check
+        const assignedSet = new Set();
+        snap.forEach(d => assignedSet.add(d.data().mediaId));
+
+        for (const mediaId of mediaIds) {
+          if (assignedSet.has(mediaId)) { dupes++; continue; }
+          maxOrder++;
+          await _fsAddDoc(_fsCollection(COL_CH_ITEMS), {
+            channelId,
+            mediaId,
+            order:    maxOrder,
+            addedAt:  Date.now(),
+          });
+          added++;
+        }
+      } catch (e) {
+        console.warn(LOG, 'assign error', e);
+        if (status) { status.textContent = 'Error: ' + e.message; status.style.color = '#ff6655'; }
+        return;
+      }
+    }
+
+    let msg = '✓ Added ' + added + ' assignment' + (added !== 1 ? 's' : '');
+    if (dupes > 0) msg += ' (' + dupes + ' duplicate' + (dupes !== 1 ? 's' : '') + ' skipped)';
+    if (status) { status.textContent = msg; status.style.color = '#44dd88'; }
+    setTimeout(_closeAssignDialog, 2000);
+  }
+
+  /* ── Library: Upload Music/Audio ── */
+
+  function _libUploadAudio() {
+    _libUploadFile('audio');
+  }
+
+  function _libUploadVideo() {
+    _libUploadFile('video');
+  }
+
+  function _libUploadFile(defaultKind) {
+    const overlay = _el('snxTvUploadOverlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+
+    const kindSel = _el('snxTvLibUploadKind');
+    if (kindSel && defaultKind) kindSel.value = defaultKind;
+
+    // Reset form
+    const fi = _el('snxTvLibUploadFile');
+    if (fi) fi.value = '';
+    const ti = _el('snxTvLibUploadTitle');
+    if (ti) ti.value = '';
+    const ai = _el('snxTvLibUploadArtist');
+    if (ai) ai.value = '';
+    const prog = _el('snxTvLibUploadProgressWrap');
+    if (prog) prog.classList.remove('visible');
+    const bar = _el('snxTvLibUploadProgressBar');
+    if (bar) bar.style.width = '0%';
+    _showStatus('snxTvLibUploadStatus', '', '');
+  }
+
+  function _closeUploadOverlay() {
+    const overlay = _el('snxTvUploadOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function _libDoUpload() {
+    const fileInput   = _el('snxTvLibUploadFile');
+    const titleInput  = _el('snxTvLibUploadTitle');
+    const artistInput = _el('snxTvLibUploadArtist');
+    const kindSel     = _el('snxTvLibUploadKind');
+
+    const file      = fileInput  && fileInput.files[0];
+    const title     = titleInput  ? titleInput.value.trim()  : '';
+    const artist    = artistInput ? artistInput.value.trim() : '';
+    const mediaKind = kindSel     ? kindSel.value            : 'audio';
+
+    if (!file) { _showStatus('snxTvLibUploadStatus', 'Select a file first.', 'err'); return; }
+
+    _showStatus('snxTvLibUploadStatus', 'Uploading…', 'info');
+    const prog = _el('snxTvLibUploadProgressWrap');
+    const bar  = _el('snxTvLibUploadProgressBar');
+    if (prog) prog.classList.add('visible');
+    if (bar)  bar.style.width = '0%';
+
+    _getIdToken().then(token => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('mediaKind', mediaKind);
+      fd.append('title',  title);
+      fd.append('artist', artist);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', WORKER + '/tv/upload-media-library');
+      xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable && bar) bar.style.width = Math.round(e.loaded / e.total * 90) + '%';
+      };
+
+      xhr.onload = () => {
+        if (bar) bar.style.width = '100%';
+        let res;
+        try { res = JSON.parse(xhr.responseText); } catch (_) { res = {}; }
+        if (xhr.status === 200 && res.url) {
+          _onLibraryUploadSuccess(res, title, artist, mediaKind);
+        } else {
+          _showStatus('snxTvLibUploadStatus', 'Upload failed: ' + (res.error || xhr.status), 'err');
+          if (prog) setTimeout(() => prog.classList.remove('visible'), 2000);
+        }
+      };
+      xhr.onerror = () => {
+        _showStatus('snxTvLibUploadStatus', 'Network error during upload.', 'err');
+        if (prog) prog.classList.remove('visible');
+      };
+      xhr.send(fd);
+    }).catch(e => _showStatus('snxTvLibUploadStatus', 'Auth error: ' + e.message, 'err'));
+  }
+
+  function _onLibraryUploadSuccess(res, title, artist, mediaKind) {
+    const prog = _el('snxTvLibUploadProgressWrap');
+
+    const mediaData = {
+      url:       res.url,
+      key:       res.key,
+      mediaKind,
+      title:     title  || res.key.split('/').pop() || 'Untitled',
+      artist:    artist || '',
+      artworkUrl:'',
+      fileName:  res.key.split('/').pop() || '',
+      createdAt: Date.now(),
+    };
+
+    _fsAddDoc(_fsCollection(COL_LIBRARY), mediaData)
+      .then(() => {
+        _showStatus('snxTvLibUploadStatus', '✓ Upload complete! Media saved to library.', 'ok');
+        if (prog) setTimeout(() => prog.classList.remove('visible'), 1500);
+        setTimeout(_closeUploadOverlay, 2200);
+      })
+      .catch(e => {
+        _showStatus('snxTvLibUploadStatus', 'Firestore error: ' + e.message, 'err');
+        if (prog) prog.classList.remove('visible');
+      });
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     CHANNELS TAB (create / delete channels)
+  ════════════════════════════════════════════════════════════ */
+
+  function _renderStudioChannelList() {
     const list = _el('snxTvStudioChList');
     if (!list) return;
 
@@ -681,35 +1174,26 @@
       '<li class="snx-tv-ch-row">' +
         '<span class="snx-tv-ch-row-name">' + _esc(ch.name) + '</span>' +
         '<button class="snx-tv-btn snx-tv-btn-primary" ' +
-          'onclick="window.SNXTv.studioOpenChannel(' + _json(ch.id) + ')">Manage Media</button>' +
+          'onclick="window.SNXTv.studioOpenChannelContent(' + _json(ch.id) + ')">Manage Content</button>' +
         '<button class="snx-tv-btn snx-tv-btn-danger" ' +
           'onclick="window.SNXTv.studioDeleteChannel(' + _json(ch.id) + ')">Delete</button>' +
       '</li>'
     )).join('');
   }
 
-  /* ── Studio: Create channel ── */
-
   function _studioCreateChannel() {
     const nameEl = _el('snxTvNewChName');
     const descEl = _el('snxTvNewChDesc');
-    const name   = (nameEl ? nameEl.value.trim() : '');
-    const desc   = (descEl ? descEl.value.trim() : '');
+    const name   = nameEl ? nameEl.value.trim() : '';
+    const desc   = descEl ? descEl.value.trim() : '';
     if (!name) { _showStatus('snxTvCreateChStatus', 'Channel name is required.', 'err'); return; }
 
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
                + '-' + Date.now().toString(36);
 
-    const data = {
-      id,
-      name,
-      description: desc,
-      artworkUrl: '',
-      order: _channels.length,
-      createdAt: Date.now(),
-    };
-
-    _fsSetDoc(_fsDoc(COL_CHANNELS, id), data)
+    _fsSetDoc(_fsDoc(COL_CHANNELS, id), {
+      id, name, description: desc, artworkUrl: '', order: _channels.length, createdAt: Date.now(),
+    })
       .then(() => {
         _showStatus('snxTvCreateChStatus', 'Channel "' + name + '" created!', 'ok');
         if (nameEl) nameEl.value = '';
@@ -718,267 +1202,252 @@
       .catch(e => _showStatus('snxTvCreateChStatus', 'Error: ' + e.message, 'err'));
   }
 
-  /* ── Studio: Delete channel (with confirmation) ── */
-
   function _studioDeleteChannel(channelId) {
     const ch = _channels.find(c => c.id === channelId);
     if (!ch) return;
-    if (!confirm('Delete channel "' + ch.name + '"? This cannot be undone. Media files remain in storage.')) return;
+
+    if (!confirm('Delete channel "' + ch.name + '"?\n\nThis removes the channel and its assignments. Media files in the library are kept.')) return;
+
+    _showStatus('snxTvDeleteChStatus', 'Deleting "' + ch.name + '"…', 'info');
 
     _fsDeleteDoc(_fsDoc(COL_CHANNELS, channelId))
       .then(() => {
+        _showStatus('snxTvDeleteChStatus', '✓ Channel "' + ch.name + '" deleted.', 'ok');
+
+        // If this was the active playback channel, stop and switch to another
+        if (_activeChannel && _activeChannel.id === channelId) {
+          _stopPlayback();
+          _activeChannel = null;
+          if (_chItemsUnsub)    { _chItemsUnsub();    _chItemsUnsub    = null; }
+          if (_studioMediaUnsub){ _studioMediaUnsub(); _studioMediaUnsub = null; }
+          // Pick any remaining channel (snapshot will have already removed this one)
+          const remaining = _channels.filter(c => c.id !== channelId);
+          if (remaining.length > 0) {
+            _selectChannel(remaining[0].id);
+          } else {
+            _showWaiting();
+          }
+        }
+
+        // Clean up studio channel state
         if (_studioChannel && _studioChannel.id === channelId) {
           _studioChannel = null;
-          _setHtml('snxTvStudioMediaPaneTitle', 'Select a channel above');
-          _setHtml('snxTvStudioMediaList', '');
-          if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
+          if (_chContentUnsub) { _chContentUnsub(); _chContentUnsub = null; }
+          _chContentItems = [];
+          _renderChContent();
+          _renderChContentChannelPicker();
         }
+
+        // Best-effort: remove tv_channel_items for this channel
+        const col = _fsCollection(COL_CH_ITEMS);
+        const q   = _fsQuery(col, _fsWhere('channelId', '==', channelId));
+        _fsGetDocs(q).then(snap => {
+          snap.forEach(d => _fsDeleteDoc(d.ref).catch(() => {}));
+        }).catch(() => {});
       })
-      .catch(e => console.warn(LOG, 'delete channel error', e));
+      .catch(e => {
+        console.warn(LOG, 'delete channel error', e);
+        const msg = (e && e.code === 'permission-denied')
+          ? '✗ Permission denied. Ensure Firestore rules are deployed and you are signed in as founder.'
+          : '✗ Delete failed: ' + (e && e.message ? e.message : String(e));
+        _showStatus('snxTvDeleteChStatus', msg, 'err');
+      });
   }
 
-  /* ── Studio: Open channel media ── */
+  /* ════════════════════════════════════════════════════════════
+     CHANNEL CONTENT TAB (ordered list of assignments)
+  ════════════════════════════════════════════════════════════ */
 
-  function _studioOpenChannel(channelId) {
+  function _renderChContentChannelPicker() {
+    const container = _el('snxTvChContentPicker');
+    const label     = _el('snxTvChContentLabel');
+
+    if (label) {
+      if (_studioChannel) {
+        label.innerHTML = '<span style="color:#00AEEF;">✔ Channel:</span> <strong style="color:#e0f0ff;">' + _esc(_studioChannel.name) + '</strong>';
+      } else {
+        label.textContent = _channels.length ? 'Select a channel below.' : 'No channels yet — create one on the Channels tab.';
+      }
+    }
+
+    if (!container) return;
+    if (_channels.length === 0) {
+      container.innerHTML = '<p style="color:#4a7a9a;font-size:13px;margin:0 0 12px;">No channels yet.</p>';
+      return;
+    }
+
+    container.innerHTML = _channels.map(ch => {
+      const sel = _studioChannel && _studioChannel.id === ch.id;
+      return (
+        '<div class="snx-tv-channel-card' + (sel ? ' active-channel' : '') + '" ' +
+        'data-ch-id="' + _esc(ch.id) + '" role="button" tabindex="0" ' +
+        'style="margin-bottom:8px;' + (sel ? 'border-color:rgba(0,174,239,0.90);box-shadow:0 0 18px rgba(0,174,239,0.30);' : '') + '" ' +
+        'onclick="window.SNXTv.studioSelectChannelContent(' + _json(ch.id) + ')" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \')window.SNXTv.studioSelectChannelContent(' + _json(ch.id) + ')">' +
+          '<div class="snx-tv-ch-art">' + (ch.artworkUrl ? '' : '📺') + '</div>' +
+          '<div class="snx-tv-ch-info">' +
+            '<div class="snx-tv-ch-name">' + _esc(ch.name) + '</div>' +
+            '<div class="snx-tv-ch-meta">' + _esc(ch.description || '') + '</div>' +
+          '</div>' +
+          (sel ? '<span class="snx-tv-ch-badge playing">✔ Selected</span>' : '<span class="snx-tv-ch-badge">Select</span>') +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  function _studioSelectChannelContent(channelId) {
     const ch = _channels.find(c => c.id === channelId);
     if (!ch) return;
     _studioChannel = ch;
-    _switchStudioTab('media');
-    _renderAddMediaChannelPicker();   // highlight selection + refresh label
-    _loadStudioMedia(channelId);
+    _renderChContentChannelPicker();
+    _loadChContent(channelId);
   }
 
-  function _loadStudioMedia(channelId) {
-    if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
+  function studioOpenChannelContent(channelId) {
+    const ch = _channels.find(c => c.id === channelId);
+    if (!ch) return;
+    _studioChannel = ch;
+    _switchStudioTab('channel-content');
+    _renderChContentChannelPicker();
+    _loadChContent(channelId);
+  }
 
-    const col = _fsCollection(COL_MEDIA);
+  function _loadChContent(channelId) {
+    if (_chContentUnsub) { _chContentUnsub(); _chContentUnsub = null; }
+    _chContentItems = [];
+    _renderChContent();
+
+    const col = _fsCollection(COL_CH_ITEMS);
     const q   = _fsQuery(col,
       _fsWhere('channelId', '==', channelId),
       _fsOrderBy('order', 'asc')
     );
 
-    _studioMediaUnsub = _fsOnSnapshot(q, snap => {
-      _studioMedia = [];
-      snap.forEach(d => _studioMedia.push({ id: d.id, ...d.data() }));
-      _studioMedia.sort((a, b) => (a.order || 0) - (b.order || 0));
-      _renderStudioMedia();
+    _chContentUnsub = _fsOnSnapshot(q, async snap => {
+      const items = [];
+      snap.forEach(d => items.push({ _assignId: d.id, ...d.data() }));
+      items.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+      // Resolve media titles from library cache or fetch
+      for (const item of items) {
+        if (!_libraryCache[item.mediaId]) {
+          try {
+            const { getDoc } = _fs();
+            const docSnap = await getDoc(_fsDoc(COL_LIBRARY, item.mediaId));
+            if (docSnap.exists()) _libraryCache[item.mediaId] = { id: docSnap.id, ...docSnap.data() };
+          } catch (_) {}
+        }
+      }
+
+      _chContentItems = items;
+      _renderChContent();
+    }, err => {
+      console.warn(LOG, 'ch content error', err);
     });
   }
 
-  function _renderStudioMedia() {
-    const list = _el('snxTvStudioMediaList');
+  function _renderChContent() {
+    const list = _el('snxTvChContentList');
     if (!list) return;
 
-    if (_studioMedia.length === 0) {
-      list.innerHTML = '<li style="color:#4a7a9a;font-size:13px;padding:8px 0;">No media. Upload content above.</li>';
+    const titleEl = _el('snxTvChContentTitle');
+    if (titleEl) titleEl.textContent = _studioChannel ? 'Content for: ' + _studioChannel.name : 'Select a channel above';
+
+    if (!_studioChannel) {
+      list.innerHTML = '';
       return;
     }
 
-    list.innerHTML = _studioMedia.map((m, i) => (
-      '<li class="snx-tv-media-row">' +
-        '<span class="snx-tv-drag-handle" title="Drag to reorder">⠿</span>' +
-        '<span class="snx-tv-media-row-icon">' + (KIND_ICON[m.mediaKind] || '📁') + '</span>' +
-        '<div class="snx-tv-media-row-info">' +
-          '<div class="snx-tv-media-row-title">' + _esc(m.title || m.fileName || 'Untitled') + '</div>' +
-          '<div class="snx-tv-media-row-meta">' + (m.artist ? _esc(m.artist) + ' · ' : '') + (m.mediaKind || '') + '</div>' +
-        '</div>' +
-        '<button class="snx-tv-btn snx-tv-btn-danger" ' +
-          'onclick="window.SNXTv.studioDeleteMedia(' + _json(m.id) + ')">Remove</button>' +
-      '</li>'
-    )).join('');
-  }
-
-  /* ── Studio: Delete media ── */
-
-  function _studioDeleteMedia(mediaId) {
-    const m = _studioMedia.find(x => x.id === mediaId);
-    if (!m) return;
-    if (!confirm('Remove "' + (m.title || 'this item') + '" from this channel?')) return;
-
-    // Delete Firestore doc; R2 file is left in place (no accidental deletions)
-    _fsDeleteDoc(_fsDoc(COL_MEDIA, mediaId))
-      .catch(e => console.warn(LOG, 'delete media error', e));
-  }
-
-  /* ── Studio: Upload ── */
-
-  function _studioUploadMedia() {
-    const fileInput  = _el('snxTvUploadFile');
-    const titleInput = _el('snxTvUploadTitle');
-    const artistInput= _el('snxTvUploadArtist');
-    const kindSel    = _el('snxTvUploadKind');
-    const chIdEl     = _el('snxTvUploadChannelId');
-
-    const file      = fileInput && fileInput.files[0];
-    const title     = titleInput  ? titleInput.value.trim()   : '';
-    const artist    = artistInput ? artistInput.value.trim()  : '';
-    const mediaKind = kindSel     ? kindSel.value             : 'video';
-    // Use _studioChannel as the authoritative source; hidden <select> is the fallback
-    const channelId = (_studioChannel && _studioChannel.id) ||
-                      (chIdEl && chIdEl.value.trim()) || '';
-
-    if (!file)      { _showStatus('snxTvUploadStatus', 'Please select a file.', 'err'); return; }
-    if (!channelId) {
-      _showStatus('snxTvUploadStatus', '⚠ Tap a channel in Step 1 above to select it first.', 'err');
+    if (_chContentItems.length === 0) {
+      list.innerHTML = '<li style="color:#4a7a9a;font-size:13px;padding:8px 0;">No media assigned. Use Media Library → Add to Channel.</li>';
       return;
     }
 
-    _showStatus('snxTvUploadStatus', 'Uploading…', 'info');
-    const prog = _el('snxTvUploadProgressWrap');
-    const bar  = _el('snxTvUploadProgressBar');
-    if (prog) prog.classList.add('visible');
-    if (bar)  bar.style.width = '0%';
-
-    _getIdToken().then(token => {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('channelId', channelId);
-      fd.append('mediaKind', mediaKind);
-      fd.append('title',  title);
-      fd.append('artist', artist);
-
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', WORKER + '/tv/upload-media');
-      xhr.setRequestHeader('Authorization', 'Bearer ' + token);
-
-      xhr.upload.onprogress = e => {
-        if (e.lengthComputable && bar) {
-          bar.style.width = Math.round(e.loaded / e.total * 90) + '%';
-        }
-      };
-
-      xhr.onload = () => {
-        if (bar) bar.style.width = '100%';
-        let res;
-        try { res = JSON.parse(xhr.responseText); } catch (_) { res = {}; }
-        if (xhr.status === 200 && res.url) {
-          _onUploadSuccess(res, channelId, title, artist, mediaKind);
-        } else {
-          _showStatus('snxTvUploadStatus', 'Upload failed: ' + (res.error || xhr.status), 'err');
-          if (prog) setTimeout(() => prog.classList.remove('visible'), 2000);
-        }
-      };
-      xhr.onerror = () => {
-        _showStatus('snxTvUploadStatus', 'Network error during upload.', 'err');
-        if (prog) prog.classList.remove('visible');
-      };
-      xhr.send(fd);
-    }).catch(e => _showStatus('snxTvUploadStatus', 'Auth error: ' + e.message, 'err'));
+    list.innerHTML = _chContentItems.map((item, idx) => {
+      const media = _libraryCache[item.mediaId] || {};
+      const title = media.title || media.fileName || item.mediaId || 'Unknown';
+      const kind  = media.mediaKind || '';
+      return (
+        '<li class="snx-tv-media-row">' +
+          '<span class="snx-tv-drag-handle" title="Drag to reorder">⠿</span>' +
+          '<span class="snx-tv-media-row-icon">' + (KIND_ICON[kind] || '📁') + '</span>' +
+          '<div class="snx-tv-media-row-info">' +
+            '<div class="snx-tv-media-row-title">' + _esc(title) + '</div>' +
+            '<div class="snx-tv-media-row-meta">' + (media.artist ? _esc(media.artist) + ' · ' : '') + _esc(kind) + '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:4px;">' +
+            (idx > 0
+              ? '<button class="snx-tv-btn snx-tv-btn-xs" onclick="window.SNXTv.chContentMoveUp(' + _json(item._assignId) + ')">↑</button>'
+              : '<span style="width:28px;"></span>') +
+            (idx < _chContentItems.length - 1
+              ? '<button class="snx-tv-btn snx-tv-btn-xs" onclick="window.SNXTv.chContentMoveDown(' + _json(item._assignId) + ')">↓</button>'
+              : '<span style="width:28px;"></span>') +
+            '<button class="snx-tv-btn snx-tv-btn-xs snx-tv-btn-danger" ' +
+              'onclick="window.SNXTv.chContentRemove(' + _json(item._assignId) + ')">Remove</button>' +
+          '</div>' +
+        '</li>'
+      );
+    }).join('');
   }
 
-  function _onUploadSuccess(res, channelId, title, artist, mediaKind) {
-    const prog = _el('snxTvUploadProgressWrap');
+  /* Move up / down (swap order values) */
+  function _chContentMoveUp(assignId) {
+    const idx = _chContentItems.findIndex(x => x._assignId === assignId);
+    if (idx <= 0) return;
+    _swapChItemOrder(idx, idx - 1);
+  }
 
-    // Save metadata to Firestore
-    const mediaData = {
-      channelId,
-      url:       res.url,
-      key:       res.key,
-      mediaKind,
-      title:     title  || res.key.split('/').pop() || 'Untitled',
-      artist:    artist || '',
-      artworkUrl:'',
-      fileName:  res.key.split('/').pop() || '',
-      order:     _studioMedia.length,
-      createdAt: Date.now(),
-    };
+  function _chContentMoveDown(assignId) {
+    const idx = _chContentItems.findIndex(x => x._assignId === assignId);
+    if (idx < 0 || idx >= _chContentItems.length - 1) return;
+    _swapChItemOrder(idx, idx + 1);
+  }
 
-    _fsAddDoc(_fsCollection(COL_MEDIA), mediaData)
-      .then(() => {
-        _showStatus('snxTvUploadStatus', '✓ Upload complete! Media added to channel.', 'ok');
-        if (prog) setTimeout(() => prog.classList.remove('visible'), 1500);
-        const fi = _el('snxTvUploadFile');
-        if (fi) fi.value = '';
-        const ti = _el('snxTvUploadTitle');
-        if (ti) ti.value = '';
-        const ai = _el('snxTvUploadArtist');
-        if (ai) ai.value = '';
-      })
-      .catch(e => {
-        _showStatus('snxTvUploadStatus', 'Firestore error: ' + e.message, 'err');
-        if (prog) prog.classList.remove('visible');
-      });
+  function _swapChItemOrder(idxA, idxB) {
+    const a = _chContentItems[idxA];
+    const b = _chContentItems[idxB];
+    const orderA = a.order;
+    const orderB = b.order;
+    Promise.all([
+      _fsUpdateDoc(_fsDoc(COL_CH_ITEMS, a._assignId), { order: orderB }),
+      _fsUpdateDoc(_fsDoc(COL_CH_ITEMS, b._assignId), { order: orderA }),
+    ]).catch(e => console.warn(LOG, 'reorder error', e));
+  }
+
+  /* Remove from channel (does NOT delete from library) */
+  function _chContentRemove(assignId) {
+    const item  = _chContentItems.find(x => x._assignId === assignId);
+    const media = item && _libraryCache[item.mediaId];
+    const name  = media ? (media.title || media.fileName || 'this item') : 'this item';
+    if (!confirm('Remove "' + name + '" from this channel? It will remain in the Media Library.')) return;
+    _fsDeleteDoc(_fsDoc(COL_CH_ITEMS, assignId))
+      .catch(e => console.warn(LOG, 'remove ch item error', e));
   }
 
   /* ════════════════════════════════════════════════════════════
-     UTILITY
+     OPEN CHANNEL CONTENT FROM CHANNELS TAB
   ════════════════════════════════════════════════════════════ */
-
-  function _esc(str) {
-    return String(str || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function _json(val) {
-    return JSON.stringify(val);
+  // Public shim to allow inline onclick from _renderStudioChannelList
+  function _studioOpenChannelContent(channelId) {
+    studioOpenChannelContent(channelId);
   }
 
   /* ════════════════════════════════════════════════════════════
-     PAGE OPEN / CLOSE lifecycle (called by navTo)
-  ════════════════════════════════════════════════════════════ */
-
-  function _pageOpen() {
-    if (!global._snxFirestore || !global._snxFirestore.db) {
-      console.error(LOG, 'Firestore not available — ensure firebase-config.js is loaded');
-      return;
-    }
-
-    _ensurePageDom();
-
-    // Defer Firestore subscription and founder UI until Firebase Auth has resolved.
-    // Without this guard, navigating to tvPage before onAuthStateChanged fires causes
-    // all Firestore reads/writes to run as unauthenticated, triggering permission-denied
-    // on both the channels snapshot and the create-channel setDoc.
-    const _open = () => {
-      _subscribeChannels();
-      if (_isFounder()) {
-        _showStudioBar();
-      } else {
-        _hideStudioBar();
-      }
-    };
-
-    if (global._snxOnAuthReady) {
-      global._snxOnAuthReady(_open);
-    } else {
-      // Fallback: _snxOnAuthReady not available (e.g. standalone test), run immediately.
-      _open();
-    }
-  }
-
-  function _pageLeave() {
-    // Don't stop playback when leaving — keep audio in background
-    // Just unsubscribe non-essential listeners
-  }
-
-  function _pageDestroy() {
-    _stopPlayback();
-    if (_channelsUnsub) { _channelsUnsub(); _channelsUnsub = null; }
-    if (_mediaUnsub)    { _mediaUnsub();    _mediaUnsub    = null; }
-    if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
-    _stopVizAnimation();
-  }
-
-  /* ════════════════════════════════════════════════════════════
-     ENSURE PAGE DOM (idempotent)
+     PAGE DOM (idempotent builder)
   ════════════════════════════════════════════════════════════ */
 
   function _ensurePageDom() {
     const page = _el('tvPage');
-    if (!page || _el('snxTvPlayerWrap')) return; // already built
+    if (!page || _el('snxTvPlayerWrap')) return;
 
     page.innerHTML = [
+
       '<h2 class="eclipse-title" style="margin:0 0 14px;">📺 Shadow Nexus TV</h2>',
 
       /* ── Player ── */
       '<div class="snx-tv-player-wrap" id="snxTvPlayerWrap">',
         '<div id="snxTvPlayerInner" style="width:100%;height:100%;position:relative;">',
-          '<video id="snxTvVideo" data-snx-media-exempt="1" ',
-            'playsinline webkit-playsinline preload="metadata" ',
-            'style="display:none;"></video>',
+          '<video id="snxTvVideo" data-snx-media-exempt="1" playsinline webkit-playsinline preload="metadata" style="display:none;"></video>',
           '<audio id="snxTvAudio" preload="none"></audio>',
           '<canvas id="snxTvVisualizer"></canvas>',
           '<div class="snx-tv-viz-overlay" id="snxTvVizOverlay">',
@@ -1011,11 +1480,10 @@
         '</div>',
       '</div>',
 
-      /* ── Founder Studio Bar (hidden by default) ── */
+      /* ── Founder Studio Bar ── */
       '<div class="snx-tv-studio-bar" id="snxTvStudioBar" style="display:none;">',
         '<span class="snx-tv-studio-label">👑 Founder Tools</span>',
-        '<button class="snx-tv-studio-toggle-btn" id="snxTvStudioToggleBtn" ',
-          'onclick="window.SNXTv.toggleStudio()">📺 TV Studio</button>',
+        '<button class="snx-tv-studio-toggle-btn" id="snxTvStudioToggleBtn" onclick="window.SNXTv.toggleStudio()">📺 TV Studio</button>',
       '</div>',
 
       /* ── Studio Panel ── */
@@ -1023,71 +1491,116 @@
 
         /* Tabs */
         '<div class="snx-tv-studio-tabs">',
-          '<button class="snx-tv-studio-tab active" data-tab="channels" ',
-            'onclick="window.SNXTv.switchStudioTab(\'channels\')">Channels</button>',
-          '<button class="snx-tv-studio-tab" data-tab="media" ',
-            'onclick="window.SNXTv.switchStudioTab(\'media\')">Add Media</button>',
+          '<button class="snx-tv-studio-tab active" data-tab="library" onclick="window.SNXTv.switchStudioTab(\'library\')">📚 Media Library</button>',
+          '<button class="snx-tv-studio-tab" data-tab="channel-content" onclick="window.SNXTv.switchStudioTab(\'channel-content\')">📋 Channel Content</button>',
+          '<button class="snx-tv-studio-tab" data-tab="channels" onclick="window.SNXTv.switchStudioTab(\'channels\')">📺 Channels</button>',
         '</div>',
 
-        /* Channels pane */
-        '<div class="snx-tv-studio-pane active" data-pane="channels">',
+        /* ══ MEDIA LIBRARY PANE ══ */
+        '<div class="snx-tv-studio-pane active" data-pane="library">',
+
+          /* Upload buttons */
+          '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">',
+            '<button class="snx-tv-btn snx-tv-btn-success" onclick="window.SNXTv.libUploadAudio()">🎵 Upload Music / Audio</button>',
+            '<button class="snx-tv-btn snx-tv-btn-primary" onclick="window.SNXTv.libUploadVideo()">🎬 Upload Video</button>',
+          '</div>',
+
+          /* Filter & search bar */
+          '<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center;">',
+            '<button class="snx-tv-lib-filter-btn active" data-filter="all" onclick="window.SNXTv.libSetFilter(\'all\')">All</button>',
+            '<button class="snx-tv-lib-filter-btn" data-filter="audio" onclick="window.SNXTv.libSetFilter(\'audio\')">🎵 Music</button>',
+            '<button class="snx-tv-lib-filter-btn" data-filter="video" onclick="window.SNXTv.libSetFilter(\'video\')">🎬 Video</button>',
+            '<input id="snxTvLibSearch" placeholder="Search…" style="flex:1;min-width:120px;" ' +
+              'oninput="window.SNXTv.libSetSearch(this.value)">',
+          '</div>',
+
+          /* Bulk action bar (hidden when nothing selected) */
+          '<div id="snxTvLibBulkBar" style="display:none;background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.25);border-radius:8px;padding:8px 12px;margin-bottom:10px;align-items:center;gap:10px;">',
+            '<span id="snxTvLibSelCount" style="font-size:13px;color:#c8e8ff;"></span>',
+            '<button class="snx-tv-btn snx-tv-btn-success" onclick="window.SNXTv.libBulkAddToChannel()">+ Add to Channel</button>',
+          '</div>',
+
+          /* Library list */
+          '<ul class="snx-tv-media-list" id="snxTvLibraryList" style="max-height:480px;overflow-y:auto;"></ul>',
+        '</div>',
+
+        /* ══ CHANNEL CONTENT PANE ══ */
+        '<div class="snx-tv-studio-pane" data-pane="channel-content">',
+          '<p style="font-size:12px;color:#5a8aaa;margin:0 0 10px;">Select a channel to view and reorder its assigned media.</p>',
+          '<div id="snxTvChContentLabel" style="font-size:13px;font-weight:600;color:#4a7a9a;margin-bottom:10px;padding:8px 10px;background:rgba(0,20,50,0.5);border:1px solid rgba(0,174,239,0.15);border-radius:8px;">',
+            'Select a channel below.',
+          '</div>',
+          '<div id="snxTvChContentPicker" style="margin-bottom:14px;"></div>',
+          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;" id="snxTvChContentTitle">Select a channel above</p>',
+          '<ul class="snx-tv-media-list" id="snxTvChContentList"></ul>',
+        '</div>',
+
+        /* ══ CHANNELS MANAGEMENT PANE ══ */
+        '<div class="snx-tv-studio-pane" data-pane="channels">',
           '<p style="font-size:12px;color:#5a8aaa;margin:0 0 12px;">Create and manage TV channels.</p>',
           '<div class="snx-tv-create-ch-form">',
-            '<label for="snxTvNewChName" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">New Channel Name</label>',
+            '<label style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">New Channel Name</label>',
             '<input id="snxTvNewChName" placeholder="e.g. Shadow Nexus TV" style="margin:4px 0 8px;">',
-            '<label for="snxTvNewChDesc" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Description (optional)</label>',
+            '<label style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Description (optional)</label>',
             '<input id="snxTvNewChDesc" placeholder="Short description" style="margin:4px 0 10px;">',
-            '<button class="snx-tv-btn snx-tv-btn-success" ',
-              'onclick="window.SNXTv.studioCreateChannel()" style="width:100%;padding:8px;">Create Channel</button>',
+            '<button class="snx-tv-btn snx-tv-btn-success" onclick="window.SNXTv.studioCreateChannel()" style="width:100%;padding:8px;">Create Channel</button>',
             '<div class="snx-tv-status" id="snxTvCreateChStatus"></div>',
           '</div>',
           '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;">Your Channels</p>',
           '<ul class="snx-tv-ch-list" id="snxTvStudioChList"></ul>',
-        '</div>',
-
-        /* Media pane */
-        '<div class="snx-tv-studio-pane" data-pane="media">',
-
-          /* ── Step 1: Channel picker ── */
-          '<p style="font-size:11px;color:#5a8aaa;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin:0 0 8px;">Step 1 — Select a Channel</p>',
-          /* Selection status label */
-          '<div id="snxTvAddMediaChLabel" style="font-size:13px;font-weight:600;color:#4a7a9a;margin-bottom:10px;padding:8px 10px;background:rgba(0,20,50,0.5);border:1px solid rgba(0,174,239,0.15);border-radius:8px;">',
-            'No channels yet — create one on the Channels tab.',
-          '</div>',
-          /* Tappable channel cards container */
-          '<div id="snxTvAddMediaChPicker" style="margin-bottom:16px;"></div>',
-          /* Hidden <select> kept for upload fallback */
-          '<select id="snxTvUploadChannelId" style="display:none;"></select>',
-
-          /* ── Step 2: Upload form ── */
-          '<p style="font-size:11px;color:#5a8aaa;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin:0 0 8px;">Step 2 — Upload Media</p>',
-          '<div class="snx-tv-upload-form">',
-            '<label for="snxTvUploadKind" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Media Type</label>',
-            '<select id="snxTvUploadKind" style="margin:4px 0 8px;">',
-              '<option value="video">Video</option>',
-              '<option value="audio">Music / Audio</option>',
-              '<option value="image">Artwork / Image</option>',
-            '</select>',
-            '<label for="snxTvUploadTitle" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Title (optional)</label>',
-            '<input id="snxTvUploadTitle" placeholder="Title" style="margin:4px 0 8px;">',
-            '<label for="snxTvUploadArtist" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Artist / Creator (optional)</label>',
-            '<input id="snxTvUploadArtist" placeholder="Artist name" style="margin:4px 0 8px;">',
-            '<label for="snxTvUploadFile" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">File</label>',
-            '<input type="file" id="snxTvUploadFile" accept="video/*,audio/*,image/*" style="margin:4px 0 10px;color:#c8e8ff;">',
-            '<button class="snx-tv-btn snx-tv-btn-success" ',
-              'onclick="window.SNXTv.studioUploadMedia()" style="width:100%;padding:8px;">Upload to Channel</button>',
-            '<div class="snx-tv-progress-wrap" id="snxTvUploadProgressWrap">',
-              '<div class="snx-tv-progress-bar" id="snxTvUploadProgressBar"></div>',
-            '</div>',
-            '<div class="snx-tv-status" id="snxTvUploadStatus"></div>',
-          '</div>',
-
-          /* ── Step 3: Media list for selected channel ── */
-          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;" id="snxTvStudioMediaPaneTitle">Select a channel above</p>',
-          '<ul class="snx-tv-media-list" id="snxTvStudioMediaList"></ul>',
+          '<div class="snx-tv-status" id="snxTvDeleteChStatus"></div>',
         '</div>',
 
       '</div>', /* end studio panel */
+
+      /* ══ UPLOAD OVERLAY ══ */
+      '<div id="snxTvUploadOverlay" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(2,8,18,0.88);align-items:center;justify-content:center;">',
+        '<div style="background:#06101e;border:1px solid rgba(0,174,239,0.35);border-radius:14px;padding:24px;width:100%;max-width:440px;box-sizing:border-box;position:relative;">',
+          '<button onclick="window.SNXTv.closeUploadOverlay()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#5a8aaa;font-size:18px;cursor:pointer;">✕</button>',
+          '<h3 style="color:#c8e8ff;margin:0 0 16px;font-size:15px;">Upload to Media Library</h3>',
+          '<label style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Media Type</label>',
+          '<select id="snxTvLibUploadKind" style="margin:4px 0 10px;">',
+            '<option value="audio">Music / Audio</option>',
+            '<option value="video">Video</option>',
+            '<option value="image">Artwork / Image</option>',
+          '</select>',
+          '<label style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Title (optional)</label>',
+          '<input id="snxTvLibUploadTitle" placeholder="Title" style="margin:4px 0 8px;">',
+          '<label style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Artist / Creator (optional)</label>',
+          '<input id="snxTvLibUploadArtist" placeholder="Artist name" style="margin:4px 0 8px;">',
+          '<label style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">File</label>',
+          '<input type="file" id="snxTvLibUploadFile" accept="video/*,audio/*,image/*" style="margin:4px 0 10px;color:#c8e8ff;">',
+          '<button class="snx-tv-btn snx-tv-btn-success" onclick="window.SNXTv.libDoUpload()" style="width:100%;padding:8px;">Upload to Library</button>',
+          '<div class="snx-tv-progress-wrap" id="snxTvLibUploadProgressWrap">',
+            '<div class="snx-tv-progress-bar" id="snxTvLibUploadProgressBar"></div>',
+          '</div>',
+          '<div class="snx-tv-status" id="snxTvLibUploadStatus"></div>',
+        '</div>',
+      '</div>',
+
+      /* ══ ASSIGN TO CHANNEL OVERLAY ══ */
+      '<div id="snxTvAssignOverlay" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(2,8,18,0.88);align-items:center;justify-content:center;">',
+        '<div style="background:#06101e;border:1px solid rgba(0,174,239,0.35);border-radius:14px;padding:24px;width:100%;max-width:400px;box-sizing:border-box;position:relative;">',
+          '<button onclick="window.SNXTv.closeAssignDialog()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#5a8aaa;font-size:18px;cursor:pointer;">✕</button>',
+          '<h3 style="color:#c8e8ff;margin:0 0 6px;font-size:15px;">Add to Channel</h3>',
+          '<p style="color:#5a8aaa;font-size:13px;margin:0 0 14px;">Adding <strong id="snxTvAssignMediaCount" style="color:#c8e8ff;"></strong> to:</p>',
+          '<div id="snxTvAssignChList" style="max-height:260px;overflow-y:auto;margin-bottom:14px;display:flex;flex-direction:column;gap:8px;"></div>',
+          '<div style="display:flex;gap:8px;">',
+            '<button class="snx-tv-btn snx-tv-btn-success" id="snxTvAssignConfirmBtn" style="flex:1;padding:8px;">Confirm</button>',
+            '<button class="snx-tv-btn" id="snxTvAssignCancelBtn" style="padding:8px 14px;">Cancel</button>',
+          '</div>',
+          '<div id="snxTvAssignStatus" style="margin-top:8px;font-size:13px;min-height:18px;"></div>',
+        '</div>',
+      '</div>',
+
+      /* ══ PREVIEW OVERLAY ══ */
+      '<div id="snxTvPreviewOverlay" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(2,8,18,0.92);align-items:center;justify-content:center;">',
+        '<div style="background:#06101e;border:1px solid rgba(0,174,239,0.35);border-radius:14px;padding:20px;width:100%;max-width:640px;box-sizing:border-box;position:relative;">',
+          '<button onclick="window.SNXTv.closePreview()" style="position:absolute;top:12px;right:14px;background:none;border:none;color:#5a8aaa;font-size:18px;cursor:pointer;">✕</button>',
+          '<h3 id="snxTvPreviewTitle" style="color:#c8e8ff;margin:0 0 14px;font-size:14px;padding-right:30px;"></h3>',
+          '<div id="snxTvPreviewBody"></div>',
+        '</div>',
+      '</div>',
 
     ].join('');
 
@@ -1096,109 +1609,60 @@
     const aud = _el('snxTvAudio');
     if (vid) {
       vid.addEventListener('ended', _advanceQueue);
-      vid.addEventListener('error', () => {
-        console.warn(LOG, 'video error — advancing queue');
-        setTimeout(_advanceQueue, 1000);
-      });
+      vid.addEventListener('error', () => { console.warn(LOG, 'video error'); setTimeout(_advanceQueue, 1000); });
     }
     if (aud) {
       aud.addEventListener('ended', _advanceQueue);
-      aud.addEventListener('error', () => {
-        console.warn(LOG, 'audio error — advancing queue');
-        setTimeout(_advanceQueue, 1000);
-      });
+      aud.addEventListener('error', () => { console.warn(LOG, 'audio error'); setTimeout(_advanceQueue, 1000); });
     }
 
-    /* Play overlay button */
     const btn = _el('snxTvPlayBtn');
     if (btn) btn.addEventListener('click', _onPlayOverlayClick);
-
-    /* Populate channel select and channel picker in Add Media tab */
-    _updateChannelSelect();
-    _renderAddMediaChannelPicker();
   }
 
-  /* Populate the hidden channel <select> (kept for upload fallback) */
-  function _updateChannelSelect() {
-    const sel = _el('snxTvUploadChannelId');
-    if (!sel) return;
-    sel.innerHTML = _channels.map(ch =>
-      '<option value="' + _esc(ch.id) + '">' + _esc(ch.name) + '</option>'
-    ).join('');
-    if (_studioChannel && _channels.find(c => c.id === _studioChannel.id)) {
-      sel.value = _studioChannel.id;
-    }
-  }
+  /* ════════════════════════════════════════════════════════════
+     PAGE LIFECYCLE
+  ════════════════════════════════════════════════════════════ */
 
-  /* Render tappable channel-selection cards inside the Add Media pane */
-  function _renderAddMediaChannelPicker() {
-    const container = _el('snxTvAddMediaChPicker');
-    const label     = _el('snxTvAddMediaChLabel');
-    const mediaTitle= _el('snxTvStudioMediaPaneTitle');
-
-    // Update the selected-channel label above the upload form
-    if (label) {
-      if (_studioChannel) {
-        label.innerHTML =
-          '<span style="color:#00AEEF;">✔ Selected Channel:</span> ' +
-          '<strong style="color:#e0f0ff;">' + _esc(_studioChannel.name) + '</strong>';
-        label.style.color = '#c8e8ff';
-      } else {
-        label.textContent = _channels.length
-          ? '⬆ Tap a channel below to select it before uploading.'
-          : 'No channels yet — create one on the Channels tab.';
-        label.style.color = '#4a7a9a';
-      }
-    }
-
-    // Update media pane title (above media list)
-    if (mediaTitle) {
-      mediaTitle.textContent = _studioChannel
-        ? 'Media for: ' + _studioChannel.name
-        : 'Select a channel below';
-    }
-
-    // Sync hidden <select>
-    _updateChannelSelect();
-
-    if (!container) return;
-
-    if (_channels.length === 0) {
-      container.innerHTML =
-        '<p style="color:#4a7a9a;font-size:13px;margin:0 0 12px;">No channels yet.</p>';
+  function _pageOpen() {
+    if (!global._snxFirestore || !global._snxFirestore.db) {
+      console.error(LOG, 'Firestore not available — ensure firebase-config.js is loaded');
       return;
     }
 
-    container.innerHTML = _channels.map(ch => {
-      const selected  = _studioChannel && _studioChannel.id === ch.id;
-      const artStyle  = ch.artworkUrl ? 'background-image:url(' + _esc(ch.artworkUrl) + ');background-size:cover;background-position:center;' : '';
-      return (
-        '<div class="snx-tv-channel-card' + (selected ? ' active-channel snx-tv-amch-selected' : '') + '" ' +
-        'data-ch-id="' + _esc(ch.id) + '" ' +
-        'role="button" tabindex="0" ' +
-        'style="margin-bottom:8px;' + (selected ? 'border-color:rgba(0,174,239,0.90);box-shadow:0 0 18px rgba(0,174,239,0.30);' : '') + '" ' +
-        'onclick="window.SNXTv.studioSelectChannel(' + _json(ch.id) + ')" ' +
-        'onkeydown="if(event.key===\'Enter\'||event.key===\' \')window.SNXTv.studioSelectChannel(' + _json(ch.id) + ')">' +
-          '<div class="snx-tv-ch-art" style="' + artStyle + '">' + (ch.artworkUrl ? '' : '📺') + '</div>' +
-          '<div class="snx-tv-ch-info">' +
-            '<div class="snx-tv-ch-name">' + _esc(ch.name) + '</div>' +
-            '<div class="snx-tv-ch-meta">' + _esc(ch.description || '') + '</div>' +
-          '</div>' +
-          (selected
-            ? '<span class="snx-tv-ch-badge playing">✔ Selected</span>'
-            : '<span class="snx-tv-ch-badge">Select</span>') +
-        '</div>'
-      );
-    }).join('');
+    _ensurePageDom();
+
+    const _open = () => {
+      _subscribeChannels();
+      if (_isFounder()) {
+        _showStudioBar();
+        _subscribeLibrary();
+        _subscribeAllChItems();
+      } else {
+        _hideStudioBar();
+      }
+    };
+
+    if (global._snxOnAuthReady) {
+      global._snxOnAuthReady(_open);
+    } else {
+      _open();
+    }
   }
 
-  /* Studio: Select a channel from the Add Media picker (does NOT navigate away) */
-  function _studioSelectChannel(channelId) {
-    const ch = _channels.find(c => c.id === channelId);
-    if (!ch) return;
-    _studioChannel = ch;
-    _renderAddMediaChannelPicker();   // re-render highlights + label
-    _loadStudioMedia(channelId);      // refresh media list for this channel
+  function _pageLeave() {
+    // Keep playback running in background — don't stop
+  }
+
+  function _pageDestroy() {
+    _stopPlayback();
+    if (_channelsUnsub)   { _channelsUnsub();   _channelsUnsub   = null; }
+    if (_chItemsUnsub)    { _chItemsUnsub();    _chItemsUnsub    = null; }
+    if (_libraryUnsub)    { _libraryUnsub();    _libraryUnsub    = null; }
+    if (_chContentUnsub)  { _chContentUnsub();  _chContentUnsub  = null; }
+    if (_allChItemsUnsub) { _allChItemsUnsub(); _allChItemsUnsub = null; }
+    if (_studioMediaUnsub){ _studioMediaUnsub(); _studioMediaUnsub = null; }
+    _stopVizAnimation();
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1222,20 +1686,44 @@
     /* Viewer */
     selectChannel: _selectChannel,
 
-    /* Studio (founder) */
-    toggleStudio:         _toggleStudio,
-    switchStudioTab:      _switchStudioTab,
-    studioCreateChannel:  _studioCreateChannel,
-    studioDeleteChannel:  _studioDeleteChannel,
-    studioOpenChannel:    _studioOpenChannel,
-    studioSelectChannel:  _studioSelectChannel,
-    studioDeleteMedia:    _studioDeleteMedia,
-    studioUploadMedia:    _studioUploadMedia,
+    /* Studio top-level */
+    toggleStudio:    _toggleStudio,
+    switchStudioTab: _switchStudioTab,
+
+    /* Library tab */
+    libUploadAudio:       _libUploadAudio,
+    libUploadVideo:       _libUploadVideo,
+    libDoUpload:          _libDoUpload,
+    libSetFilter:         _libSetFilter,
+    libSetSearch:         _libSetSearch,
+    libToggleSelect:      _libToggleSelect,
+    libPreview:           _libPreview,
+    libEditTitle:         _libEditTitle,
+    libAddToChannel:      _libAddToChannel,
+    libBulkAddToChannel:  _libBulkAddToChannel,
+    libDeleteMedia:       _libDeleteMedia,
+    closeUploadOverlay:   _closeUploadOverlay,
+    closePreview:         _closePreview,
+
+    /* Assign dialog */
+    closeAssignDialog: _closeAssignDialog,
+
+    /* Channel content tab */
+    studioSelectChannelContent: _studioSelectChannelContent,
+    studioOpenChannelContent:   _studioOpenChannelContent,
+    chContentMoveUp:    _chContentMoveUp,
+    chContentMoveDown:  _chContentMoveDown,
+    chContentRemove:    _chContentRemove,
+
+    /* Channels tab */
+    studioCreateChannel: _studioCreateChannel,
+    studioDeleteChannel: _studioDeleteChannel,
 
     /* Diagnostics */
     getBuild:    () => BUILD,
     getChannels: () => _channels,
     getQueue:    () => _mediaQueue,
+    getLibrary:  () => _libraryAll,
   };
 
   _init();

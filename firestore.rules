@@ -1737,25 +1737,25 @@ service cloud.firestore {
     // All in SNS project (horr-a08f4). No separate Firebase project needed.
     // ════════════════════════════════════════════════════════════════════════
     //
-    //   /tv_state/{channelId}     — live broadcast state (current item, queue, started_at)
-    //   /tv_config/{channelId}    — programming engine config (running, freq, history)
-    //   /tv_media/{mediaId}          — TV media library (references SNS R2 URLs)
+    //   /tv_channels/{channelId}     — channel registry
+    //   /tv_library/{mediaId}        — CENTRAL media library (no channelId — library-first)
+    //   /tv_channel_items/{itemId}   — channel assignments { channelId, mediaId, order, addedAt }
+    //   /tv_media/{mediaId}          — LEGACY media (read-only backward compat, channelId-based)
+    //   /tv_state/{channelId}        — live broadcast state
+    //   /tv_config/{channelId}       — programming engine config
     //   /tv_playlists/{playlistId}   — TV playlists
-    //   /tv_programs/{programId}     — TV programs (media or playlist references)
-    //   /tv_schedule/{slotId}        — TV schedule slots (managed via tv_state queue)
-    //   /tv_submissions/{subId}      — User content submissions (pending/approved/rejected)
-    //   /tv_settings/{doc}           — Channel settings (Founder write, signed-in read)
+    //   /tv_programs/{programId}     — TV programs
+    //   /tv_schedule/{slotId}        — TV schedule slots
+    //   /tv_submissions/{subId}      — User content submissions
+    //   /tv_settings/{doc}           — Channel settings
     //
     // Security model:
-    //   READ:  tv_state, tv_config — any signed-in user (all viewers need to read state)
-    //          tv_media — any signed-in user (for viewer guide and studio)
-    //          tv_playlists, tv_programs, tv_schedule — any signed-in user
+    //   READ:  tv_library, tv_channel_items — any signed-in user (viewers need for playback)
+    //          tv_channels — any signed-in user (for channel guide)
+    //          tv_state, tv_config — any signed-in user
     //   WRITE: Founder only (enforced via isFounderEmail() — cannot be spoofed)
-    //   EXCEPTION: tv_state advancement fields can also be written by the SNS
-    //              Cloudflare Worker, which authenticates via Firebase service account.
-    //              The Worker only writes tv_state/{channelId} atomically.
-    //   EXCEPTION: tv_submissions — any signed-in user may CREATE (submit),
-    //              but only Founder may read all submissions or update status.
+    //   EXCEPTION: tv_state — also writable by SNS Cloudflare Worker (service account)
+    //   EXCEPTION: tv_submissions — any signed-in user may CREATE
 
     // ── tv_state — live broadcast state ──────────────────────────────────────
     match /tv_state/{channelId} {
@@ -1823,6 +1823,24 @@ service cloud.firestore {
     //   READ:  any signed-in user (for viewer channel selector)
     //   WRITE: Founder only
     match /tv_channels/{channelId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── tv_library — central media library (SNS-2026-TV-LIBRARY-001) ──────
+    //   One doc per uploaded media item. No channelId field.
+    //   READ:  any signed-in user (viewers need to resolve media for playback)
+    //   WRITE: Founder only
+    match /tv_library/{mediaId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isFounderEmail();
+    }
+
+    // ── tv_channel_items — channel ↔ media assignments ────────────────────
+    //   { channelId, mediaId, order, addedAt }
+    //   READ:  any signed-in user (viewers need to build playback queue)
+    //   WRITE: Founder only (prevents viewers from assigning media to channels)
+    match /tv_channel_items/{itemId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isFounderEmail();
     }
