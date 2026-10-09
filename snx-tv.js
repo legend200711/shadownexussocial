@@ -178,7 +178,10 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function _json(val) { return JSON.stringify(val); }
+  /* HTML-attribute-safe JSON: embeds a value inside a double-quoted onclick/onchange
+     attribute.  JSON.stringify wraps strings in ", which would break the HTML parser.
+     Replacing " with &quot; lets the parser decode it correctly back to ". */
+  function _json(val) { return JSON.stringify(val).replace(/"/g, '&quot;'); }
 
   /* ════════════════════════════════════════════════════════════
      CHANNELS — subscribe & render guide
@@ -1056,12 +1059,23 @@
     if (!overlay) return;
     overlay.style.display = 'flex';
 
+    // Authoritative kind for this action — set select and restrict accept
     const kindSel = _el('snxTvLibUploadKind');
     if (kindSel && defaultKind) kindSel.value = defaultKind;
 
-    // Reset form
     const fi = _el('snxTvLibUploadFile');
-    if (fi) fi.value = '';
+    if (fi) {
+      fi.value = '';
+      // Restrict the file picker to the correct media type so the user cannot
+      // accidentally choose the wrong kind (e.g. an audio file from the Video
+      // upload button).  Fall back to all three types if defaultKind is unknown.
+      fi.accept = defaultKind === 'video' ? 'video/*'
+                : defaultKind === 'audio' ? 'audio/*'
+                : defaultKind === 'image' ? 'image/*'
+                : 'video/*,audio/*,image/*';
+    }
+
+    // Reset remaining form fields
     const ti = _el('snxTvLibUploadTitle');
     if (ti) ti.value = '';
     const ai = _el('snxTvLibUploadArtist');
@@ -1078,18 +1092,48 @@
     if (overlay) overlay.style.display = 'none';
   }
 
+  /* Map a MIME type string to the canonical mediaKind value.
+     Returns 'video', 'audio', 'image', or null for unknown/unsupported types. */
+  function _kindFromMime(mime) {
+    if (!mime) return null;
+    if (mime.startsWith('video/'))                                     return 'video';
+    if (mime.startsWith('audio/'))                                     return 'audio';
+    if (mime.startsWith('image/'))                                     return 'image';
+    // application/octet-stream can legitimately be audio (some browsers report
+    // this for MP3/AAC downloads) — treat it as unknown so the caller can fall
+    // back to the select value rather than silently misclassifying.
+    return null;
+  }
+
   function _libDoUpload() {
     const fileInput   = _el('snxTvLibUploadFile');
     const titleInput  = _el('snxTvLibUploadTitle');
     const artistInput = _el('snxTvLibUploadArtist');
     const kindSel     = _el('snxTvLibUploadKind');
 
-    const file      = fileInput  && fileInput.files[0];
-    const title     = titleInput  ? titleInput.value.trim()  : '';
-    const artist    = artistInput ? artistInput.value.trim() : '';
-    const mediaKind = kindSel     ? kindSel.value            : 'audio';
+    const file   = fileInput  && fileInput.files[0];
+    const title  = titleInput  ? titleInput.value.trim()  : '';
+    const artist = artistInput ? artistInput.value.trim() : '';
 
     if (!file) { _showStatus('snxTvLibUploadStatus', 'Select a file first.', 'err'); return; }
+
+    // Derive mediaKind from the file's MIME type (authoritative).
+    // Fall back to the <select> value only when the browser reports an ambiguous
+    // MIME (e.g. application/octet-stream).  This prevents stale select state
+    // from causing a mediaKind/file-type mismatch on the server.
+    const mimeKind    = _kindFromMime(file.type);
+    const selectKind  = kindSel ? kindSel.value : 'audio';
+    const mediaKind   = mimeKind || selectKind;
+
+    if (!['video', 'audio', 'image'].includes(mediaKind)) {
+      _showStatus('snxTvLibUploadStatus',
+        'Unsupported file type "' + (file.type || 'unknown') + '". Please choose a video, audio, or image file.',
+        'err');
+      return;
+    }
+
+    // Keep the <select> in sync so the user sees what kind will be uploaded.
+    if (kindSel) kindSel.value = mediaKind;
 
     _showStatus('snxTvLibUploadStatus', 'Uploading…', 'info');
     const prog = _el('snxTvLibUploadProgressWrap');
@@ -1205,9 +1249,35 @@
   function _studioDeleteChannel(channelId) {
     const ch = _channels.find(c => c.id === channelId);
     if (!ch) return;
+    // Show a custom in-page confirmation overlay instead of window.confirm(),
+    // which some browsers silently suppress (returns false) in certain contexts.
+    _openDeleteConfirmDialog(ch);
+  }
 
-    if (!confirm('Delete channel "' + ch.name + '"?\n\nThis removes the channel and its assignments. Media files in the library are kept.')) return;
+  /* Custom delete-confirmation overlay — avoids window.confirm() suppression */
+  function _openDeleteConfirmDialog(ch) {
+    const overlay = _el('snxTvDeleteConfirmOverlay');
+    if (!overlay) return;
 
+    const nameEl = _el('snxTvDeleteConfirmChName');
+    if (nameEl) nameEl.textContent = ch.name;
+
+    overlay.style.display = 'flex';
+
+    // Wire buttons — replace handlers each time so stale channelId never fires
+    const confirmBtn = _el('snxTvDeleteConfirmBtn');
+    const cancelBtn  = _el('snxTvDeleteCancelBtn');
+    if (confirmBtn) confirmBtn.onclick = () => { _closeDeleteConfirmDialog(); _doDeleteChannel(ch); };
+    if (cancelBtn)  cancelBtn.onclick  = _closeDeleteConfirmDialog;
+  }
+
+  function _closeDeleteConfirmDialog() {
+    const overlay = _el('snxTvDeleteConfirmOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function _doDeleteChannel(ch) {
+    const channelId = ch.id;
     _showStatus('snxTvDeleteChStatus', 'Deleting "' + ch.name + '"…', 'info');
 
     _fsDeleteDoc(_fsDoc(COL_CHANNELS, channelId))
@@ -1353,13 +1423,20 @@
     const titleEl = _el('snxTvChContentTitle');
     if (titleEl) titleEl.textContent = _studioChannel ? 'Content for: ' + _studioChannel.name : 'Select a channel above';
 
+    // Show/hide the "Add from Library" button based on whether a channel is selected
+    const addBtn = _el('snxTvChContentAddBtn');
+    if (addBtn) addBtn.style.display = _studioChannel ? '' : 'none';
+
+    // Clear status on re-render
+    _showStatus('snxTvChContentStatus', '', '');
+
     if (!_studioChannel) {
       list.innerHTML = '';
       return;
     }
 
     if (_chContentItems.length === 0) {
-      list.innerHTML = '<li style="color:#4a7a9a;font-size:13px;padding:8px 0;">No media assigned. Use Media Library → Add to Channel.</li>';
+      list.innerHTML = '<li style="color:#4a7a9a;font-size:13px;padding:8px 0;">No media assigned yet. Use the "+ Add from Library" button above or go to Media Library → Add to Channel.</li>';
       return;
     }
 
@@ -1419,9 +1496,119 @@
     const item  = _chContentItems.find(x => x._assignId === assignId);
     const media = item && _libraryCache[item.mediaId];
     const name  = media ? (media.title || media.fileName || 'this item') : 'this item';
-    if (!confirm('Remove "' + name + '" from this channel? It will remain in the Media Library.')) return;
+    // Direct remove — no native confirm() needed since the Remove button is a
+    // deliberate action inside the content editor and the operation is reversible
+    // (the founder can re-add the item from the library).
     _fsDeleteDoc(_fsDoc(COL_CH_ITEMS, assignId))
-      .catch(e => console.warn(LOG, 'remove ch item error', e));
+      .then(() => {
+        _showStatus('snxTvChContentStatus', '✓ "' + name + '" removed from channel.', 'ok');
+      })
+      .catch(e => {
+        console.warn(LOG, 'remove ch item error', e);
+        _showStatus('snxTvChContentStatus', '✗ Remove failed: ' + (e && e.message ? e.message : String(e)), 'err');
+      });
+  }
+
+  /* Add library items to the currently-selected channel from within the
+     Channel Content pane.  Reuses the existing assign-to-channel dialog but
+     pre-selects the current channel so the founder only has to confirm. */
+  function _chContentAddFromLibrary() {
+    if (!_studioChannel) {
+      _showStatus('snxTvChContentStatus', 'Select a channel first.', 'err');
+      return;
+    }
+    if (_libraryAll.length === 0) {
+      _showStatus('snxTvChContentStatus', 'No items in the Media Library yet. Upload some first.', 'err');
+      return;
+    }
+    // Show a library picker in the existing assign overlay.  We open it and
+    // pre-tick the currently-selected channel so the founder just picks items.
+    _openLibraryPickerForChannel(_studioChannel.id);
+  }
+
+  /* Opens a media-picker overlay so the founder can select items from the
+     library and add them directly to the given channel. */
+  function _openLibraryPickerForChannel(channelId) {
+    const overlay = _el('snxTvLibPickerOverlay');
+    if (!overlay) return;
+
+    const ch = _channels.find(c => c.id === channelId);
+    if (!ch) return;
+
+    const chNameEl = _el('snxTvLibPickerChName');
+    if (chNameEl) chNameEl.textContent = ch.name;
+
+    // Populate list — exclude items already assigned to this channel
+    const alreadyAssigned = new Set(_chContentItems.map(i => i.mediaId));
+    const list = _el('snxTvLibPickerList');
+    if (list) {
+      if (_libraryAll.length === 0) {
+        list.innerHTML = '<p style="color:#4a7a9a;font-size:13px;">No items in library.</p>';
+      } else {
+        list.innerHTML = _libraryAll.map(m => {
+          const disabled = alreadyAssigned.has(m.id);
+          return (
+            '<label class="snx-tv-assign-ch-label" style="' + (disabled ? 'opacity:.45;' : '') + '">' +
+              '<input type="checkbox" value="' + _esc(m.id) + '"' + (disabled ? ' disabled' : '') + '> ' +
+              '<span>' + (KIND_ICON[m.mediaKind] || '📁') + ' ' + _esc(m.title || m.fileName || m.id) + '</span>' +
+            '</label>'
+          );
+        }).join('');
+      }
+    }
+
+    overlay.style.display = 'flex';
+
+    const confirmBtn = _el('snxTvLibPickerConfirmBtn');
+    const cancelBtn  = _el('snxTvLibPickerCancelBtn');
+    const statusEl   = _el('snxTvLibPickerStatus');
+
+    if (statusEl) { statusEl.textContent = ''; statusEl.style.color = ''; }
+
+    if (cancelBtn) cancelBtn.onclick = () => {
+      overlay.style.display = 'none';
+    };
+
+    if (confirmBtn) confirmBtn.onclick = async () => {
+      const checked = list
+        ? Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(el => el.value)
+        : [];
+      if (checked.length === 0) {
+        if (statusEl) { statusEl.textContent = 'Select at least one item.'; statusEl.style.color = '#ff6655'; }
+        return;
+      }
+      confirmBtn.disabled = true;
+      if (statusEl) { statusEl.textContent = 'Adding…'; statusEl.style.color = '#00AEEF'; }
+
+      // Determine highest current order
+      let maxOrder = _chContentItems.reduce((m, i) => Math.max(m, i.order || 0), -1);
+      let added = 0;
+      const alreadySet = new Set(_chContentItems.map(i => i.mediaId));
+
+      for (const mediaId of checked) {
+        if (alreadySet.has(mediaId)) continue;
+        maxOrder++;
+        try {
+          await _fsAddDoc(_fsCollection(COL_CH_ITEMS), {
+            channelId,
+            mediaId,
+            order:   maxOrder,
+            addedAt: Date.now(),
+          });
+          alreadySet.add(mediaId);
+          added++;
+        } catch (e) {
+          console.warn(LOG, 'lib picker add error', e);
+          if (statusEl) { statusEl.textContent = '✗ Error: ' + (e && e.message ? e.message : String(e)); statusEl.style.color = '#ff6655'; }
+          confirmBtn.disabled = false;
+          return;
+        }
+      }
+
+      if (statusEl) { statusEl.textContent = '✓ Added ' + added + ' item' + (added !== 1 ? 's' : '') + ' to channel.'; statusEl.style.color = '#44dd88'; }
+      confirmBtn.disabled = false;
+      setTimeout(() => { overlay.style.display = 'none'; }, 1500);
+    };
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1531,7 +1718,11 @@
             'Select a channel below.',
           '</div>',
           '<div id="snxTvChContentPicker" style="margin-bottom:14px;"></div>',
-          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;" id="snxTvChContentTitle">Select a channel above</p>',
+          '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">',
+            '<p style="font-size:11px;color:#4a7a9a;margin:0;font-weight:700;letter-spacing:.5px;text-transform:uppercase;flex:1;" id="snxTvChContentTitle">Select a channel above</p>',
+            '<button class="snx-tv-btn snx-tv-btn-success" id="snxTvChContentAddBtn" style="display:none;" onclick="window.SNXTv.chContentAddFromLibrary()">+ Add from Library</button>',
+          '</div>',
+          '<div class="snx-tv-status" id="snxTvChContentStatus"></div>',
           '<ul class="snx-tv-media-list" id="snxTvChContentList"></ul>',
         '</div>',
 
@@ -1602,6 +1793,35 @@
         '</div>',
       '</div>',
 
+      /* ══ DELETE CHANNEL CONFIRM OVERLAY ══ */
+      '<div id="snxTvDeleteConfirmOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(2,8,18,0.92);align-items:center;justify-content:center;">',
+        '<div style="background:#06101e;border:1px solid rgba(255,51,68,0.45);border-radius:14px;padding:24px;width:100%;max-width:380px;box-sizing:border-box;position:relative;text-align:center;">',
+          '<div style="font-size:32px;margin-bottom:12px;">⚠️</div>',
+          '<h3 style="color:#ff5577;margin:0 0 10px;font-size:15px;">Delete Channel?</h3>',
+          '<p style="color:#c8e8ff;font-size:13px;margin:0 0 6px;">You are about to delete:</p>',
+          '<p style="color:#fff;font-size:14px;font-weight:700;margin:0 0 14px;" id="snxTvDeleteConfirmChName"></p>',
+          '<p style="color:#5a8aaa;font-size:12px;margin:0 0 18px;">This removes the channel and all its assignments. Media files in the Library are never deleted.</p>',
+          '<div style="display:flex;gap:10px;justify-content:center;">',
+            '<button class="snx-tv-btn snx-tv-btn-danger" id="snxTvDeleteConfirmBtn" style="padding:8px 20px;">Yes, Delete</button>',
+            '<button class="snx-tv-btn" id="snxTvDeleteCancelBtn" style="padding:8px 20px;">Cancel</button>',
+          '</div>',
+        '</div>',
+      '</div>',
+
+      /* ══ LIBRARY PICKER OVERLAY (add items to channel from Channel Content tab) ══ */
+      '<div id="snxTvLibPickerOverlay" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(2,8,18,0.92);align-items:center;justify-content:center;">',
+        '<div style="background:#06101e;border:1px solid rgba(0,174,239,0.35);border-radius:14px;padding:24px;width:100%;max-width:440px;box-sizing:border-box;position:relative;">',
+          '<h3 style="color:#c8e8ff;margin:0 0 6px;font-size:15px;">Add from Library</h3>',
+          '<p style="color:#5a8aaa;font-size:13px;margin:0 0 14px;">Adding to: <strong id="snxTvLibPickerChName" style="color:#c8e8ff;"></strong></p>',
+          '<div id="snxTvLibPickerList" style="max-height:320px;overflow-y:auto;margin-bottom:14px;display:flex;flex-direction:column;gap:8px;"></div>',
+          '<div style="display:flex;gap:8px;">',
+            '<button class="snx-tv-btn snx-tv-btn-success" id="snxTvLibPickerConfirmBtn" style="flex:1;padding:8px;">Add Selected</button>',
+            '<button class="snx-tv-btn" id="snxTvLibPickerCancelBtn" style="padding:8px 14px;">Cancel</button>',
+          '</div>',
+          '<div id="snxTvLibPickerStatus" style="margin-top:8px;font-size:13px;min-height:18px;"></div>',
+        '</div>',
+      '</div>',
+
     ].join('');
 
     /* Wire media element events */
@@ -1618,6 +1838,28 @@
 
     const btn = _el('snxTvPlayBtn');
     if (btn) btn.addEventListener('click', _onPlayOverlayClick);
+
+    /* Wire upload file-input onchange: auto-sync the Media Type <select>
+       whenever a file is chosen so the UI always reflects the actual file kind.
+       The <select> can still be overridden manually for application/octet-stream
+       files that browsers report without a specific MIME. */
+    const uploadFile = _el('snxTvLibUploadFile');
+    const uploadKind = _el('snxTvLibUploadKind');
+    if (uploadFile && uploadKind) {
+      uploadFile.addEventListener('change', () => {
+        const f = uploadFile.files && uploadFile.files[0];
+        if (!f) return;
+        const detected = _kindFromMime(f.type);
+        if (detected) {
+          uploadKind.value = detected;
+        } else if (f.type && f.type !== 'application/octet-stream') {
+          // MIME present but not recognised — warn but don't block yet
+          _showStatus('snxTvLibUploadStatus',
+            'Warning: unrecognised file type "' + f.type + '". Verify the Media Type above is correct.',
+            'err');
+        }
+      });
+    }
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1711,13 +1953,15 @@
     /* Channel content tab */
     studioSelectChannelContent: _studioSelectChannelContent,
     studioOpenChannelContent:   _studioOpenChannelContent,
-    chContentMoveUp:    _chContentMoveUp,
-    chContentMoveDown:  _chContentMoveDown,
-    chContentRemove:    _chContentRemove,
+    chContentMoveUp:          _chContentMoveUp,
+    chContentMoveDown:        _chContentMoveDown,
+    chContentRemove:          _chContentRemove,
+    chContentAddFromLibrary:  _chContentAddFromLibrary,
 
     /* Channels tab */
-    studioCreateChannel: _studioCreateChannel,
-    studioDeleteChannel: _studioDeleteChannel,
+    studioCreateChannel:       _studioCreateChannel,
+    studioDeleteChannel:       _studioDeleteChannel,
+    closeDeleteConfirmDialog:  _closeDeleteConfirmDialog,
 
     /* Diagnostics */
     getBuild:    () => BUILD,
