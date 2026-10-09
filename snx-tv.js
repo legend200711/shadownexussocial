@@ -30,7 +30,7 @@
      CONSTANTS
   ════════════════════════════════════════════════════════════ */
 
-  const BUILD  = 'SNS-2026-TV-LIBRARY-001';
+  const BUILD  = 'SNS-2026-TV-STATION-001';
   const WORKER = 'https://yellow-term-11e6.nthntjrn.workers.dev';
   const LOG    = '[SNX-TV]';
 
@@ -56,6 +56,10 @@
   let _channelsUnsub   = null;
   let _chItemsUnsub    = null;  // assignment listener for active channel
   let _libraryCache    = {};    // mediaId → media doc (avoids redundant reads)
+
+  /* HUD / playback state */
+  // States: 'waiting' | 'loading' | 'playing' | 'paused' | 'blocked' | 'ended' | 'failed'
+  let _playState = 'waiting';
 
   /* Studio state */
   let _studioOpen    = false;
@@ -374,12 +378,16 @@
     if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
     if (aud) { try { aud.pause(); aud.removeAttribute('src'); aud.load(); } catch (_) {} }
     _hideVisualizer();
+    _setPlayState('waiting');
+    _resetHud();
   }
 
   function _playItem(item) {
     if (!item) { _showWaiting(); return; }
     _playing = true;
     _clearWaiting();
+    _resetHud();
+    _setPlayState('loading');
 
     const vid = _getVideoEl();
     const aud = _getAudioEl();
@@ -410,6 +418,7 @@
       _stopPlayback();
       _playing = true;
       _showImageItem(item);
+      _setPlayState('playing');
       setTimeout(_advanceQueue, 10000);
     }
   }
@@ -424,14 +433,17 @@
       p.then(() => {
         _autoplayBlocked = false;
         _hidePlayOverlay();
+        // state transitions via the 'playing' event listener
       }).catch(err => {
         if (err.name === 'NotAllowedError') {
           _autoplayBlocked = true;
+          _setPlayState('blocked');
           _showPlayOverlay();
         } else {
           // Do NOT mute — log the error and show the overlay so the user can retry
           console.warn(LOG, 'play error', err.name, err.message);
           _autoplayBlocked = true;
+          _setPlayState('blocked');
           _showPlayOverlay();
         }
       });
@@ -449,6 +461,8 @@
     const vid = _getVideoEl();
     if (vid) vid.style.display = 'none';
     _hideVisualizer();
+    _setPlayState('waiting');
+    _resetHud();
     const wrap = _el('snxTvPlayerInner');
     if (wrap && !wrap.querySelector('.snx-tv-waiting')) {
       const w = document.createElement('div');
@@ -630,7 +644,80 @@
   }
 
   /* ════════════════════════════════════════════════════════════
-     PLAY OVERLAY
+     PLAYBACK STATE MACHINE
+  ════════════════════════════════════════════════════════════ */
+
+  function _setPlayState(state) {
+    _playState = state;
+    _updateHudState(state);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     HUD — elapsed / progress / duration / remaining
+  ════════════════════════════════════════════════════════════ */
+
+  function _fmtTime(secs) {
+    if (!isFinite(secs) || isNaN(secs) || secs < 0) return '--:--';
+    const s = Math.floor(secs);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const ss = s % 60;
+    if (h > 0) {
+      return h + ':' + String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+    }
+    return String(m).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+  }
+
+  function _resetHud() {
+    const el = _el('snxTvHud');
+    if (!el) return;
+    _el('snxTvHudElapsed')  && (_el('snxTvHudElapsed').textContent  = '00:00');
+    _el('snxTvHudDuration') && (_el('snxTvHudDuration').textContent = '--:--');
+    _el('snxTvHudRemaining')&& (_el('snxTvHudRemaining').textContent= '');
+    const bar = _el('snxTvHudBar');
+    if (bar) bar.style.width = '0%';
+  }
+
+  function _tickHud(mediaEl) {
+    if (!mediaEl) return;
+    const cur = mediaEl.currentTime;
+    const dur = mediaEl.duration;
+
+    const elEl  = _el('snxTvHudElapsed');
+    const durEl = _el('snxTvHudDuration');
+    const remEl = _el('snxTvHudRemaining');
+    const bar   = _el('snxTvHudBar');
+
+    if (elEl)  elEl.textContent  = _fmtTime(cur);
+    if (durEl) durEl.textContent = isFinite(dur) ? _fmtTime(dur) : '--:--';
+    if (remEl) {
+      const rem = isFinite(dur) ? Math.max(0, dur - cur) : null;
+      remEl.textContent = rem !== null ? '-' + _fmtTime(rem) : '';
+    }
+    if (bar) {
+      const pct = (isFinite(dur) && dur > 0) ? Math.min(100, (cur / dur) * 100) : 0;
+      bar.style.width = pct + '%';
+    }
+  }
+
+  function _updateHudState(state) {
+    const indicator = _el('snxTvHudState');
+    if (!indicator) return;
+    const labels = {
+      waiting:  '',
+      loading:  '⏳',
+      playing:  '',      // keep clean when playing
+      paused:   '⏸',
+      blocked:  '🔇',
+      ended:    '',
+      failed:   '⚠',
+    };
+    indicator.textContent = labels[state] || '';
+    indicator.title = state;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PLAY OVERLAY  (small, shown only when autoplay is blocked)
   ════════════════════════════════════════════════════════════ */
 
   function _showPlayOverlay() { const o = _el('snxTvPlayOverlay'); if (o) o.classList.add('visible'); }
@@ -672,7 +759,14 @@
     }
 
     if (npTitle)   npTitle.textContent   = item.title  || item.fileName || 'Untitled';
-    if (npSub)     npSub.textContent     = item.artist || (item.mediaKind === 'video' ? 'Video' : '');
+    // Sub line: "Artist · duration" or just artist or just duration
+    if (npSub) {
+      const artist   = item.artist || (item.mediaKind === 'video' ? 'Video' : '');
+      const durStr   = (item.duration && isFinite(item.duration))
+                        ? _fmtTime(item.duration)
+                        : '';
+      npSub.textContent = [artist, durStr].filter(Boolean).join(' · ');
+    }
     if (npChannel && _activeChannel) npChannel.textContent = _activeChannel.name;
     if (npArt) {
       const art = item.artworkUrl || (_activeChannel && _activeChannel.artworkUrl) || '';
@@ -1681,9 +1775,23 @@
             '<div class="snx-tv-viz-title"></div>',
             '<div class="snx-tv-viz-artist"></div>',
           '</div>',
+          /* HUD — real playback timeline, always visible at bottom of player */
+          '<div class="snx-tv-hud" id="snxTvHud">',
+            '<span class="snx-tv-hud-elapsed" id="snxTvHudElapsed">00:00</span>',
+            '<div class="snx-tv-hud-track">',
+              '<div class="snx-tv-hud-bar-wrap">',
+                '<div class="snx-tv-hud-bar" id="snxTvHudBar"></div>',
+              '</div>',
+              '<div class="snx-tv-hud-times">',
+                '<span id="snxTvHudDuration">--:--</span>',
+                '<span id="snxTvHudRemaining" class="snx-tv-hud-remaining"></span>',
+              '</div>',
+            '</div>',
+            '<span class="snx-tv-hud-state" id="snxTvHudState"></span>',
+          '</div>',
+          /* Autoplay-blocked prompt — small, only shown when browser requires interaction */
           '<div class="snx-tv-play-overlay" id="snxTvPlayOverlay">',
-            '<button class="snx-tv-play-btn" id="snxTvPlayBtn">▶</button>',
-            '<div class="snx-tv-play-label">Tap to enable playback</div>',
+            '<button class="snx-tv-play-btn" id="snxTvPlayBtn">▶ Enable Sound</button>',
           '</div>',
         '</div>',
         '<span class="snx-tv-channel-badge" id="snxTvChannelBadge">TV</span>',
@@ -1864,17 +1972,61 @@
 
     ].join('');
 
-    /* Wire media element events */
+    /* ── Wire media element events ── */
     const vid = _el('snxTvVideo');
     const aud = _el('snxTvAudio');
-    if (vid) {
-      vid.addEventListener('ended', _advanceQueue);
-      vid.addEventListener('error', () => { console.warn(LOG, 'video error'); setTimeout(_advanceQueue, 1000); });
+
+    function _wireMediaEl(el) {
+      el.addEventListener('loadedmetadata', () => {
+        // Duration is now known — update HUD immediately
+        _tickHud(el);
+      });
+      el.addEventListener('durationchange', () => {
+        _tickHud(el);
+      });
+      el.addEventListener('timeupdate', () => {
+        _tickHud(el);
+        // Clear loading state once time starts moving
+        if (_playState === 'loading' && el.currentTime > 0) {
+          _setPlayState('playing');
+        }
+      });
+      el.addEventListener('play', () => {
+        // 'play' fires when play() is called — not yet necessarily audible
+      });
+      el.addEventListener('playing', () => {
+        // 'playing' fires when media actually starts rendering frames/audio
+        _setPlayState('playing');
+        _autoplayBlocked = false;
+        _hidePlayOverlay();
+      });
+      el.addEventListener('pause', () => {
+        if (_playState !== 'blocked' && _playState !== 'waiting') {
+          _setPlayState('paused');
+        }
+      });
+      el.addEventListener('ended', () => {
+        _setPlayState('ended');
+        _advanceQueue();
+      });
+      el.addEventListener('error', () => {
+        const err = el.error;
+        console.warn(LOG, el.tagName, 'media error',
+          err ? 'code=' + err.code + ' ' + err.message : '(unknown)');
+        _setPlayState('failed');
+        setTimeout(_advanceQueue, 2000);
+      });
+      el.addEventListener('waiting', () => {
+        // Buffering stall — keep showing what state we were in unless loading
+        if (_playState === 'playing') _setPlayState('loading');
+      });
+      el.addEventListener('canplay', () => {
+        if (_playState === 'loading') _setPlayState('playing');
+      });
     }
-    if (aud) {
-      aud.addEventListener('ended', _advanceQueue);
-      aud.addEventListener('error', () => { console.warn(LOG, 'audio error'); setTimeout(_advanceQueue, 1000); });
-    }
+
+    if (vid) _wireMediaEl(vid);
+    if (aud) _wireMediaEl(aud);
 
     const btn = _el('snxTvPlayBtn');
     if (btn) btn.addEventListener('click', _onPlayOverlayClick);
