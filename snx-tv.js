@@ -391,14 +391,19 @@
       if (!vid) return;
       vid.style.display = 'block';
       vid.setAttribute('data-snx-media-exempt', '1');
+      vid.muted = false;
       vid.src = item.url;
       vid.load();
+      console.log(LOG, 'playing video', item.title || item.fileName, item.url);
       _tryPlay(vid);
     } else if (item.mediaKind === 'audio') {
       if (!aud) return;
       if (vid) vid.style.display = 'none';
+      aud.muted = false;
+      aud.volume = aud.volume > 0 ? aud.volume : 1;
       aud.src = item.url;
       aud.load();
+      console.log(LOG, 'playing audio', item.title || item.fileName, item.url);
       _showVisualizer(item);
       _tryPlay(aud);
     } else if (item.mediaKind === 'image') {
@@ -410,6 +415,10 @@
   }
 
   function _tryPlay(mediaEl) {
+    // Resume a suspended AudioContext in a play attempt (may be inside a user gesture)
+    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') {
+      _vizAudioCtx.resume().catch(() => {});
+    }
     const p = mediaEl.play();
     if (p && typeof p.then === 'function') {
       p.then(() => {
@@ -420,9 +429,9 @@
           _autoplayBlocked = true;
           _showPlayOverlay();
         } else {
-          console.warn(LOG, 'play error', err.message);
-          mediaEl.muted = true;
-          mediaEl.play().catch(() => {});
+          // Do NOT mute — log the error and show the overlay so the user can retry
+          console.warn(LOG, 'play error', err.name, err.message);
+          _autoplayBlocked = true;
           _showPlayOverlay();
         }
       });
@@ -541,15 +550,42 @@
     _vizRunning = true;
     const aud = _getAudioEl();
     if (!canvas || !aud) return;
-    try {
-      if (!_vizAudioCtx) _vizAudioCtx = new (global.AudioContext || global.webkitAudioContext)();
-      if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
-      _vizSource   = _vizAudioCtx.createMediaElementSource(aud);
-      _vizAnalyser = _vizAudioCtx.createAnalyser();
-      _vizAnalyser.fftSize = 128;
-      _vizSource.connect(_vizAnalyser);
-      _vizAnalyser.connect(_vizAudioCtx.destination);
-    } catch (e) { console.warn(LOG, 'AudioContext error:', e.message); }
+
+    // Wire up Web Audio only once per audio element instance.
+    // createMediaElementSource() can only be called once per element per context —
+    // reuse _vizSource if it already wraps this exact element.
+    const needsWire = !_vizSource || _vizSource.mediaElement !== aud;
+    if (needsWire) {
+      try {
+        if (!_vizAudioCtx) {
+          _vizAudioCtx = new (global.AudioContext || global.webkitAudioContext)();
+        }
+        // Disconnect the previous source if it exists
+        if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
+        if (_vizAnalyser) { try { _vizAnalyser.disconnect(); } catch (_) {} }
+
+        _vizSource   = _vizAudioCtx.createMediaElementSource(aud);
+        _vizAnalyser = _vizAudioCtx.createAnalyser();
+        _vizAnalyser.fftSize = 128;
+        // source → analyser → speakers (both visualizer AND audio output)
+        _vizSource.connect(_vizAnalyser);
+        _vizAnalyser.connect(_vizAudioCtx.destination);
+        console.log(LOG, 'Web Audio graph wired; ctx state:', _vizAudioCtx.state);
+      } catch (e) {
+        // If Web Audio fails for any reason, fall back gracefully:
+        // null out the analyser so the fallback waveform draws instead,
+        // but do NOT silence the audio element — direct HTML5 playback
+        // continues independently of the Web Audio graph.
+        console.warn(LOG, 'AudioContext setup error (visualizer disabled):', e.message);
+        _vizSource   = null;
+        _vizAnalyser = null;
+      }
+    }
+
+    // Resume a suspended context (e.g. browser autoplay policy)
+    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') {
+      _vizAudioCtx.resume().catch(() => {});
+    }
 
     const ctx = canvas.getContext('2d');
     if (!ctx) { _vizRunning = false; return; }
@@ -602,15 +638,19 @@
 
   function _onPlayOverlayClick() {
     _hidePlayOverlay();
+    _autoplayBlocked = false;
+
+    // Resume suspended AudioContext first (must happen in a genuine user gesture)
+    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') {
+      _vizAudioCtx.resume().catch(() => {});
+    }
+
     const item = _mediaQueue[_queueIdx];
     if (!item) return;
-    const vid = _getVideoEl();
-    const aud = _getAudioEl();
-    const el  = (item.mediaKind === 'video') ? vid : aud;
-    if (!el) return;
-    el.muted = false;
-    el.play().catch(() => {});
-    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') _vizAudioCtx.resume().catch(() => {});
+
+    // Re-play the current item from scratch so src, load, and play all
+    // happen in the user-gesture callback, satisfying autoplay policy.
+    _playItem(item);
   }
 
   /* ════════════════════════════════════════════════════════════
