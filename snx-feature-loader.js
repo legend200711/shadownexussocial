@@ -170,6 +170,19 @@
       init: null   // boot handled by snxShadowReaperInit() in index.html inline script
     },
 
+    // ── 24-Hour TV Network
+    // snx-tv.css provides styles; snx-tv.js exposes window.SNXTv and self-initialises.
+    // Both load only when the user navigates to tvPage.
+    tv: {
+      label: 'TV',
+      css:  ['snx-tv.css?v=SNS-2026-TV-REBUILD-001'],
+      scripts: [
+        'snx-tv.js?v=SNS-2026-TV-REBUILD-001'
+      ],
+      esModules: [],
+      init: null  // SNXTv.pageOpen() is called by navTo() after the feature loads
+    },
+
   };
 
   /* ─────────────────────────────────────────────────────────────────────────

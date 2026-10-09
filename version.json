@@ -1,7 +1,7 @@
 {
-  "buildId": "SNS-2026-TV-STAGE6-002",
-  "swVersion": "v102",
-  "deployedAt": "2026-10-26T00:00:00Z",
+  "buildId": "SNS-2026-TV-REBUILD-001",
+  "swVersion": "v104",
+  "deployedAt": "2026-10-27T00:00:00Z",
   "project": "horr-a08f4",
   "studioVersion": "3.2.2",
   "nexusVersion": "1.1.0",
@@ -36,9 +36,6 @@
   "shadowAIAdaptiveLearningFinalVersion": "SNS-2026-SHADOW-ADAPTIVE-LEARNING-FINAL-001",
   "shadowAIUnifiedRCVersion": "SR-2026-UNIFIED-AI-RC-001",
   "shadowAIUnifiedBridgeBuild": "SR-2026-STAGE2-BRIDGE-001",
-  "tvVersion": "SNS-2026-TV-STAGE6-002",
-  "tvStudioVersion": "SNS-2026-TV-STAGE6-002",
-  "tvTimelineVersion": "SNS-2026-TV-STAGE6-002",
-  "tvCssVersion": "SNS-2026-TV-STAGE6-001",
-  "note": "SNS-2026-TV-STAGE6-002: Complete 24-hour TV upgrades and multi-channel support. Audio fix: permanent Web Audio graph (createMediaElementSource never re-disconnected). Multi-channel: tv_channels collection, channel selector in viewer and studio, per-channel schedule isolation. Video/audio upload with artwork. Duration detection. Sequential playlist advancement. Custom program block duration. Content submissions. TV Guide from live schedule. Mid-program join-in-progress. Mobile/PWA. Firestore rules: tv_channels added. PRIOR BUILD: SNS-2026-TV-STAGE5-001."
+  "tvVersion": "SNS-2026-TV-REBUILD-001",
+  "note": "SNS-2026-TV-REBUILD-001: 24-Hour TV Network fully rebuilt from scratch. New snx-tv.js engine, snx-tv.css styles, TV worker endpoints, nav links in all three navs, SNXFeatureLoader entry, navTo() lifecycle wiring. Firestore rules already present (tv_channels, tv_media, tv_state, etc.). Radio, Shadow Reaper, Live, and all other SNS features preserved."
 }

@@ -1,2667 +1,1128 @@
 /**
  * snx-tv.js
- * Shadow Nexus Social — 24-Hour TV
- * Stage 6: Audio Fix + Multi-Channel Support
- * Build: SNS-2026-TV-STAGE6-001
+ * Shadow Nexus Social — 24-Hour TV Network
+ * Build: SNS-2026-TV-REBUILD-001
  *
- * ════════════════════════════════════════════════════════════════════════
- *  SHADOW NEXUS SOCIAL 24-HOUR TV IS SNS-NATIVE.
- *  It does NOT use the separate 24-Hour Engine.
- *  It does NOT use Supabase, new KV, new storage, or new service accounts.
+ * Exposes: window.SNXTv
  *
- *  Architecture (canonical — do not reconnect to the old Engine):
+ * Architecture:
+ *   - Channels stored in Firestore /tv_channels/{channelId}
+ *   - Media stored in Firestore /tv_media/{mediaId}  (references R2 URLs)
+ *   - Playback is entirely client-side: queue is built from channel's media,
+ *     advances on <video>/<audio> ended / error events.
+ *   - Founder authentication: window._snxRole === 'founder' (set by SNS auth)
+ *   - Uploads via POST /tv/upload-media on the Cloudflare Worker (Founder only)
  *
- *    SNS R2 Media (via Firestore tv_media)
- *          ↓
- *    tv_media   →  tv_playlists  →  tv_programs  →  tv_schedule
- *          ↓
- *    SNXTVTimeline  (snx-tv-timeline.js)
- *    ONE authoritative resolver — resolve(nowMs) → current item + offset
- *          ↓
- *    window.SNXTV  (this file)
- *    ├── TV Core  — state machine
- *    ├── Viewer   — <video> element + overlays
- *    ├── Now Playing / Up Next
- *    └── TV Guide
- *
- *  SNXTVStudio (snx-tv-studio.js) manages the Firestore collections above.
- *  It exposes getAdapterQueue() for adapter/playlist mode (no schedule).
- *
- *  Join-in-progress:
- *    loadItemAt(item, offsetSeconds) → seeks to authoritative offset on load.
- *
- *  Failure recovery:
- *    Media error / stall → bounded retry → re-resolve timeline → advance.
- *    Offline / online   → preserve last state / re-resolve on reconnect.
- *    Tab sleep / resume → visibilitychange + pageshow → re-resolve timeline.
- *
- *  This file replaces snx-tv.js Stage 3. No other file is required.
- * ════════════════════════════════════════════════════════════════════════
- *
- * Exposes: window.SNXTV
+ * Safety:
+ *   - Does NOT touch Radio, Live, Shadow Reaper, or any other SNS feature.
+ *   - Does NOT create a second Firebase app.
+ *   - Does NOT pause/interfere with Feed media (data-snx-media-exempt on TV video).
+ *   - Fully removable without affecting anything else.
  */
 
 'use strict';
 
 (function (global) {
 
-/* ════════════════════════════════════════════════════════════
-   ── TV CORE — CANONICAL STATE ──────────────────────────────
-════════════════════════════════════════════════════════════ */
+  /* ════════════════════════════════════════════════════════════
+     CONSTANTS
+  ════════════════════════════════════════════════════════════ */
 
-/**
- * @typedef {Object} TVItem
- * @property {string}  id           — unique item identifier
- * @property {string}  title        — display title
- * @property {string}  mediaType    — 'video' | 'audio'
- * @property {string}  mediaUrl     — playback URL (R2 CDN or external)
- * @property {string}  [artwork]    — artwork image URL (optional)
- * @property {number}  [duration]   — total duration in seconds (0 = unknown)
- */
+  const BUILD     = 'SNS-2026-TV-REBUILD-001';
+  const WORKER    = 'https://yellow-term-11e6.nthntjrn.workers.dev';
+  const LOG       = '[SNX-TV]';
 
-/**
- * @typedef {Object} TVState
- * @property {'idle'|'loading'|'playing'|'paused'|'error'|'offline'} status
- * @property {TVItem|null}  current      — currently loaded item
- * @property {TVItem|null}  next         — up-next item
- * @property {number}       elapsed      — current elapsed time in seconds
- * @property {number}       duration     — current item duration in seconds
- * @property {boolean}      onAir        — true when a real item is loaded/playing
- * @property {string|null}  error        — last error message
- * @property {boolean}      needsUserGesture — browser blocked autoplay
- * @property {Object|null}  program      — currently-scheduled program (or null)
- * @property {Object|null}  scheduleEntry— currently-scheduled entry (or null)
- * @property {boolean}      isScheduled  — true when playing from timeline
- * @property {boolean}      isGap        — true when schedule exists but nothing on air now
- * @property {string}       gapLabel
- * @property {boolean}      isOffline    — true when device is offline
- */
+  /* Firestore collection names */
+  const COL_CHANNELS = 'tv_channels';
+  const COL_MEDIA    = 'tv_media';
 
-var _state = {
-  status:           'idle',
-  current:          null,
-  next:             null,
-  elapsed:          0,
-  duration:         0,
-  onAir:            false,
-  error:            null,
-  needsUserGesture: false,
-  program:          null,
-  scheduleEntry:    null,
-  isScheduled:      false,
-  isGap:            false,
-  gapLabel:         '',
-  isOffline:        false,
-};
+  /* Media kind → emoji */
+  const KIND_ICON = { video: '🎬', audio: '🎵', image: '🖼' };
 
-/** Subscribers: functions called on every state change */
-var _subscribers = [];
-
-/** Queue cursor */
-var _queueIndex = 0;
-
-/**
- * Duration writeback: track which media IDs we have already written a real
- * duration for so we only fire ONE Firestore update per item per session.
- * { mediaId: true }
- */
-var _durationWrittenFor = {};
-
-/**
- * The last fully-resolved timeline state.
- * Stored so onMediaEnded can advance by queue position when item durations
- * are unknown (resolver cannot calculate position from wall clock alone).
- */
-var _lastResolvedState = null;
-
-/** Loaded playlist queue — set by _loadPlaylistQueue() */
-var _playlistQueue = null;
-
-/* ── Stage 3/4: Timeline integration ── */
-
-/** True when scheduled mode is active (SNXTVTimeline is driving) */
-var _scheduleMode     = false;
-
-/** Unsubscribe handle for SNXTVTimeline */
-var _unsubTimeline    = null;
-
-/** The item URL we last loaded via timeline (to avoid double-loading) */
-var _tlMediaLoaded    = null;
-
-/** Flag to prevent re-entrancy in _onTimelineChange */
-var _tlChanging       = false;
-
-/* ── Stage 4: Media failure / stall recovery ── */
-
-/**
- * Bounded retry counter for media errors.
- * Reset when a new item is loaded successfully.
- */
-var _mediaErrorCount  = 0;
-var MAX_MEDIA_RETRIES = 3;
-
-/** Stall detection timer */
-var _stallTimer       = null;
-var STALL_TIMEOUT_MS  = 15000; // 15 s of stall = recovery attempt
-
-/** Whether we're currently in a media recovery attempt */
-var _recovering       = false;
-
-/* ── State helpers ── */
-
-function _setState(patch) {
-  Object.assign(_state, patch);
-  _notifySubscribers();
-}
-
-function _notifySubscribers() {
-  var snapshot = Object.assign({}, _state);
-  for (var i = 0; i < _subscribers.length; i++) {
-    try { _subscribers[i](snapshot); } catch (e) { /* never crash TV on subscriber error */ }
-  }
-}
-
-/* ── Public Core API ── */
-
-/**
- * Subscribe to TV state changes.
- * @param {function} fn  Called with the current TVState on every change.
- * @returns {function}   Unsubscribe function.
- */
-function subscribe(fn) {
-  _subscribers.push(fn);
-  try { fn(Object.assign({}, _state)); } catch (e) {}
-  return function unsubscribe() {
-    _subscribers = _subscribers.filter(function (s) { return s !== fn; });
-  };
-}
-
-/**
- * Read the current TV state snapshot.
- * @returns {TVState}
- */
-function getState() {
-  return Object.assign({}, _state);
-}
-
-/**
- * Load a specific TV item into the Core.
- * @param {TVItem} item
- */
-function loadItem(item) {
-  if (!item || !item.mediaUrl) {
-    _setState({ status: 'error', error: 'No media URL', onAir: false });
-    return;
-  }
-  _clearStallTimer();
-  _mediaErrorCount = 0;
-  _recovering = false;
-  _setState({
-    status:           'loading',
-    current:          item,
-    elapsed:          0,
-    duration:         item.duration || 0,
-    onAir:            false,
-    error:            null,
-    needsUserGesture: false
-  });
-}
-
-/**
- * Load an item and seek to the given offset (seconds).
- * Used by the timeline for join-in-progress / resync.
- * @param {TVItem} item
- * @param {number} offsetSeconds
- */
-function loadItemAt(item, offsetSeconds) {
-  if (!item || !item.mediaUrl) {
-    _setState({ status: 'error', error: 'No media URL', onAir: false });
-    return;
-  }
-  _clearStallTimer();
-  _mediaErrorCount = 0;
-  _recovering = false;
-  _tlMediaLoaded = item.mediaUrl;
-  _setState({
-    status:           'loading',
-    current:          item,
-    elapsed:          offsetSeconds || 0,
-    duration:         item.duration || 0,
-    onAir:            false,
-    error:            null,
-    needsUserGesture: false
-  });
-
-  var v = _el.video;
-  if (!v) return;
-
-  var doSeek = function () {
-    if (offsetSeconds > 0) {
-      v.currentTime = offsetSeconds;
-    }
-    var playP = v.play();
-    if (playP !== undefined) {
-      playP.catch(function (err) {
-        if (err.name === 'NotAllowedError') onAutoplayBlocked();
-        else onMediaError(err.message);
-      });
-    }
+  /* Default channel created if none exist */
+  const DEFAULT_CHANNEL = {
+    id: 'shadow-nexus-tv',
+    name: 'Shadow Nexus TV',
+    description: '24-Hour continuous television',
+    artworkUrl: '',
+    mediaKind: 'video',
+    order: 0,
+    createdAt: Date.now(),
   };
 
-  if (v.src !== item.mediaUrl) {
-    v.src     = item.mediaUrl;
-    v.preload = 'auto';
-    v.oncanplay = function () {
-      v.oncanplay = null;
-      doSeek();
-    };
-  } else {
-    doSeek();
-  }
-}
-
-/**
- * Advance to the next queued item (adapter/playlist mode).
- */
-function advance() {
-  var queue = _getQueue();
-  if (!queue.length) {
-    _setState({ status: 'idle', current: null, next: null, onAir: false });
-    return;
-  }
-  _queueIndex = (_queueIndex + 1) % queue.length;
-  var item = queue[_queueIndex];
-  var nextItem = queue[(_queueIndex + 1) % queue.length];
-  _setState({ next: nextItem });
-  loadItem(item);
-}
-
-/**
- * Called by the Viewer's media element on 'canplay'.
- */
-function onMediaReady() {
-  _clearStallTimer();
-  _setState({ status: 'loading', onAir: true });
-}
-
-/**
- * Called by the Viewer when playback actually starts.
- */
-function onPlaybackStarted() {
-  _clearStallTimer();
-  _mediaErrorCount = 0;
-  _recovering = false;
-  _setState({ status: 'playing', onAir: true, needsUserGesture: false });
-  // Re-apply volume on every track start (preserves volume through track/channel changes).
-  // Also resume AudioContext in case a gesture happened and it hadn't been resumed yet.
-  _resumeAudioContext();
-  _applyVolume();
-}
-
-/**
- * Called by the Viewer when playback is paused (not ended).
- */
-function onPlaybackPaused() {
-  _clearStallTimer();
-  _setState({ status: 'paused' });
-}
-
-/**
- * Called by the Viewer on media 'timeupdate'.
- * @param {number} elapsed
- * @param {number} duration
- */
-function onTimeUpdate(elapsed, duration) {
-  _state.elapsed  = elapsed;
-  _state.duration = duration;
-  _notifySubscribers();
-  // Reset stall timer on progress
-  if (_state.status === 'playing') {
-    _resetStallTimer();
-  }
-  // Update duration in state and write back to Firestore tv_media if newly discovered.
-  // This is the ONLY reliable moment we learn real media duration — on first timeupdate
-  // after the media element reports a finite, non-zero duration.
-  if (duration > 0) {
-    var cur = _state.current;
-    if (cur && (!cur.duration || cur.duration !== duration)) {
-      _state.duration = duration;
-      cur.duration    = duration;
-      // Write real duration back to tv_media so the timeline resolver can calculate
-      // playlist positions correctly on subsequent calls (avoids the dur=0 → always-item-0 bug).
-      _writeDurationToFirestore(cur.id, duration);
-    }
-  }
-}
-
-/**
- * Write the real media duration back to the tv_media Firestore document.
- * Fires at most once per media ID per browser session (guarded by _durationWrittenFor).
- * Non-blocking — failure is non-fatal (resolver degrades gracefully).
- */
-function _writeDurationToFirestore(mediaId, duration) {
-  if (!mediaId || !duration || _durationWrittenFor[mediaId]) return;
-  _durationWrittenFor[mediaId] = true;
-
-  // Access Firestore via the Studio module — it holds the Firebase references
-  var fs = global._snxFirestore;
-  if (!fs || !fs.db) return;
-  var db = fs.db;
-  try {
-    var docFn  = fs.doc;
-    var updFn  = fs.updateDoc;
-    if (!docFn || !updFn) return;
-    updFn(docFn(db, 'tv_media', mediaId), { duration: Math.round(duration) })
-      .catch(function (e) {
-        // Non-fatal — another viewer may not have write permission; that is fine.
-        // Duration will be correct in memory for the current session.
-        delete _durationWrittenFor[mediaId];
-        console.info('[SNX TV] duration writeback skipped (non-fatal):', e.message);
-      });
-  } catch (e) {
-    delete _durationWrittenFor[mediaId];
-  }
-}
-
-/**
- * Called when media playback ends.
- * Re-resolve from timeline (schedule mode) or advance (adapter mode).
- *
- * Strategy:
- *   A) If the current item has a known duration (> 0): resolve with nowMs + 1 s
- *      so the resolver steps past the just-finished item's boundary.
- *   B) If the current item's duration is unknown (= 0, common right after upload):
- *      the wall-clock resolver cannot determine which item is next.
- *      Use _lastResolvedState.nextItem (pre-calculated by the resolver) to load
- *      directly without re-resolving, bypassing the wall-clock limitation.
- *      After this load, _writeDurationToFirestore will have stored the real
- *      duration so future resolves work correctly.
- */
-function onMediaEnded() {
-  _clearStallTimer();
-  _mediaErrorCount = 0;
-  _recovering = false;
-
-  if (_scheduleMode && global.SNXTVTimeline) {
-    var curItem  = _state.current;
-    var curDur   = curItem ? (curItem.duration || 0) : 0;
-
-    if (curDur > 0) {
-      // Known duration — re-resolve 1 s past end so resolver steps to next item.
-      var endedResolved = global.SNXTVTimeline.resolve(Date.now() + 1000);
-      _applyTimelineState(endedResolved, true);
-    } else {
-      // Unknown duration — use queue from last resolved state to advance by position.
-      // This avoids the wall-clock bug where resolver always returns item[0].
-      _advanceByQueue();
-    }
-  } else {
-    advance();
-  }
-}
-
-/**
- * Advance to the next item using the queue cached in _lastResolvedState.
- * Called from onMediaEnded when the current item's duration is unknown.
- *
- * The queue in resolved state is [ items after currentItem in the program ].
- * nextItem is the first element of that queue (or items[0] on loop).
- *
- * After loading the next item the resolver will get a fresh wall-clock position
- * on the NEXT ended event (because _writeDurationToFirestore will have run).
- */
-function _advanceByQueue() {
-  var resolved;
-
-  if (!_lastResolvedState) {
-    // No cached state — fall back to full re-resolve (may restart song 1, but it's
-    // the best we can do without any prior context).
-    resolved = global.SNXTVTimeline.resolve(Date.now());
-    _applyTimelineState(resolved, true);
-    return;
-  }
-
-  var last     = _lastResolvedState;
-  var nextItem = last.nextItem;
-
-  // Check if the program's schedule window has ended.
-  var nowMs = Date.now();
-  resolved = global.SNXTVTimeline.resolve(nowMs);
-
-  // If the resolved state points to a different program or a gap, let the
-  // normal timeline take over (program ended, advance to next scheduled program).
-  if (!resolved || resolved.mode === 'gap' || resolved.mode === 'noSchedule' ||
-      (resolved.scheduleEntry && last.scheduleEntry &&
-       resolved.scheduleEntry.id !== last.scheduleEntry.id)) {
-    _applyTimelineState(resolved, true);
-    return;
-  }
-
-  // Program still active. Load next item from cached queue.
-  if (!nextItem || !nextItem.mediaUrl) {
-    // Queue exhausted — re-resolve; this will loop to first item.
-    _applyTimelineState(resolved, true);
-    return;
-  }
-
-  // Build a synthetic "next" from the queue (item after nextItem).
-  var queue    = last.queue || [];
-  var nextIdx  = queue.indexOf(nextItem);
-  var afterNext = (nextIdx >= 0 && nextIdx + 1 < queue.length)
-    ? queue[nextIdx + 1]
-    : (resolved.nextItem || null);
-
-  _setState({
-    next:          afterNext || null,
-    program:       last.program || null,
-    scheduleEntry: last.scheduleEntry || null,
-    isScheduled:   true,
-    isGap:         false,
-    gapLabel:      '',
-  });
-
-  _tlMediaLoaded = nextItem.mediaUrl;
-  if (_viewerReady) loadItemAt(nextItem, 0);
-  _opened = true;
-
-  // Update _lastResolvedState so the NEXT ended event has an accurate queue.
-  // Shift the queue: nextItem becomes current, rest remains.
-  _lastResolvedState = Object.assign({}, last, {
-    currentItem: nextItem,
-    itemOffset:  0,
-    nextItem:    afterNext || null,
-    queue:       queue.slice(nextIdx + 1),
-  });
-}
-
-/**
- * Called when the browser blocks autoplay.
- */
-function onAutoplayBlocked() {
-  _clearStallTimer();
-  _setState({ status: 'paused', needsUserGesture: true, onAir: true });
-}
-
-/**
- * Called on media error.
- * Stage 4: bounded retry / timeline re-resolve.
- * @param {string} msg
- */
-function onMediaError(msg) {
-  _clearStallTimer();
-  _mediaErrorCount++;
-
-  // If we haven't exceeded retries and we're in schedule mode, re-resolve
-  if (_scheduleMode && global.SNXTVTimeline && _mediaErrorCount <= MAX_MEDIA_RETRIES) {
-    console.warn('[SNX TV] Media error (' + _mediaErrorCount + '/' + MAX_MEDIA_RETRIES + '):', msg, '— re-resolving timeline');
-    var resolved = global.SNXTVTimeline.resolve(Date.now());
-    // If another item should be playing, move to it
-    if (resolved && resolved.mode === 'playing' && resolved.currentItem &&
-        resolved.currentItem.mediaUrl !== (_state.current && _state.current.mediaUrl)) {
-      _applyTimelineState(resolved, true);
-      return;
-    }
-    // Same item failed: try a single reload after a short delay
-    if (_mediaErrorCount < MAX_MEDIA_RETRIES) {
-      setTimeout(function () {
-        if (_state.current && _state.current.mediaUrl) {
-          var v = _el.video;
-          if (v) {
-            v.load();
-            v.play().catch(function () {});
-          }
-        }
-      }, 2000 * _mediaErrorCount);
-      _setState({ status: 'loading', error: null });
-      return;
-    }
-    // Exhausted retries — show unavailable and let schedule advance naturally
-    _mediaErrorCount = 0;
-    _applyTimelineState(resolved, true);
-    return;
-  }
-
-  // Adapter/playlist mode or retries exhausted
-  _setState({ status: 'error', error: msg || 'Playback error', onAir: false });
-}
-
-/* ── Stage 4: Stall detection ── */
-
-function _clearStallTimer() {
-  if (_stallTimer) {
-    clearTimeout(_stallTimer);
-    _stallTimer = null;
-  }
-}
-
-function _resetStallTimer() {
-  _clearStallTimer();
-  if (_state.status !== 'playing') return;
-  _stallTimer = setTimeout(_onStallTimeout, STALL_TIMEOUT_MS);
-}
-
-function _onStallTimeout() {
-  _stallTimer = null;
-  if (_state.status !== 'playing' && _state.status !== 'loading') return;
-  if (_recovering) {
-    // Already tried — give up gracefully
-    _recovering = false;
-    onMediaError('Playback stalled — could not recover');
-    return;
-  }
-  _recovering = true;
-  console.warn('[SNX TV] Stall detected — attempting recovery');
-
-  if (_scheduleMode && global.SNXTVTimeline) {
-    // Re-resolve — seek to authoritative position
-    var resolved = global.SNXTVTimeline.resolve(Date.now());
-    if (resolved && resolved.mode === 'playing' && resolved.currentItem) {
-      var v = _el.video;
-      if (v) {
-        var target = resolved.itemOffset || 0;
-        // Try seek first
-        try {
-          if (isFinite(v.duration) && v.duration > 0) {
-            v.currentTime = Math.min(target, v.duration - 0.5);
-          }
-          v.play().catch(function () {});
-        } catch (e) {}
-        _recovering = false;
-        return;
-      }
-    }
-    // Can't recover — re-resolve
-    _applyTimelineState(resolved, true);
-    _recovering = false;
-  } else {
-    // Adapter mode — reload current
-    var v2 = _el.video;
-    if (v2 && _state.current && _state.current.mediaUrl) {
-      v2.load();
-      v2.play().catch(function () {});
-    }
-    _recovering = false;
-  }
-}
-
-/* ════════════════════════════════════════════════════════════
-   ── TV MEDIA ADAPTER ──────────────────────────────────────
-   Delegates to SNXTVStudio (snx-tv-studio.js).
-   TV Core and Viewer never query Firestore directly.
-════════════════════════════════════════════════════════════ */
-
-function _getQueue() {
-  if (global.SNXTVStudio && typeof global.SNXTVStudio.getAdapterQueue === 'function') {
-    return global.SNXTVStudio.getAdapterQueue();
-  }
-  return [];
-}
-
-/* ════════════════════════════════════════════════════════════
-   ── TV VIEWER ──────────────────────────────────────────────
-   Reads TV Core state and updates the #tvPage DOM.
-   Uses one <video> element for both video and audio media.
-════════════════════════════════════════════════════════════ */
-
-/** References to DOM elements, populated once on init */
-var _el = {
-  page:               null,
-  video:              null,
-  artwork:            null,
-  artworkImg:         null,
-  artworkBg:          null,
-  artworkGlow:        null,
-  artworkTitle:       null,
-  artworkArtist:      null,
-  visualizer:         null,
-  fallback:           null,
-  fallbackLabel:      null,
-  tapOverlay:         null,
-  tapBtn:             null,
-  loadingOverlay:     null,
-  unavailableOverlay: null,
-  unavailableMsg:     null,
-  onairBadge:         null,
-  onairDot:           null,
-  onairText:          null,
-  npTitle:            null,
-  npArtist:           null,
-  npTypeBadge:        null,
-  progressFill:       null,
-  timeDisplay:        null,
-  unTitle:            null,
-  unSub:              null,
-  unThumb:            null,
-  unEmpty:            null,
-  fullscreenBtn:      null,
-  guideList:          null,
-  guideToggle:        null,
-  guideContent:       null,
-  // Volume controls
-  muteBtn:            null,
-  volumeSlider:       null,
-  channelSelector:    null,
-};
-
-/* ── Volume state (persisted in sessionStorage) ── */
-var _volume      = 0.8;   // 0–1; default 80%
-var _muted       = false;
-var _volumeInited = false;
-
-function _loadVolumePrefs() {
-  if (_volumeInited) return;
-  _volumeInited = true;
-  try {
-    var sv = sessionStorage.getItem('snxTvVolume');
-    var sm = sessionStorage.getItem('snxTvMuted');
-    if (sv !== null) _volume = Math.max(0, Math.min(1, parseFloat(sv) || 0.8));
-    if (sm !== null) _muted  = sm === '1';
-  } catch (e) {}
-}
-
-function _saveVolumePrefs() {
-  try {
-    sessionStorage.setItem('snxTvVolume', String(_volume));
-    sessionStorage.setItem('snxTvMuted',  _muted ? '1' : '0');
-  } catch (e) {}
-}
-
-function _applyVolume() {
-  var v = _el.video;
-  if (!v) return;
-  // Set the element volume only when the Web Audio graph is NOT connected.
-  // Once createMediaElementSource() is called, v.volume has no effect on
-  // audible output — the gainNode controls it exclusively.
-  var webAudioActive = !!(_snxViz._gainNode);
-  if (!webAudioActive) {
-    v.volume = _muted ? 0 : _volume;
-  }
-  v.muted  = false;  // Never use the element's muted property
-  if (_el.muteBtn)      _el.muteBtn.textContent  = _muted ? '🔇' : '🔊';
-  if (_el.volumeSlider) _el.volumeSlider.value    = String(Math.round((_muted ? 0 : _volume) * 100));
-  // Sync Web Audio gainNode
-  if (_snxViz._gainNode) {
-    _snxViz._gainNode.gain.value = _muted ? 0 : _volume;
-  }
-  // Always try to resume a suspended AudioContext when applying volume
-  // (volume interactions are user gestures that unblock autoplay).
-  _resumeAudioContext();
-}
-
-/**
- * Resume the Web Audio context after a user gesture.
- * MUST be called from any user-initiated event handler.
- * Returns a Promise that resolves when the context is running (or immediately
- * if it was already running, or if there is no Web Audio context).
- */
-function _resumeAudioContext() {
-  var ctx = _snxViz._audioCtx;
-  if (ctx && ctx.state === 'suspended') {
-    return ctx.resume().catch(function () { return Promise.resolve(); });
-  }
-  return Promise.resolve();
-}
-
-var _viewerReady = false;
-var _mediaLoaded = false;  // last media URL loaded into the element (adapter mode)
-
-function _initViewer() {
-  // Idempotent — only run once per DOM lifecycle
-  if (_viewerReady) return;
-
-  _el.page              = document.getElementById('tvPage');
-  _el.video             = document.getElementById('snxTvVideo');
-  _el.artwork           = document.getElementById('snxTvArtwork');
-  _el.artworkImg        = document.getElementById('snxTvArtworkImg');
-  _el.artworkBg         = document.getElementById('snxTvArtworkBg');
-  _el.artworkGlow       = document.getElementById('snxTvArtworkGlow');
-  _el.artworkTitle      = document.getElementById('snxTvArtworkTitle');
-  _el.artworkArtist     = document.getElementById('snxTvArtworkArtist');
-  _el.visualizer        = document.getElementById('snxTvVisualizer');
-  _el.fallback          = document.getElementById('snxTvFallback');
-  _el.fallbackLabel     = document.getElementById('snxTvFallbackLabel');
-  _el.tapOverlay        = document.getElementById('snxTvTapOverlay');
-  _el.tapBtn            = document.getElementById('snxTvTapBtn');
-  _el.loadingOverlay    = document.getElementById('snxTvLoadingOverlay');
-  _el.unavailableOverlay= document.getElementById('snxTvUnavailableOverlay');
-  _el.unavailableMsg    = document.getElementById('snxTvUnavailableMsg');
-  _el.onairBadge        = document.getElementById('snxTvOnAirBadge');
-  _el.onairDot          = document.getElementById('snxTvOnAirDot');
-  _el.onairText         = document.getElementById('snxTvOnAirText');
-  _el.npTitle           = document.getElementById('snxTvNpTitle');
-  _el.npArtist          = document.getElementById('snxTvNpArtist');
-  _el.npTypeBadge       = document.getElementById('snxTvNpTypeBadge');
-  _el.progressFill      = document.getElementById('snxTvProgressFill');
-  _el.timeDisplay       = document.getElementById('snxTvTimeDisplay');
-  _el.unTitle           = document.getElementById('snxTvUnTitle');
-  _el.unSub             = document.getElementById('snxTvUnSub');
-  _el.unThumb           = document.getElementById('snxTvUnThumb');
-  _el.unEmpty           = document.getElementById('snxTvUnEmpty');
-  _el.fullscreenBtn     = document.getElementById('snxTvFullscreenBtn');
-  _el.guideList         = document.getElementById('snxTvGuideList');
-  _el.guideToggle       = document.getElementById('snxTvGuideToggle');
-  _el.guideContent      = document.getElementById('snxTvGuideContent');
-  _el.muteBtn           = document.getElementById('snxTvMuteBtn');
-  _el.volumeSlider      = document.getElementById('snxTvVolumeSlider');
-  _el.channelSelector   = document.getElementById('snxTvChannelSelect');
-
-  if (!_el.video) {
-    console.warn('[SNX TV] Viewer elements not found — is #tvPage in the DOM?');
-    return;
-  }
-
-  // Load persisted volume preferences before attaching listeners
-  _loadVolumePrefs();
-
-  _attachMediaListeners();
-  _attachTapOverlay();
-  _attachVolumeControls();
-  _attachFullscreen();
-  _attachGuideToggle();
-
-  // Apply initial volume to the element
-  _applyVolume();
-
-  // Subscribe the viewer to TV Core state
-  subscribe(_renderState);
-
-  _viewerReady = true;
-}
-
-/* ── TV Guide toggle ── */
-
-function _attachGuideToggle() {
-  var btn = _el.guideToggle;
-  var content = _el.guideContent;
-  if (!btn || !content) return;
-  btn.addEventListener('click', function () {
-    var open = content.classList.toggle('snx-tv-guide-content--open');
-    btn.textContent = open ? '▲' : '▼';
-    if (open) _renderGuide();
-  });
-}
-
-/* ── Wire up the HTML media element ── */
-
-function _attachMediaListeners() {
-  var v = _el.video;
-  if (!v) return;
-
-  v.addEventListener('canplay', function () {
-    onMediaReady();
-  });
-
-  v.addEventListener('playing', function () {
-    onPlaybackStarted();
-  });
-
-  v.addEventListener('pause', function () {
-    // Don't fire paused if the element has ended — that's handled by 'ended'
-    if (!v.ended) onPlaybackPaused();
-  });
-
-  v.addEventListener('timeupdate', function () {
-    var elapsed  = isFinite(v.currentTime)  ? v.currentTime  : 0;
-    var duration = isFinite(v.duration)     ? v.duration     : 0;
-    onTimeUpdate(elapsed, duration);
-    if (duration > 0 && _state.duration !== duration) {
-      _state.duration = duration;
-      if (_state.current) _state.current.duration = duration;
-    }
-  });
-
-  v.addEventListener('ended', function () {
-    onMediaEnded();
-  });
-
-  v.addEventListener('error', function () {
-    var msg = 'Media unavailable';
-    if (v.error) {
-      switch (v.error.code) {
-        case 1: msg = 'Media loading aborted'; break;
-        case 2: msg = 'Network error while loading media'; break;
-        case 3: msg = 'Media format not supported'; break;
-        case 4: msg = 'Media source not supported'; break;
-      }
-    }
-    onMediaError(msg);
-  });
-
-  v.addEventListener('waiting', function () {
-    if (_state.status === 'playing') {
-      _setState({ status: 'loading' });
-      // Start stall timer when buffering begins
-      _resetStallTimer();
-    }
-  });
-
-  v.addEventListener('stalled', function () {
-    // Stalled event — start stall timer if playing/loading
-    if (_state.status === 'playing' || _state.status === 'loading') {
-      _resetStallTimer();
-    }
-  });
-
-  v.addEventListener('playing', function () {
-    // Clear stall timer on resume after buffering
-    _clearStallTimer();
-  });
-}
-
-function _attachTapOverlay() {
-  var btn = _el.tapBtn;
-  if (!btn) return;
-  btn.addEventListener('click', function () {
-    _hideTapOverlay();
-
-    var v = _el.video;
-    if (!v) return;
-
-    // ── AUDIO FIX: Build graph + resume AudioContext BEFORE playing ──────
-    // The Web Audio graph MUST be created from a user-gesture call stack so
-    // the browser allows AudioContext.resume() to succeed (required on iOS
-    // Safari and Chromium when autoplay policy is active).
-    // createMediaElementSource() permanently routes all audio through the
-    // Web Audio graph, so a suspended context = total silence.
-    _snxViz.ensureGraph(v);
-    _resumeAudioContext().then(function () {
-      // Ensure volume/gain is applied now that context is confirmed running.
-      _applyVolume();
-
-      // Stage 4: after user gesture, re-calculate the correct offset before playing.
-      // Autoplay may have been blocked for seconds/minutes; time has passed.
-      if (_scheduleMode && global.SNXTVTimeline) {
-        var resolved = global.SNXTVTimeline.resolve(Date.now());
-        if (resolved && resolved.mode === 'playing' && resolved.currentItem) {
-          var offset = resolved.itemOffset || 0;
-          if (resolved.currentItem.mediaUrl !== (v.src || '')) {
-            // Different item should be on air now
-            _applyTimelineState(resolved, true);
-            return;
-          }
-          // Seek to correct offset, then play
-          try {
-            if (isFinite(v.duration) && v.duration > 0) {
-              v.currentTime = Math.min(offset, v.duration - 0.5);
-            } else if (offset > 0) {
-              v.currentTime = offset;
-            }
-          } catch (e) {}
-          v.play().catch(function (e) {
-            console.warn('[SNX TV] Play after tap rejected:', e.message);
-            onMediaError('Playback could not start');
-          });
-          return;
-        }
-        // Gap or no schedule — re-apply timeline state
-        _applyTimelineState(resolved, false);
-        return;
-      }
-
-      // Adapter mode — just play from current position
-      v.play().catch(function (e) {
-        console.warn('[SNX TV] Play after tap rejected:', e.message);
-        onMediaError('Playback could not start');
-      });
-    });
-  });
-}
-
-/* ── Volume controls ── */
-
-function _attachVolumeControls() {
-  var muteBtn = _el.muteBtn;
-  var slider  = _el.volumeSlider;
-
-  if (muteBtn) {
-    muteBtn.addEventListener('click', function () {
-      _muted = !_muted;
-      _saveVolumePrefs();
-      // Build the Web Audio graph from this user gesture if not yet built,
-      // then resume the AudioContext so audio flows through the graph.
-      var v = _el.video;
-      if (v) _snxViz.ensureGraph(v);
-      _resumeAudioContext().then(function () { _applyVolume(); });
-    });
-  }
-
-  if (slider) {
-    slider.addEventListener('input', function () {
-      var val = parseInt(slider.value, 10) || 0;
-      _volume = val / 100;
-      _muted  = (val === 0);
-      _saveVolumePrefs();
-      // Build the Web Audio graph from this user gesture if not yet built,
-      // then resume the AudioContext so audio flows through the graph.
-      var v = _el.video;
-      if (v) _snxViz.ensureGraph(v);
-      _resumeAudioContext().then(function () { _applyVolume(); });
-    });
-  }
-}
-
-function _attachFullscreen() {
-  var btn = _el.fullscreenBtn;
-  if (!btn) return;
-  btn.addEventListener('click', function () {
-    var wrap = document.getElementById('snxTvPlayerWrap');
-    if (!wrap) return;
-    try {
-      if (wrap.requestFullscreen) {
-        wrap.requestFullscreen().catch(function (e) {
-          console.info('[SNX TV] Fullscreen request denied:', e.message);
-        });
-      } else if (wrap.webkitRequestFullscreen) {
-        wrap.webkitRequestFullscreen();
-      } else {
-        console.info('[SNX TV] Fullscreen not supported on this device.');
-      }
-    } catch (e) {
-      console.info('[SNX TV] Fullscreen error (non-fatal):', e.message);
-    }
-  });
-}
-
-/* ── Render: reflect TV Core state into the DOM ── */
-
-function _renderState(state) {
-  if (!_viewerReady) return;
-
-  _renderOnAir(state);
-  _renderPlayer(state);
-  _renderNowPlaying(state);
-  _renderUpNext(state);
-  // Update guide only if it's open (performance)
-  if (_el.guideContent && _el.guideContent.classList.contains('snx-tv-guide-content--open')) {
-    _renderGuide();
-  }
-}
-
-function _renderOnAir(state) {
-  var badge = _el.onairBadge;
-  var text  = _el.onairText;
-  if (!badge) return;
-  if (state.onAir && state.status !== 'error') {
-    badge.classList.remove('offline');
-    if (text) text.textContent = 'ON AIR';
-  } else {
-    badge.classList.add('offline');
-    if (text) text.textContent = state.isOffline ? 'OFFLINE' : (state.status === 'idle' ? 'OFF AIR' : 'LOADING');
-  }
-}
-
-function _renderPlayer(state) {
-  var v           = _el.video;
-  var artworkWrap = _el.artwork;
-  var artImg      = _el.artworkImg;
-  var visualizer  = _el.visualizer;
-  var fallback    = _el.fallback;
-  var loading     = _el.loadingOverlay;
-  var unavail     = _el.unavailableOverlay;
-  var unavailMsg  = _el.unavailableMsg;
-  var tap         = _el.tapOverlay;
-
-  if (!v) return;
-
-  var item = state.current;
-
-  // ── Load media into element if URL changed (adapter/playlist mode only) ──
-  // In scheduled mode, loadItemAt() handles the load+seek.
-  if (!_scheduleMode && item && item.mediaUrl && item.mediaUrl !== _mediaLoaded) {
-    _mediaLoaded = item.mediaUrl;
-    v.src     = item.mediaUrl;
-    v.preload = 'auto';
-    var playPromise = v.play();
-    if (playPromise !== undefined) {
-      playPromise.catch(function (err) {
-        if (err.name === 'NotAllowedError') {
-          onAutoplayBlocked();
-        } else {
-          onMediaError(err.message);
-        }
-      });
-    }
-  }
-
-  // ── Determine display mode ──
-  // audioVisualMode from channel settings: 'auto' | 'artwork' | 'visualizer'
-  var avMode   = _getAudioVisualMode();
-  var isVideo  = item && item.mediaType === 'video';
-  var isAudio  = item && item.mediaType === 'audio';
-  var hasArtwork = item && item.artwork;
-
-  // Priority: video → video player. Audio: per mode.
-  var showVideo      = !!(item && isVideo);
-  var showArtwork    = false;
-  var showVisualizer = false;
-
-  if (isAudio) {
-    if (avMode === 'visualizer') {
-      showVisualizer = true;
-    } else if (avMode === 'artwork') {
-      // Artwork preferred; fall back to visualizer only if truly no artwork
-      if (hasArtwork) {
-        showArtwork = true;
-      } else {
-        showVisualizer = true;
-      }
-    } else {
-      // AUTO (default): artwork if available, visualizer if not
-      if (hasArtwork) {
-        showArtwork = true;
-      } else {
-        showVisualizer = true;
-      }
-    }
-  }
-
-  var showFallback = !item || (!isVideo && !isAudio);
-
-  _setVisible(v,           showVideo);
-  _setVisible(artworkWrap, showArtwork);
-  _setVisible(visualizer,  showVisualizer);
-  _setVisible(fallback,    showFallback);
-
-  // ── Update artwork presentation ──
-  if (showArtwork && artImg) {
-    if (artImg.dataset.snxSrc !== item.artwork) {
-      artImg.dataset.snxSrc = item.artwork;
-      artImg.src = item.artwork;
-      _updateArtworkPresentation(item);
-    }
-  }
-
-  // ── Update artwork overlay metadata ──
-  if (showArtwork) {
-    if (_el.artworkTitle) _el.artworkTitle.textContent = item.title || '';
-    if (_el.artworkArtist) _el.artworkArtist.textContent = item.artist || '';
-  }
-
-  // ── Drive the audio visual engine ──
-  if (showVisualizer) {
-    _snxViz.start(v, item);
-  } else {
-    _snxViz.stop();
-  }
-
-  if (showArtwork) {
-    _snxArtwork.start(item, state);
-  } else {
-    _snxArtwork.stop();
-  }
-
-  // ── Overlays ──
-  var showLoading = (state.status === 'loading') && !state.needsUserGesture;
-  var showUnavail = state.status === 'error' || state.status === 'offline' ||
-                   (state.status === 'idle' && !item) || state.isOffline;
-  var showTap     = state.needsUserGesture;
-
-  _setOverlayVisible(loading,  showLoading && !showUnavail && !showTap);
-  _setOverlayVisible(unavail,  showUnavail && !showLoading && !showTap);
-  _setOverlayVisible(tap,      showTap);
-
-  if (unavailMsg) {
-    if (state.isOffline) {
-      unavailMsg.textContent = 'No internet connection — please reconnect to watch.';
-    } else if (state.status === 'error') {
-      unavailMsg.textContent = state.error || 'Media unavailable';
-    } else if (state.status === 'offline') {
-      var chName = global.SNXTVChannels && typeof global.SNXTVChannels.getChannels === 'function'
-        ? (function() {
-            var sel = global.SNXTVChannels.getSelectedId ? global.SNXTVChannels.getSelectedId() : null;
-            var list = global.SNXTVChannels.getChannels();
-            var ch = list.find(function(c) { return c.id === sel; });
-            return ch ? ch.name : null;
-          })()
-        : null;
-      unavailMsg.textContent = chName
-        ? 'No media in ' + chName + '. Open TV Studio → Media to add content to this channel.'
-        : 'No media in this channel. Open TV Studio → Media to add content.';
-    } else if (state.status === 'idle' && state.isGap) {
-      unavailMsg.textContent = state.gapLabel || 'Programming Resumes Soon';
-    } else if (state.status === 'idle') {
-      unavailMsg.textContent = 'Shadow Nexus TV is warming up…';
-    }
-  }
-}
-
-/** Get channel audio-visual mode from TV settings (cached in SNXTVTimeline or Studio) */
-function _getAudioVisualMode() {
-  // Try timeline settings cache first, then studio settings cache
-  var cfg = null;
-  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getSettings === 'function') {
-    cfg = global.SNXTVTimeline.getSettings();
-  }
-  if (!cfg && global.SNXTVStudio && typeof global.SNXTVStudio.getSettings === 'function') {
-    cfg = global.SNXTVStudio.getSettings();
-  }
-  if (!cfg && global._snxTvSettings) {
-    cfg = global._snxTvSettings;
-  }
-  return (cfg && cfg.audioVisualMode) || 'auto';
-}
-
-/** Apply artwork cinematic presentation — blurred bg + glow color */
-function _updateArtworkPresentation(item) {
-  if (!item || !item.artwork) return;
-  var bg   = _el.artworkBg;
-  var glow = _el.artworkGlow;
-  if (bg)   bg.style.backgroundImage = 'url(' + _esc(item.artwork) + ')';
-  if (glow) glow.style.setProperty('--snx-glow-src', 'url(' + _esc(item.artwork) + ')');
-}
-
-function _renderNowPlaying(state) {
-  var title  = _el.npTitle;
-  var artist = _el.npArtist;
-  var badge  = _el.npTypeBadge;
-  var fill   = _el.progressFill;
-  var time   = _el.timeDisplay;
-
-  var item  = state.current;
-
-  if (title) {
-    if (item) {
-      var progName = (state.program && state.program.name) ? state.program.name : null;
-      title.textContent = (progName && progName !== item.title)
-        ? progName + ' — ' + (item.title || 'Loading…')
-        : (item.title || 'Loading…');
-    } else if (state.isGap) {
-      title.textContent = state.gapLabel || 'Programming Resumes Soon';
-    } else {
-      title.textContent = '—';
-    }
-  }
-
-  // Artist line — shown for audio items with an artist field
-  if (artist) {
-    var artistName = (item && item.mediaType === 'audio' && item.artist) ? item.artist : '';
-    artist.textContent  = artistName;
-    artist.style.display = artistName ? '' : 'none';
-  }
-
-  if (badge) {
-    var type = (item && item.mediaType) || '';
-    badge.textContent   = type ? type.toUpperCase() : (state.isGap ? 'SCHEDULED' : 'TV');
-    badge.className     = 'snx-tv-np-type-badge' + (type === 'audio' ? ' audio' : '');
-  }
-
-  // Progress
-  var elapsed  = state.elapsed  || 0;
-  var duration = state.duration || 0;
-  var pct = (duration > 0) ? Math.min(100, (elapsed / duration) * 100) : 0;
-  if (fill) fill.style.width = pct + '%';
-  if (time) time.textContent = _fmtTime(elapsed) + ' / ' + (duration > 0 ? _fmtTime(duration) : '--:--');
-}
-
-function _renderUpNext(state) {
-  var item    = state.next;
-  var title   = _el.unTitle;
-  var sub     = _el.unSub;
-  var empty   = _el.unEmpty;
-  var thumbEl = _el.unThumb;
-
-  var show = !!item;
-  if (title)   { title.style.display   = show ? '' : 'none'; title.textContent = item ? item.title : ''; }
-  if (sub)     { sub.style.display     = show ? '' : 'none'; sub.textContent   = item ? _mediaTypeLabel(item.mediaType) : ''; }
-  if (empty)   { empty.style.display   = show ? 'none' : ''; }
-  if (thumbEl) {
-    if (show && item.artwork) {
-      thumbEl.innerHTML = '<img src="' + _esc(item.artwork) + '" alt="">';
-    } else {
-      thumbEl.innerHTML = '📺';
-    }
-  }
-}
-
-/* ── Viewer helpers ── */
-
-function _setVisible(el, visible) {
-  if (!el) return;
-  el.classList.toggle('visible', !!visible);
-}
-
-function _setOverlayVisible(el, visible) {
-  if (!el) return;
-  el.classList.toggle('visible', !!visible);
-}
-
-function _hideTapOverlay() {
-  _setState({ needsUserGesture: false });
-}
-
-function _fmtTime(secs) {
-  if (!isFinite(secs) || secs < 0) return '0:00';
-  var s = Math.floor(secs % 60);
-  var m = Math.floor(secs / 60);
-  var h = Math.floor(m / 60);
-  m = m % 60;
-  if (h > 0) return h + ':' + _pad(m) + ':' + _pad(s);
-  return m + ':' + _pad(s);
-}
-
-function _pad(n) { return n < 10 ? '0' + n : '' + n; }
-
-function _esc(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function _mediaTypeLabel(type) {
-  if (type === 'video') return 'VIDEO';
-  if (type === 'audio') return 'AUDIO';
-  return 'MEDIA';
-}
-
-/* ════════════════════════════════════════════════════════════
-   ── STAGE 3/4: TV GUIDE ─────────────────────────────────────
-   Reads from SNXTVTimeline (same data as timeline resolver).
-   One guide — no duplicate schedule data.
-════════════════════════════════════════════════════════════ */
-
-function _renderGuide() {
-  var el = _el.guideList;
-  if (!el) return;
-
-  if (!global.SNXTVTimeline) {
-    el.innerHTML = '<div class="snx-tv-guide-empty">TV Guide not available.</div>';
-    return;
-  }
-
-  var upcoming = global.SNXTVTimeline.getUpcoming(10);
-
-  if (!upcoming.length) {
-    el.innerHTML = '<div class="snx-tv-guide-empty">No schedule. Add programs in TV Studio → Schedule.</div>';
-    return;
-  }
-
-  var nowMs = Date.now();
-  var html  = '';
-
-  for (var i = 0; i < upcoming.length; i++) {
-    var slot   = upcoming[i];
-    var prog   = slot.program;
-    var title  = prog ? (prog.name || 'Untitled') : 'Unknown';
-    var startMs= slot.startMs;
-    var endMs  = slot.endMs;
-    var isOnAir= startMs <= nowMs && endMs > nowMs;
-
-    var startLabel = startMs ? _fmtGuideTime(startMs) : '—';
-    var endLabel   = (endMs > startMs) ? _fmtGuideTime(endMs) : '';
-
-    var progressHtml = '';
-    if (isOnAir && endMs > startMs) {
-      var pct = Math.min(100, ((nowMs - startMs) / (endMs - startMs)) * 100);
-      progressHtml = '<div class="snx-tv-guide-progress"><div class="snx-tv-guide-progress-fill" style="width:' + pct.toFixed(1) + '%"></div></div>';
-    }
-
-    html += '<div class="snx-tv-guide-row' + (isOnAir ? ' snx-tv-guide-row--onair' : '') + '">'
-      + '<div class="snx-tv-guide-time">' + _esc(startLabel) + (endLabel ? '<br>' + _esc(endLabel) : '') + '</div>'
-      + '<div class="snx-tv-guide-info">'
-      + '<div class="snx-tv-guide-title">' + (isOnAir ? '<span class="snx-tv-guide-pill">ON AIR</span> ' : '') + _esc(title) + '</div>'
-      + (prog && prog.description ? '<div class="snx-tv-guide-desc">' + _esc(prog.description) + '</div>' : '')
-      + progressHtml
-      + '</div>'
-      + '</div>';
-  }
-
-  el.innerHTML = html;
-}
-
-function _fmtGuideTime(ms) {
-  if (!ms) return '—';
-  var d = new Date(ms);
-  var h = d.getHours();
-  var m = d.getMinutes();
-  var ampm = h >= 12 ? 'PM' : 'AM';
-  h = h % 12 || 12;
-  return h + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
-}
-
-/* ════════════════════════════════════════════════════════════
-   ── LIFECYCLE — PAGE OPEN / CLOSE ─────────────────────────
-   Called by navTo() when user navigates to/from #tvPage.
-════════════════════════════════════════════════════════════ */
-
-var _opened = false;
-
-/* ── Multi-channel support ── */
-
-/** Currently active channel ID. null = default (all existing single-channel data) */
-var _activeChannelId = null;
-
-/**
- * Switch to a different TV channel.
- * Resolves the channel's timeline from the correct offset so viewers join mid-program.
- * @param {string} channelId
- */
-function _switchChannel(channelId) {
-  // 'snx-ch-shadow-nexus-tv' is the viewer ID for the default/legacy channel.
-  // Map it to null so Timeline continues to serve the default content stream.
-  var newId = (channelId === 'snx-ch-shadow-nexus-tv') ? null
-            : (channelId || null);
-
-  // For display purposes track the full ID (including the preset label)
-  var displayId = channelId || 'snx-ch-shadow-nexus-tv';
-
-  if (_activeChannelId === newId) {
-    // Still re-render panel so active state is shown correctly
-    if (_viewerReady && global.SNXTVChannels) global.SNXTVChannels.refresh();
-    return;
-  }
-  _activeChannelId = newId;
-  // Persist via SNXTVChannels (canonical) — also writes localStorage
-  if (global.SNXTVChannels && typeof global.SNXTVChannels.setSelectedId === 'function') {
-    global.SNXTVChannels.setSelectedId(displayId);
-  } else {
-    _saveChannelPref(displayId);
-  }
-
-  // Stop current playback cleanly
-  var v = _el.video;
-  if (v && !v.paused) v.pause();
-
-  // Reset per-channel viewer state
-  _scheduleMode  = false;
-  _tlMediaLoaded = null;
-  _mediaLoaded   = null;
-  _playlistQueue = null;
-  _queueIndex    = 0;
-  _opened        = false;
-  _lastResolvedState = null;
-
-  _setState({
-    status:        'loading',
-    current:       null,
-    next:          null,
-    onAir:         false,
-    elapsed:       0,
-    duration:      0,
-    isScheduled:   false,
-    isGap:         false,
-    gapLabel:      '',
-    program:       null,
-    scheduleEntry: null,
-    error:         null,
-    needsUserGesture: false
-  });
+  /* ════════════════════════════════════════════════════════════
+     STATE
+  ════════════════════════════════════════════════════════════ */
 
-  // Tell SNXTVTimeline to reload for the new channel
-  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
-    global.SNXTVTimeline.setChannel(_activeChannelId);
-  }
-
-  // Tell SNXTVStudio to switch its channel context
-  if (global.SNXTVStudio && typeof global.SNXTVStudio.setChannel === 'function') {
-    global.SNXTVStudio.setChannel(_activeChannelId);
-  }
-
-  // Re-apply volume (channel switch must not mute audio)
-  _resumeAudioContext();
-  _applyVolume();
-
-  // Re-render the channel panel so active dot moves to newly selected channel
-  if (_viewerReady) {
-    if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
-      global.SNXTVChannels.refresh();
-    } else {
-      _renderChannelPanel();
-    }
-  }
-
-  // Restart the timeline mode so it resolves the new channel
-  _unsubTimeline && (function() { try { _unsubTimeline(); } catch(_){} _unsubTimeline = null; })();
-  _startTimelineMode();
-  _opened = true;
-}
-
-/* ── Viewer channel selector — card-based panel (Rebuild) ── */
-
-/**
- * Channel persistence — save/restore via localStorage so refresh remembers the channel.
- */
-function _saveChannelPref(channelId) {
-  try { localStorage.setItem('snxTvActiveChannel', channelId || 'default'); } catch (e) {}
-}
-
-function _loadChannelPref() {
-  try { return localStorage.getItem('snxTvActiveChannel') || 'default'; } catch (e) { return 'default'; }
-}
-
-/**
- * Get the canonical channel list from Timeline or Studio.
- * Always includes the 'default' virtual channel first.
- */
-function _getChannels() {
-  var channels = [];
-  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.getChannels === 'function') {
-    channels = global.SNXTVTimeline.getChannels();
-  } else if (global.SNXTVStudio && typeof global.SNXTVStudio.getChannels === 'function') {
-    channels = global.SNXTVStudio.getChannels();
-  }
-  // Ensure 'default' is always present
-  if (!channels.some(function (c) { return c.id === 'default'; })) {
-    channels = [{ id: 'default', name: 'Shadow Nexus TV', description: '24-Hour TV', logoEmoji: '📺' }].concat(channels);
-  }
-  return channels;
-}
-
-/**
- * Rebuild the viewer channel panel UI and wire up the toggle.
- * Safe to call repeatedly — always re-renders the card list.
- * Binds the collapse toggle only once per page lifecycle.
- */
-var _channelToggleInited = false;
+  let _channels = [];     // Array of channel objects (sorted by order)
+  let _activeChannel = null;  // currently selected channel object
+  let _mediaQueue    = [];    // ordered media for active channel
+  let _queueIdx      = 0;     // current position in queue
+  let _playing       = false;
+  let _autoplayBlocked = false;
+  let _channelsUnsub = null;  // Firestore listener cleanup
+  let _mediaUnsub    = null;
+  let _studioOpen    = false;
+  let _studioTab     = 'channels';
+  let _studioChannel = null;  // channel selected inside studio
+  let _studioMedia   = [];    // media for _studioChannel
+  let _studioMediaUnsub = null;
 
-function _initChannelSelector() {
-  // Wire up collapse toggle once
-  if (!_channelToggleInited) {
-    _channelToggleInited = true;
-    var toggleBtn = document.getElementById('snxTvChToggle');
-    var content   = document.getElementById('snxTvChContent');
-    if (toggleBtn && content) {
-      toggleBtn.addEventListener('click', function () {
-        var collapsed = content.classList.toggle('collapsed');
-        toggleBtn.classList.toggle('collapsed', collapsed);
-        toggleBtn.textContent = collapsed ? '▶' : '▼';
-      });
-    }
-    // Also make the header row (label) toggle the panel
-    var header = document.querySelector('.snx-tv-ch-header');
-    if (header) {
-      header.addEventListener('click', function (e) {
-        if (e.target === toggleBtn) return; // already handled
-        if (toggleBtn) toggleBtn.click();
-      });
-    }
-  }
-
-  // Delegate to SNXTVChannels.init() — the canonical channel manager.
-  // It starts the Firestore listener, builds the channel list (presets + user),
-  // chooses the selected channel, and renders the panel.
-  if (global.SNXTVChannels && typeof global.SNXTVChannels.init === 'function') {
-    global.SNXTVChannels.init(function (channelId) {
-      // Called when user taps a channel card
-      _resumeAudioContext().then(function () { _applyVolume(); });
-      _switchChannel(channelId);
-    });
-  } else {
-    // SNXTVChannels not loaded yet — fallback to preset-only rendering
-    _renderChannelPanel();
-  }
-}
+  /* ════════════════════════════════════════════════════════════
+     FIREBASE HELPERS — wraps window._snxFirestore (modular v12)
+  ════════════════════════════════════════════════════════════ */
 
-/**
- * Re-render the channel panel.
- * Delegates to SNXTVChannels (canonical) if available.
- * Used as fallback when SNXTVChannels hasn't loaded yet.
- */
-function _renderChannelPanel() {
-  if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
-    global.SNXTVChannels.refresh();
-    return;
-  }
-
-  // Inline fallback (only runs if SNXTVChannels is not loaded)
-  var channels = _getChannels();
-  var activeId = _activeChannelId || 'snx-ch-shadow-nexus-tv';
-  var panel    = document.getElementById('snxTvChannelPanel');
-  if (!panel) return;
+  function _fs() { return global._snxFirestore || {}; }
 
-  var html = '<div class="snx-tv-ch-list">';
-  for (var i = 0; i < channels.length; i++) {
-    var ch       = channels[i];
-    var isActive = ch.id === activeId;
-    var emoji    = ch.logoEmoji || '📺';
-    html += '<button class="snx-tv-ch-btn' + (isActive ? ' snx-tv-ch-btn--active' : '') + '"'
-      + ' data-channel-id="' + _esc(ch.id) + '" type="button">'
-      + '<span class="snx-tv-ch-emoji">' + emoji + '</span>'
-      + '<span class="snx-tv-ch-info">'
-      +   '<span class="snx-tv-ch-name">' + _esc(ch.name || ch.id) + '</span>'
-      + '</span>'
-      + (isActive ? '<span class="snx-tv-ch-active-dot"></span>' : '')
-      + '</button>';
+  function _fsCollection(colName) {
+    const { db, collection } = _fs();
+    return collection(db, colName);
   }
-  html += '</div>';
-  panel.innerHTML = html;
-  var buttons = panel.querySelectorAll('.snx-tv-ch-btn');
-  for (var j = 0; j < buttons.length; j++) {
-    (function (btn) {
-      btn.addEventListener('click', function () {
-        var id = btn.dataset.channelId;
-        _resumeAudioContext().then(function () { _applyVolume(); });
-        _switchChannel(id);
-      });
-    })(buttons[j]);
-  }
 
-  // Sync hidden <select>
-  var sel = _el.channelSelector;
-  if (sel) {
-    sel.innerHTML = channels.map(function (ch) {
-      return '<option value="' + _esc(ch.id) + '">' + _esc(ch.name || ch.id) + '</option>';
-    }).join('');
-    sel.value = activeId;
+  function _fsDoc(colName, id) {
+    const { db, doc } = _fs();
+    return doc(db, colName, id);
   }
-}
-
-/**
- * Re-render the viewer channel panel — called by _onTimelineChange and Studio.
- */
-function _refreshChannelSelector() {
-  _renderChannelPanel();
-}
 
-/**
- * Called when the TV page becomes active.
- */
-function pageOpen() {
-  if (!_viewerReady) _initViewer();
-
-  // Inject Studio button / overlay (Founder only, once)
-  _initStudio();
-
-  // Show Submit Content button for any signed-in user
-  _initSubmitArea();
-
-  // Restore persisted channel selection.
-  // SNXTVChannels is the canonical store for the selected channel ID.
-  // Fall back to _loadChannelPref() if SNXTVChannels hasn't loaded yet.
-  if (!_activeChannelId) {
-    var savedChannel = null;
-    if (global.SNXTVChannels && typeof global.SNXTVChannels.getSelectedId === 'function') {
-      savedChannel = global.SNXTVChannels.getSelectedId();
-    }
-    if (!savedChannel) savedChannel = _loadChannelPref();
-    // 'default' and 'snx-ch-shadow-nexus-tv' both mean the legacy default channel.
-    // Only set _activeChannelId for a non-default named channel.
-    var isDefaultChannel = !savedChannel
-                        || savedChannel === 'default'
-                        || savedChannel === 'snx-ch-shadow-nexus-tv';
-    if (!isDefaultChannel) {
-      _activeChannelId = savedChannel;
-      // Tell Timeline and Studio about the restored channel
-      if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
-        global.SNXTVTimeline.setChannel(_activeChannelId);
-      }
-      if (global.SNXTVStudio && typeof global.SNXTVStudio.setChannel === 'function') {
-        global.SNXTVStudio.setChannel(_activeChannelId);
-      }
-    }
+  function _fsQuery(col, ...constraints) {
+    const { query } = _fs();
+    return query(col, ...constraints);
   }
-
-  // Populate the viewer channel panel (card-based)
-  _initChannelSelector();
 
-  // Start timeline listener and try scheduled mode
-  _startTimelineMode();
-
-  if (!_opened && _state.status === 'idle') {
-    _opened = true;
-    // _startQueue() will be called if timeline has no schedule
+  function _fsOrderBy(field, dir) {
+    const { orderBy } = _fs();
+    return orderBy(field, dir || 'asc');
   }
 
-  if (_state.needsUserGesture) {
-    _notifySubscribers();
+  function _fsWhere(field, op, val) {
+    const { where } = _fs();
+    return where(field, op, val);
   }
 
-  // Stage 4: if returning to TV after being away, resync immediately
-  if (_scheduleMode && _viewerReady && global.SNXTVTimeline) {
-    _timelineResync();
+  async function _fsGetDocs(q) {
+    const { getDocs } = _fs();
+    return getDocs(q);
   }
-}
 
-/**
- * Called when the user navigates away from TV.
- * Stage 4: pause video but preserve ALL state — viewer may return.
- */
-function pageLeave() {
-  var v = _el.video;
-  if (v && !v.paused) {
-    v.pause();
+  async function _fsSetDoc(ref, data, opts) {
+    const { setDoc } = _fs();
+    return setDoc(ref, data, opts || {});
   }
-  _clearStallTimer();
-  // Stop visual engines while TV is not visible (saves CPU/battery)
-  _snxViz.stop();
-  _snxArtwork.stop();
-  // Note: DO NOT stop the timeline listener here.
-  // The timeline subscription keeps schedule data fresh while the user is elsewhere,
-  // so rejoining is instant. Timeline data (stations) is global, not viewer-specific.
-}
-
-/* ════════════════════════════════════════════════════════════
-   ── STAGE 3/4: TIMELINE INTEGRATION ────────────────────────
-   SNXTVTimeline drives scheduled playback.
-   _getQueue() / advance() remain for adapter mode.
-════════════════════════════════════════════════════════════ */
 
-/**
- * Start timeline mode.
- * Idempotent: safe to call on every pageOpen().
- */
-function _startTimelineMode() {
-  if (!global.SNXTVTimeline) {
-    if (!_opened && _state.status === 'idle') {
-      _opened = true;
-      _startQueue();
-    }
-    return;
+  async function _fsUpdateDoc(ref, data) {
+    const { updateDoc } = _fs();
+    return updateDoc(ref, data);
   }
-
-  // Start live listeners (guarded internally by _listening flag)
-  global.SNXTVTimeline.startListening();
-
-  // Re-subscribe: always create a fresh subscription to get the current resolved state.
-  // Unsub old one first to avoid double-handlers.
-  if (_unsubTimeline) { try { _unsubTimeline(); } catch(_){} _unsubTimeline = null; }
-  _unsubTimeline = global.SNXTVTimeline.subscribe(_onTimelineChange);
-}
 
-/**
- * Called whenever SNXTVTimeline data changes.
- * Also called once on subscribe (initial resolve).
- */
-function _onTimelineChange(resolved) {
-  if (_tlChanging) return;
-  _tlChanging = true;
-  try {
-    _applyTimelineState(resolved, false);
-  } finally {
-    _tlChanging = false;
+  async function _fsDeleteDoc(ref) {
+    const { deleteDoc } = _fs();
+    return deleteDoc(ref);
   }
-  // Refresh the viewer channel selector whenever timeline data changes
-  // (covers the case where a new channel was just created in Studio).
-  if (_viewerReady) _refreshChannelSelector();
-}
 
-/**
- * Apply a resolved timeline state to the TV core.
- * @param {Object}  resolved     — result of SNXTVTimeline.resolve()
- * @param {boolean} forceReload  — true when called from onMediaEnded to force next item
- */
-function _applyTimelineState(resolved, forceReload) {
-  if (!resolved) return;
-
-  // Cache the last playing/fallback state so _advanceByQueue can use it.
-  if (resolved.mode === 'playing' || resolved.mode === 'fallback') {
-    _lastResolvedState = resolved;
+  async function _fsAddDoc(col, data) {
+    const { addDoc } = _fs();
+    return addDoc(col, data);
   }
 
-  if (resolved.mode === 'gap' || resolved.mode === 'noSchedule') {
-    if (!global.SNXTVTimeline.hasSchedule()) {
-      // No schedule → fall back to adapter/playlist mode
-      _scheduleMode = false;
-      if (!_opened && _state.status === 'idle') {
-        _opened = true;
-        _startQueue();
-      }
-      return;
-    }
-
-    // Schedule exists but current time is a gap, and no usable fallback
-    _scheduleMode = true;
-    _scheduleGap(resolved);
-    return;
+  function _fsOnSnapshot(ref, cb) {
+    const { onSnapshot } = _fs();
+    if (onSnapshot) return onSnapshot(ref, cb);
+    return () => {};
   }
-
-  // ── Fallback playlist mode ────────────────────────────────────────────────
-  // Treat 'fallback' identically to 'playing' for load/seek/advance, but mark
-  // the state as fallback so the UI can show it appropriately.
-  if (resolved.mode === 'fallback') {
-    _scheduleMode = true;
-
-    var fbItem   = resolved.currentItem;
-    var fbNext   = resolved.nextItem;
-    var fbOffset = resolved.itemOffset || 0;
-
-    if (!fbItem || !fbItem.mediaUrl) {
-      // Fallback has no playable items — show standby gap
-      _scheduleGap(resolved);
-      return;
-    }
-
-    _setState({
-      next:          fbNext || null,
-      program:       null,
-      scheduleEntry: null,
-      isScheduled:   true,
-      isGap:         false,
-      gapLabel:      '',
-    });
-
-    var fbAlreadyLoaded = (_state.current && _state.current.mediaUrl === fbItem.mediaUrl);
 
-    if (forceReload || !fbAlreadyLoaded || _tlMediaLoaded !== fbItem.mediaUrl) {
-      _tlMediaLoaded = fbItem.mediaUrl;
-      if (!_viewerReady) return;
-      loadItemAt(fbItem, fbOffset);
-      _opened = true;
-    } else {
-      // Already on the correct fallback item — check drift
-      var fbDrift = Math.abs(_state.elapsed - fbOffset);
-      if (fbDrift > 8) {
-        var vfb = _el.video;
-        if (vfb && isFinite(vfb.duration)) {
-          vfb.currentTime = Math.min(fbOffset, vfb.duration - 0.5);
-          console.log('[SNX TV] Fallback drift resync:', Math.round(fbDrift) + 's → seeking to', Math.round(fbOffset));
-        }
-      }
-    }
-    return;
+  function _fsServerTimestamp() {
+    const { serverTimestamp } = _fs();
+    return serverTimestamp ? serverTimestamp() : Date.now();
   }
 
-  // ── Active scheduled program ──────────────────────────────────────────────
-  _scheduleMode = true;
+  /* ════════════════════════════════════════════════════════════
+     AUTH HELPERS
+  ════════════════════════════════════════════════════════════ */
 
-  var item  = resolved.currentItem;
-  var next  = resolved.nextItem;
-  var offset = resolved.itemOffset || 0;
-
-  if (!item || !item.mediaUrl) {
-    // Program has no playable items right now
-    _scheduleGap(resolved);
-    return;
+  function _isFounder() {
+    return global._snxRole === 'founder';
   }
-
-  // Update state fields for program/entry
-  _setState({
-    next:          next || null,
-    program:       resolved.program || null,
-    scheduleEntry: resolved.scheduleEntry || null,
-    isScheduled:   true,
-    isGap:         false,
-    gapLabel:      '',
-  });
-
-  // Check if we need to load/seek
-  var alreadyLoaded = (_state.current && _state.current.mediaUrl === item.mediaUrl);
 
-  if (forceReload || !alreadyLoaded || _tlMediaLoaded !== item.mediaUrl) {
-    // Load this item with offset for join-in-progress / resync
-    _tlMediaLoaded = item.mediaUrl;
-    if (!_viewerReady) return;
-    loadItemAt(item, offset);
-    _opened = true;
-  } else {
-    // Already playing the right item — check drift
-    var expectedPos = offset;
-    var actualPos   = _state.elapsed;
-    var drift       = Math.abs(actualPos - expectedPos);
-    if (drift > 8) { // DRIFT_TOLERANCE seconds
-      var v = _el.video;
-      if (v && isFinite(v.duration)) {
-        v.currentTime = Math.min(expectedPos, v.duration - 0.5);
-        console.log('[SNX TV] Clock drift resync:', Math.round(drift) + 's → seeking to', Math.round(expectedPos));
-      }
-    }
+  function _getIdToken() {
+    // Use the Firebase auth instance set by SNS main script (window.auth or window._snxAuth)
+    const authInst = global.auth || global._snxAuth;
+    const user = authInst && authInst.currentUser;
+    if (!user) return Promise.reject(new Error('Not authenticated'));
+    return user.getIdToken();
   }
-}
 
-function _scheduleGap(resolved) {
-  var label = (resolved && resolved.gapLabel) || 'Programming Resumes Soon';
-  _setState({
-    status:        'idle',
-    current:       null,
-    next:          resolved ? (resolved.nextItem || null) : null,
-    onAir:         false,
-    isScheduled:   true,
-    isGap:         true,
-    gapLabel:      label,
-    program:       null,
-    scheduleEntry: null,
-  });
-  _mediaLoaded = null;
-  _tlMediaLoaded = null;
-  _clearStallTimer();
+  /* ════════════════════════════════════════════════════════════
+     DOM HELPERS
+  ════════════════════════════════════════════════════════════ */
 
-  // Pause any playing video
-  var v = _el.video;
-  if (v && !v.paused) v.pause();
-}
+  function _el(id) { return document.getElementById(id); }
 
-/**
- * Resynchronise against the live timeline.
- * Called by SNXTVTimeline._periodicResync() every 30s.
- * Also called on visibility restore and online restore.
- * Public so the timeline module can call it.
- */
-function _timelineResync() {
-  if (!_scheduleMode || !global.SNXTVTimeline) return;
-  var resolved = global.SNXTVTimeline.resolve(Date.now());
-  _applyTimelineState(resolved, false);
-}
-
-function _startQueue() {
-  var queue = _getQueue();
-  if (!queue.length) {
-    _setState({ status: 'offline', onAir: false, current: null, next: null });
-    return;
-  }
-  _queueIndex = 0;
-  var item     = queue[0];
-  var nextItem = queue.length > 1 ? queue[1] : null;
-  _setState({ next: nextItem });
-  loadItem(item);
-}
-
-/**
- * Load a playlist queue into the TV Core.
- * Called by SNXTVStudio when the Founder clicks "Load to TV".
- * Stage 4: disables schedule mode so manual playlist takes control.
- * @param {TVItem[]} tvItems
- * @param {string}   [name]
- */
-function _loadPlaylistQueue(tvItems, name) {
-  if (!tvItems || !tvItems.length) return;
-  var valid = tvItems.filter(function (i) { return i && i.mediaUrl; });
-  if (!valid.length) {
-    _setState({ status: 'offline', onAir: false, current: null, next: null });
-    return;
-  }
-  if (global.SNXTVStudio && typeof global.SNXTVStudio.setPlaylistQueue === 'function') {
-    global.SNXTVStudio.setPlaylistQueue(valid);
+  function _setHtml(id, html) {
+    const el = _el(id);
+    if (el) el.innerHTML = html;
   }
-  // Disengage schedule mode — playlist takes manual control
-  _scheduleMode  = false;
-  _tlMediaLoaded = null;
-  _playlistQueue = valid;
-  _opened = true;
-  _queueIndex = 0;
-  var nextItem = valid.length > 1 ? valid[1] : null;
-  _setState({
-    next:          nextItem,
-    isScheduled:   false,
-    isGap:         false,
-    gapLabel:      '',
-    program:       null,
-    scheduleEntry: null,
-  });
-  loadItem(valid[0]);
-  console.log('[SNX TV] Playlist loaded:', name || 'unnamed', '|', valid.length, 'items');
-}
 
-/* ════════════════════════════════════════════════════════════
-   ── STAGE 4: PAGE LIFECYCLE EVENTS ──────────────────────────
-   Tab sleep / device sleep / offline / online recovery.
-════════════════════════════════════════════════════════════ */
+  function _show(id) { const el = _el(id); if (el) el.style.display = ''; }
+  function _hide(id) { const el = _el(id); if (el) el.style.display = 'none'; }
 
-var _lifecycleAttached = false;
-
-function _attachLifecycleEvents() {
-  if (_lifecycleAttached) return;
-  _lifecycleAttached = true;
-
-  // ── visibilitychange — tab backgrounded/foregrounded, screen off/on ──
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') {
-      // Page became visible — re-resolve timeline to correct stale position
-      if (_scheduleMode && global.SNXTVTimeline && _viewerReady) {
-        // Small delay to let browser stabilise after visibility restore
-        setTimeout(function () {
-          _timelineResync();
-          // If guide is open, refresh it
-          if (_el.guideContent && _el.guideContent.classList.contains('snx-tv-guide-content--open')) {
-            _renderGuide();
-          }
-        }, 300);
-      }
-    } else {
-      // Page hidden — clear stall timer to avoid spurious recovery while backgrounded
-      _clearStallTimer();
-      // Pause canvas animation while backgrounded
-      _snxViz.stop();
-      _snxArtwork.stop();
-    }
-  });
-
-  // ── pageshow — BFCache restore (iOS Safari, Android Chrome) ──
-  global.addEventListener('pageshow', function (e) {
-    if (!e.persisted) return; // not a BFCache restore
-    if (_scheduleMode && global.SNXTVTimeline && _viewerReady) {
-      setTimeout(function () {
-        _timelineResync();
-      }, 400);
-    }
-  });
-
-  // ── focus — window refocused (desktop) ──
-  global.addEventListener('focus', function () {
-    if (_scheduleMode && global.SNXTVTimeline && _viewerReady) {
-      // Only resync if we were away long enough to drift
-      setTimeout(function () {
-        var v = _el.video;
-        if (v && _state.status === 'playing' && global.SNXTVTimeline) {
-          var resolved = global.SNXTVTimeline.resolve(Date.now());
-          if (resolved && resolved.mode === 'playing' && resolved.currentItem) {
-            var drift = Math.abs(_state.elapsed - (resolved.itemOffset || 0));
-            if (drift > 10) _timelineResync();
-          }
-        }
-      }, 500);
-    }
-  });
-
-  // ── offline — network lost ──
-  global.addEventListener('offline', function () {
-    _clearStallTimer();
-    _setState({ isOffline: true });
-    var v = _el.video;
-    // Don't destroy state; if buffered, let browser play on.
-    // If currently loading (no buffer), show offline state.
-    if (v && _state.status === 'loading') {
-      _setState({ status: 'idle', current: null, onAir: false,
-                  isGap: _state.isScheduled, gapLabel: 'No internet connection — reconnecting…' });
-    }
-    console.log('[SNX TV] Network offline.');
-  });
-
-  // ── online — network restored ──
-  global.addEventListener('online', function () {
-    _setState({ isOffline: false });
-    console.log('[SNX TV] Network online — refreshing schedule.');
-    if (_scheduleMode && global.SNXTVTimeline) {
-      // Give Firestore a moment to reconnect, then re-resolve
-      setTimeout(function () {
-        if (global.SNXTVTimeline) {
-          _timelineResync();
-        }
-      }, 2000);
-    } else if (!_scheduleMode && _state.status === 'idle') {
-      // Adapter mode — try to restart queue
-      _startQueue();
-    }
-  });
-}
-
-/* ── Submit Content Area — Stage 5 ── */
-var _submitAreaInited = false;
-
-function _initSubmitArea() {
-  // Show the submit button for any signed-in user
-  var cu = global._snxCurrentUser || null;
-  var submitArea = document.getElementById('snxTvSubmitArea');
-  if (!submitArea) return;
-
-  submitArea.style.display = cu ? 'block' : 'none';
-  if (_submitAreaInited || !cu) return;
-  _submitAreaInited = true;
-
-  var submitBtn   = document.getElementById('snxTvSubmitBtn');
-  var modal       = document.getElementById('snxTvSubmitModal');
-  var closeBtn    = document.getElementById('snxTvSubmitClose');
-  var cancelBtn   = document.getElementById('snxTvSubCancelBtn');
-  var sendBtn     = document.getElementById('snxTvSubSendBtn');
-  var statusEl    = document.getElementById('snxTvSubStatus');
-
-  if (!modal) return;
-
-  function openModal() {
-    // Clear previous form state
-    var titleInput = document.getElementById('snxTvSubTitle');
-    var urlInput   = document.getElementById('snxTvSubUrl');
-    var descInput  = document.getElementById('snxTvSubDesc');
-    if (titleInput) titleInput.value = '';
-    if (urlInput)   urlInput.value   = '';
-    if (descInput)  descInput.value  = '';
-    if (statusEl)   { statusEl.style.display = 'none'; statusEl.textContent = ''; }
-    if (sendBtn)    sendBtn.disabled = false;
-    modal.style.display = 'flex';
-  }
-
-  function closeModal() {
-    modal.style.display = 'none';
+  function _showStatus(id, msg, type) {
+    const el = _el(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.className   = 'snx-tv-status visible ' + (type || 'info');
+    if (type === 'ok') setTimeout(() => { el.classList.remove('visible'); }, 4000);
   }
-
-  if (submitBtn) submitBtn.addEventListener('click', openModal);
-  if (closeBtn)  closeBtn.addEventListener('click', closeModal);
-  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
 
-  if (sendBtn) {
-    sendBtn.addEventListener('click', async function () {
-      var titleVal    = (document.getElementById('snxTvSubTitle') || {}).value || '';
-      var urlVal      = (document.getElementById('snxTvSubUrl')   || {}).value || '';
-      var descVal     = (document.getElementById('snxTvSubDesc')  || {}).value || '';
-      var catVal      = (document.getElementById('snxTvSubCategory') || {}).value || 'general';
-      var typeVal     = (document.getElementById('snxTvSubMediaType') || {}).value || 'video';
+  /* ════════════════════════════════════════════════════════════
+     CHANNELS — Load & Listen
+  ════════════════════════════════════════════════════════════ */
 
-      if (!titleVal.trim()) {
-        if (statusEl) { statusEl.style.display = 'block'; statusEl.style.color = '#ff7070'; statusEl.textContent = 'Title is required.'; }
-        return;
-      }
-      if (!urlVal.trim() || !urlVal.match(/^https?:\/\//)) {
-        if (statusEl) { statusEl.style.display = 'block'; statusEl.style.color = '#ff7070'; statusEl.textContent = 'A valid HTTPS media URL is required.'; }
-        return;
-      }
+  function _subscribeChannels() {
+    if (_channelsUnsub) { _channelsUnsub(); _channelsUnsub = null; }
 
-      if (statusEl) { statusEl.style.display = 'block'; statusEl.style.color = 'rgba(255,255,255,0.5)'; statusEl.textContent = 'Submitting…'; }
-      sendBtn.disabled = true;
+    const col = _fsCollection(COL_CHANNELS);
+    const q   = _fsQuery(col, _fsOrderBy('order', 'asc'));
 
+    _channelsUnsub = _fsOnSnapshot(q, snap => {
       try {
-        if (!global.SNXTVStudio || typeof global.SNXTVStudio.submitContent !== 'function') {
-          throw new Error('TV submission service not ready. Try again in a moment.');
+        _channels = [];
+        snap.forEach(d => _channels.push({ id: d.id, ...d.data() }));
+        _channels.sort((a, b) => (a.order || 0) - (b.order || 0));
+        _renderGuide();
+        _renderStudioChannels();
+        // Auto-select first channel if none selected
+        if (!_activeChannel && _channels.length > 0) {
+          _selectChannel(_channels[0].id);
         }
-        await global.SNXTVStudio.submitContent({
-          title:       titleVal.trim(),
-          description: descVal.trim(),
-          category:    catVal,
-          mediaType:   typeVal,
-          mediaUrl:    urlVal.trim(),
-        });
-        if (statusEl) { statusEl.style.color = '#00d45a'; statusEl.textContent = '✓ Submitted for review! Thank you.'; }
-        setTimeout(closeModal, 2200);
-      } catch (err) {
-        if (statusEl) { statusEl.style.color = '#ff7070'; statusEl.textContent = '✗ ' + (err.message || 'Submission failed.'); }
-        sendBtn.disabled = false;
+      } catch (e) {
+        console.warn(LOG, 'channels snapshot error', e);
       }
     });
   }
-}
 
-/* ── TV Studio injection ── */
-var _studioInjected = false;
+  /* ════════════════════════════════════════════════════════════
+     MEDIA — Load for active channel
+  ════════════════════════════════════════════════════════════ */
 
-function _initStudio() {
-  if (_studioInjected) return;
-  if ((global._snxRole || '') !== 'founder') return;
-  _studioInjected = true;
+  function _subscribeMedia(channelId) {
+    if (_mediaUnsub) { _mediaUnsub(); _mediaUnsub = null; }
+    _mediaQueue = [];
+    _queueIdx   = 0;
 
-  var tvPage = document.getElementById('tvPage');
-  if (!tvPage) return;
+    const col = _fsCollection(COL_MEDIA);
+    const q   = _fsQuery(col,
+      _fsWhere('channelId', '==', channelId),
+      _fsOrderBy('order', 'asc')
+    );
 
-  // Inject Studio toggle button into TV header
-  var header = tvPage.querySelector('.snx-tv-header');
-  if (header && !document.getElementById('snxtvStudioBtn')) {
-    var btn = document.createElement('button');
-    btn.id = 'snxtvStudioBtn';
-    btn.type = 'button';
-    btn.className = 'snxtv-studio-open-btn';
-    btn.textContent = '🎬 TV Studio';
-    btn.addEventListener('click', function () {
-      if (global.SNXTVStudio) global.SNXTVStudio.show();
-    });
-    header.appendChild(btn);
-  }
-
-  // Inject "Manage Channel" shortcut button into the channel bar footer
-  _injectChannelManageBtn();
-
-  // Create studio overlay
-  if (!document.getElementById('snxtvStudioOverlay')) {
-    var overlay = document.createElement('div');
-    overlay.id = 'snxtvStudioOverlay';
-    overlay.className = 'snxtv-studio-overlay';
-    document.body.appendChild(overlay);
-
-    function _tryMount() {
-      if (global.SNXTVStudio && typeof global.SNXTVStudio.mount === 'function') {
-        global.SNXTVStudio.mount(overlay);
-      } else {
-        setTimeout(_tryMount, 500);
+    _mediaUnsub = _fsOnSnapshot(q, snap => {
+      try {
+        _mediaQueue = [];
+        snap.forEach(d => _mediaQueue.push({ id: d.id, ...d.data() }));
+        _mediaQueue.sort((a, b) => (a.order || 0) - (b.order || 0));
+        _onMediaQueueUpdated();
+      } catch (e) {
+        console.warn(LOG, 'media snapshot error', e);
       }
-    }
-    _tryMount();
-  }
-}
-
-/**
- * Inject quick-access management buttons into the channel bar footer.
- * Founders see two buttons: "✏ Edit Channel" and "📺 Manage Media".
- * Called once when Studio is initialized.
- */
-function _injectChannelManageBtn() {
-  var channelBar = document.getElementById('snxTvChannelBar');
-  if (!channelBar || document.getElementById('snxTvChManageRow')) return;
-
-  var row = document.createElement('div');
-  row.id = 'snxTvChManageRow';
-  row.className = 'snx-tv-ch-manage-row';
-  row.innerHTML =
-    '<button class="snx-tv-ch-manage-btn" id="snxTvChEditBtn" type="button">'
-    + '✏ Edit Channel'
-    + '</button>'
-    + '<button class="snx-tv-ch-manage-btn snx-tv-ch-manage-btn--alt" id="snxTvChMediaBtn" type="button">'
-    + '📺 Manage Media'
-    + '</button>';
-
-  channelBar.appendChild(row);
-
-  document.getElementById('snxTvChEditBtn').addEventListener('click', function () {
-    if (global.SNXTVStudio && typeof global.SNXTVStudio.openOnTab === 'function') {
-      global.SNXTVStudio.openOnTab('channels');
-    }
-  });
-  document.getElementById('snxTvChMediaBtn').addEventListener('click', function () {
-    if (global.SNXTVStudio && typeof global.SNXTVStudio.openOnTab === 'function') {
-      global.SNXTVStudio.openOnTab('media');
-    }
-  });
-}
-
-/* ════════════════════════════════════════════════════════════
-   ── AUTH INTEGRATION ──────────────────────────────────────
-   Observes SNS auth events.
-════════════════════════════════════════════════════════════ */
-
-global.addEventListener('snxAuthStateChanged', function (e) {
-  var user = e.detail && e.detail.user;
-  if (!user) return;
-  // Ensure Studio is available for founder, and attach lifecycle events once
-  _attachLifecycleEvents();
-  if ((global._snxRole || '') === 'founder') {
-    if (_viewerReady) {
-      _initStudio();
-    } else {
-      // TV page not open yet — defer until pageOpen() runs and sets _viewerReady.
-      // We retry via a small poll so the Studio button appears as soon as the
-      // viewer is ready, regardless of navigation order.
-      (function _retryInitStudio() {
-        if (_studioInjected) return;
-        if (!_viewerReady) { setTimeout(_retryInitStudio, 400); return; }
-        _initStudio();
-      })();
-    }
-  }
-});
-
-// Also attach lifecycle events on DOM ready (does not depend on auth)
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', _attachLifecycleEvents);
-} else {
-  _attachLifecycleEvents();
-}
-
-global.addEventListener('snxAuthSignOut', function () {
-  pageLeave();
-  _clearStallTimer();
-  _lastResolvedState  = null;
-  _durationWrittenFor = {};
-
-  _setState({
-    status: 'idle', current: null, next: null, onAir: false,
-    elapsed: 0, duration: 0, program: null, scheduleEntry: null,
-    isScheduled: false, isGap: false, gapLabel: '', isOffline: false,
-    error: null, needsUserGesture: false
-  });
-  _mediaLoaded      = null;
-  _tlMediaLoaded    = null;
-  _opened           = false;
-  _queueIndex       = 0;
-  _playlistQueue    = null;
-  _scheduleMode     = false;
-  _mediaErrorCount  = 0;
-  _recovering       = false;
-  _submitAreaInited = false;   // reset so it re-inits on next sign-in
-  // Hide submit area
-  var sa = document.getElementById('snxTvSubmitArea');
-  if (sa) sa.style.display = 'none';
-
-  // Stop timeline listener and subscriber
-  if (_unsubTimeline) { try { _unsubTimeline(); } catch(_){} _unsubTimeline = null; }
-  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.stopListening === 'function') {
-    global.SNXTVTimeline.stopListening();
+    });
   }
 
-  _snxViz.stop();
-  _snxArtwork.stop();
-
-  if (global.SNXTVStudio && typeof global.SNXTVStudio.unmount === 'function') {
-    global.SNXTVStudio.unmount();
+  function _onMediaQueueUpdated() {
+    if (_mediaQueue.length === 0) {
+      _showWaiting();
+      return;
+    }
+    // If nothing is playing, start from beginning
+    if (!_playing) {
+      _queueIdx = 0;
+      _playItem(_mediaQueue[0]);
+    }
   }
-  _studioInjected = false;
 
-  // Reset viewer ready flag so it re-initialises on next sign-in if page is navigated to
-  // Note: keep _el populated — DOM is still in place; just reset the subscription guard
-  // so that _attachMediaListeners is not called twice
-  // _viewerReady stays true: the video element is still in the DOM and listeners are attached.
-  // We just cleared playing state. The viewer will render idle on next state snapshot.
-});
+  /* ════════════════════════════════════════════════════════════
+     CHANNEL SELECTION
+  ════════════════════════════════════════════════════════════ */
 
-/* ════════════════════════════════════════════════════════════
-   ── SHADOW NEXUS MUSIC VISUALIZER ─────────────────────────
-   Canvas-based audio visualizer for audio-only TV content.
-   Connects to the existing <video> element via Web Audio API.
-   No second audio playback engine — we only analyse, not play.
+  function _selectChannel(channelId) {
+    const ch = _channels.find(c => c.id === channelId);
+    if (!ch) return;
 
-   ── AUDIO ARCHITECTURE (PERMANENT GRAPH) ────────────────────
-   createMediaElementSource() permanently captures the <video>
-   element.  Once called, ALL audio MUST flow through the graph.
-   The graph is NEVER torn down — only the canvas drawing stops.
-   Graph: srcNode → analyser → gainNode → audioCtx.destination
-   This ensures audio plays whether or not the canvas is shown.
-   AudioContext starts SUSPENDED; resume() is called from every
-   user-gesture handler (tap button, mute, volume slider, play).
-════════════════════════════════════════════════════════════ */
+    _stopPlayback();
+    _activeChannel = ch;
 
-var _snxViz = (function () {
+    // Update guide highlight
+    document.querySelectorAll('.snx-tv-channel-card').forEach(el => {
+      el.classList.toggle('active-channel', el.dataset.chId === channelId);
+    });
 
-  var _canvas    = null;
-  var _ctx       = null;
-  var _raf       = null;
-  var _analyser  = null;
-  var _srcNode   = null;   // NEVER disconnected once created
-  var _audioCtx  = null;
-  var _gainNode  = null;   // master gain for volume control
-  var _connected = false;  // true once the permanent graph is built
-  var _active    = false;  // true while canvas animation is running
-  var _lastVideo = null;
+    // Update channel badge
+    const badge = _el('snxTvChannelBadge');
+    if (badge) badge.textContent = ch.name;
 
-  // Particle field
-  var _particles = [];
-  var PARTICLE_COUNT = 55;
+    // Subscribe to this channel's media
+    _subscribeMedia(channelId);
+  }
 
-  // Frequency data buffer
-  var _freqData  = null;
-  var _timeData  = null;
+  /* ════════════════════════════════════════════════════════════
+     PLAYBACK ENGINE
+  ════════════════════════════════════════════════════════════ */
 
-  function _initParticles(w, h) {
-    _particles = [];
-    for (var i = 0; i < PARTICLE_COUNT; i++) {
-      _particles.push({
-        x:  Math.random() * w,
-        y:  Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.4,
-        vy: (Math.random() - 0.5) * 0.4,
-        r:  Math.random() * 2 + 0.5,
-        a:  Math.random() * 0.4 + 0.05,
+  function _getVideoEl() { return _el('snxTvVideo'); }
+  function _getAudioEl() { return _el('snxTvAudio'); }
+
+  function _stopPlayback() {
+    _playing = false;
+    const vid = _getVideoEl();
+    const aud = _getAudioEl();
+    if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
+    if (aud) { try { aud.pause(); aud.removeAttribute('src'); aud.load(); } catch (_) {} }
+    _hideVisualizer();
+  }
+
+  function _playItem(item) {
+    if (!item) { _showWaiting(); return; }
+    _playing = true;
+
+    const vid = _getVideoEl();
+    const aud = _getAudioEl();
+
+    // Update Now Playing
+    _renderNowPlaying(item);
+
+    if (item.mediaKind === 'video') {
+      // Hide visualizer, show video
+      _hideVisualizer();
+      if (!vid) return;
+      vid.style.display = 'block';
+      vid.setAttribute('data-snx-media-exempt', '1');
+      vid.src = item.url;
+      vid.load();
+      _tryPlay(vid);
+    } else if (item.mediaKind === 'audio') {
+      // Show visualizer, play audio
+      if (!aud) return;
+      if (vid) vid.style.display = 'none';
+      aud.src = item.url;
+      aud.load();
+      _showVisualizer(item);
+      _tryPlay(aud);
+    } else if (item.mediaKind === 'image') {
+      // Show image as artwork in player
+      _stopPlayback();
+      _playing = true; // mark as "playing" so UI is happy
+      _showImageItem(item);
+      // Advance after a fixed duration (e.g. 10 seconds)
+      setTimeout(_advanceQueue, 10000);
+    }
+  }
+
+  function _tryPlay(mediaEl) {
+    const p = mediaEl.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => {
+        _autoplayBlocked = false;
+        _hidePlayOverlay();
+      }).catch(err => {
+        if (err.name === 'NotAllowedError') {
+          _autoplayBlocked = true;
+          _showPlayOverlay();
+        } else {
+          console.warn(LOG, 'play error', err.message);
+          // Try without audio
+          mediaEl.muted = true;
+          mediaEl.play().catch(() => {});
+          _showPlayOverlay();
+        }
       });
     }
   }
 
-  /**
-   * Build the permanent Web Audio graph for the given video element.
-   * Safe to call multiple times — idempotent once connected.
-   * The graph is NEVER disconnected after creation.
-   */
-  function _connectAnalyser(videoEl) {
-    // Already connected to this element — nothing to do.
-    if (_connected && _lastVideo === videoEl) return;
+  function _advanceQueue() {
+    if (_mediaQueue.length === 0) { _showWaiting(); return; }
+    _queueIdx = (_queueIdx + 1) % _mediaQueue.length;
+    _playItem(_mediaQueue[_queueIdx]);
+  }
 
-    // If we already have a permanent graph but _lastVideo differs, this is a
-    // second <video> element (should never happen — there is only one — but guard
-    // defensively: keep the old graph rather than destroying it).
-    if (_connected) return;
+  function _showWaiting() {
+    _playing = false;
+    const vid = _getVideoEl();
+    if (vid) vid.style.display = 'none';
+    _hideVisualizer();
+    const wrap = _el('snxTvPlayerInner');
+    if (wrap) {
+      // Remove existing waiting msg
+      const old = wrap.querySelector('.snx-tv-waiting');
+      if (!old) {
+        const w = document.createElement('div');
+        w.className = 'snx-tv-waiting';
+        w.innerHTML =
+          '<div class="snx-tv-waiting-icon">📺</div>' +
+          '<div class="snx-tv-waiting-text">No content available on this channel.<br>' +
+          (_isFounder() ? 'Open TV Studio to add media.' : 'Check back soon.') + '</div>';
+        wrap.appendChild(w);
+      }
+    }
+    _renderNowPlaying(null);
+  }
 
-    _lastVideo = videoEl;
-    if (!videoEl) return;
+  function _clearWaiting() {
+    const wrap = _el('snxTvPlayerInner');
+    if (!wrap) return;
+    const w = wrap.querySelector('.snx-tv-waiting');
+    if (w) w.remove();
+  }
+
+  function _showImageItem(item) {
+    const vid = _getVideoEl();
+    if (vid) vid.style.display = 'none';
+    _hideVisualizer();
+    _clearWaiting();
+    const wrap = _el('snxTvPlayerInner');
+    if (!wrap) return;
+    let img = wrap.querySelector('.snx-tv-image-item');
+    if (!img) {
+      img = document.createElement('img');
+      img.className = 'snx-tv-image-item';
+      img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+      wrap.appendChild(img);
+    }
+    img.src = item.url;
+    img.alt = item.title || 'TV artwork';
+  }
+
+  function _clearImageItem() {
+    const wrap = _el('snxTvPlayerInner');
+    if (!wrap) return;
+    const img = wrap.querySelector('.snx-tv-image-item');
+    if (img) img.remove();
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     VISUALIZER (audio without custom artwork)
+  ════════════════════════════════════════════════════════════ */
+
+  let _vizCtx = null;
+  let _vizAnalyser = null;
+  let _vizAudioCtx = null;
+  let _vizSource   = null;
+  let _vizFrame    = null;
+  let _vizRunning  = false;
+
+  function _showVisualizer(item) {
+    _clearWaiting();
+    _clearImageItem();
+    const canvas  = _el('snxTvVisualizer');
+    const overlay = _el('snxTvVizOverlay');
+    if (!canvas) return;
+    canvas.classList.add('active');
+
+    if (item.artworkUrl) {
+      // Use artwork image instead of canvas waveform
+      canvas.classList.remove('active');
+      const wrap = _el('snxTvPlayerInner');
+      if (wrap) {
+        let img = wrap.querySelector('.snx-tv-image-item');
+        if (!img) {
+          img = document.createElement('img');
+          img.className = 'snx-tv-image-item';
+          img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;';
+          wrap.appendChild(img);
+        }
+        img.src = item.artworkUrl;
+        img.alt = item.title || 'Album artwork';
+      }
+    }
+
+    if (overlay) {
+      overlay.querySelector('.snx-tv-viz-title').textContent = item.title  || 'Unknown Track';
+      overlay.querySelector('.snx-tv-viz-artist').textContent = item.artist || '';
+    }
+
+    _startVizAnimation(canvas);
+  }
+
+  function _hideVisualizer() {
+    const canvas = _el('snxTvVisualizer');
+    if (canvas) canvas.classList.remove('active');
+    _stopVizAnimation();
+    _clearImageItem();
+  }
+
+  function _startVizAnimation(canvas) {
+    if (_vizRunning) return;
+    _vizRunning = true;
+    const aud = _getAudioEl();
+    if (!canvas || !aud) return;
 
     try {
-      if (!_audioCtx) {
-        var AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-        _audioCtx = new AudioCtx();
-        // This function is only called from user-gesture handlers (tap overlay,
-        // mute button, volume slider).  Resume immediately — the user gesture
-        // is on the call stack so the browser WILL allow it.
-        _audioCtx.resume().catch(function () {});
+      if (!_vizAudioCtx) {
+        _vizAudioCtx = new (global.AudioContext || global.webkitAudioContext)();
       }
-
-      // Build the permanent graph: source → analyser → gain → destination.
-      // After createMediaElementSource the element's native audio output is
-      // silenced; ALL sound must travel through this graph.
-      _srcNode  = _audioCtx.createMediaElementSource(videoEl);
-      _analyser = _audioCtx.createAnalyser();
-      _analyser.fftSize = 256;
-      _analyser.smoothingTimeConstant = 0.82;
-      _gainNode = _audioCtx.createGain();
-
-      _srcNode.connect(_analyser);
-      _analyser.connect(_gainNode);
-      _gainNode.connect(_audioCtx.destination);
-
-      _freqData  = new Uint8Array(_analyser.frequencyBinCount);
-      _timeData  = new Uint8Array(_analyser.frequencyBinCount);
-      _connected = true;
-
-      console.log('[SNX-VIZ] Web Audio graph built. AudioContext state:', _audioCtx.state);
+      if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
+      _vizSource   = _vizAudioCtx.createMediaElementSource(aud);
+      _vizAnalyser = _vizAudioCtx.createAnalyser();
+      _vizAnalyser.fftSize = 128;
+      _vizSource.connect(_vizAnalyser);
+      _vizAnalyser.connect(_vizAudioCtx.destination);
     } catch (e) {
-      // Browser restriction or element already captured — leave _connected false.
-      // Audio will fall back to the element's native output (v.volume still works).
-      console.info('[SNX-VIZ] Web Audio graph not available (non-fatal):', e.message);
-      _srcNode  = null;
-      _analyser = null;
-      _gainNode = null;
-    }
-  }
-
-  /** @deprecated — kept for safety; the permanent graph is never torn down. */
-  function _disconnectAnalyser() {
-    // No-op: disconnecting srcNode destroys the audio path permanently.
-    // The graph stays connected for the lifetime of the page.
-  }
-
-  function _bandEnergy(data, lo, hi) {
-    if (!data) return 0;
-    var sum = 0, n = hi - lo;
-    for (var i = lo; i < hi && i < data.length; i++) sum += data[i];
-    return n > 0 ? (sum / n) / 255 : 0;
-  }
-
-  function _draw() {
-    if (!_active || !_canvas || !_ctx) return;
-    _raf = requestAnimationFrame(_draw);
-
-    var w = _canvas.width;
-    var h = _canvas.height;
-    if (w < 2 || h < 2) return;
-
-    if (_analyser && _freqData) {
-      _analyser.getByteFrequencyData(_freqData);
-    }
-    if (_analyser && _timeData) {
-      _analyser.getByteTimeDomainData(_timeData);
+      console.warn(LOG, 'AudioContext error:', e.message);
     }
 
-    var freq = _freqData;
-    var time = _timeData;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { _vizRunning = false; return; }
+    _vizCtx = ctx;
 
-    var bass   = _bandEnergy(freq, 0,  4);
-    var mid    = _bandEnergy(freq, 4,  16);
-    var treble = _bandEnergy(freq, 16, 32);
-    var energy = bass * 0.5 + mid * 0.3 + treble * 0.2;
+    function draw() {
+      if (!_vizRunning) return;
+      _vizFrame = requestAnimationFrame(draw);
+      const W = canvas.width  = canvas.offsetWidth  || 320;
+      const H = canvas.height = canvas.offsetHeight || 180;
+      ctx.clearRect(0, 0, W, H);
 
-    // Trail fade
-    _ctx.fillStyle = 'rgba(2, 4, 15, 0.55)';
-    _ctx.fillRect(0, 0, w, h);
+      // Background
+      ctx.fillStyle = '#020812';
+      ctx.fillRect(0, 0, W, H);
 
-    // Deep radial background gradient, energy-reactive
-    var gAlpha = 0.08 + energy * 0.12;
-    var bgGrad = _ctx.createRadialGradient(w * 0.5, h * 0.55, 0, w * 0.5, h * 0.5, w * 0.7);
-    bgGrad.addColorStop(0,   'rgba(0,40,100,' + gAlpha + ')');
-    bgGrad.addColorStop(0.5, 'rgba(0,10,40,'  + (gAlpha * 0.5) + ')');
-    bgGrad.addColorStop(1,   'rgba(0,0,0,0)');
-    _ctx.fillStyle = bgGrad;
-    _ctx.fillRect(0, 0, w, h);
-
-    // Spectrum bars
-    if (freq) {
-      var barCount = 48;
-      var barW     = w / barCount;
-      var barGap   = barW * 0.35;
-      var maxBarH  = h * 0.38;
-      var centerY  = h * 0.72;
-
-      for (var bi = 0; bi < barCount; bi++) {
-        var idx   = Math.floor((bi / barCount) * (freq.length * 0.6));
-        var val   = freq[idx] / 255;
-        var barH  = val * maxBarH;
-        var bx    = bi * barW + barGap * 0.5;
-        var bw    = barW - barGap;
-        var hue   = 195 + (bi / barCount) * 40;
-        var sat   = 80  + val * 20;
-        var lit   = 35  + val * 45;
-        var alp   = 0.2 + val * 0.75;
-
-        var barGrad = _ctx.createLinearGradient(0, centerY - barH, 0, centerY);
-        barGrad.addColorStop(0, 'hsla(' + hue + ',' + sat + '%,' + (lit + 15) + '%,' + alp + ')');
-        barGrad.addColorStop(1, 'hsla(' + hue + ',' + sat + '%,' + lit + '%,0.05)');
-        _ctx.fillStyle = barGrad;
-        _ctx.fillRect(bx, centerY - barH, bw, barH);
-
-        // Mirror bars (subtle)
-        _ctx.fillStyle = 'hsla(' + hue + ',' + sat + '%,' + lit + '%,' + (alp * 0.12) + ')';
-        _ctx.fillRect(bx, centerY, bw, barH * 0.28);
-      }
-    }
-
-    // Waveform line
-    if (time) {
-      _ctx.beginPath();
-      _ctx.strokeStyle = 'rgba(0,174,239,' + (0.3 + energy * 0.55) + ')';
-      _ctx.lineWidth   = 1.5 + energy * 2.5;
-      _ctx.shadowBlur  = 8 + energy * 18;
-      _ctx.shadowColor = 'rgba(0,174,239,0.8)';
-      var sliceW = w / time.length;
-      var xw = 0;
-      for (var wi = 0; wi < time.length; wi++) {
-        var wv = time[wi] / 128 - 1;
-        var wy = h * 0.5 + wv * h * 0.12 * (1 + energy * 0.8);
-        if (wi === 0) _ctx.moveTo(xw, wy);
-        else          _ctx.lineTo(xw, wy);
-        xw += sliceW;
-      }
-      _ctx.stroke();
-      _ctx.shadowBlur  = 0;
-      _ctx.shadowColor = 'transparent';
-    }
-
-    // Floating particles
-    for (var pi = 0; pi < _particles.length; pi++) {
-      var p = _particles[pi];
-      p.x += p.vx * (1 + energy * 2.5);
-      p.y += p.vy * (1 + energy * 1.5);
-      if (p.x < 0) p.x = w;
-      if (p.x > w) p.x = 0;
-      if (p.y < 0) p.y = h;
-      if (p.y > h) p.y = 0;
-      var pa = p.a * (0.4 + bass * 0.8);
-      _ctx.beginPath();
-      _ctx.arc(p.x, p.y, p.r * (1 + energy * 0.6), 0, Math.PI * 2);
-      _ctx.fillStyle = 'rgba(0,174,239,' + pa + ')';
-      _ctx.fill();
-    }
-
-    // Bass-reactive central glow
-    var glowR = w * (0.08 + bass * 0.18);
-    var glowG = _ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, glowR);
-    glowG.addColorStop(0, 'rgba(0,174,239,' + (bass * 0.3) + ')');
-    glowG.addColorStop(1, 'rgba(0,174,239,0)');
-    _ctx.fillStyle = glowG;
-    _ctx.fillRect(0, 0, w, h);
-
-    // Channel label
-    _ctx.globalAlpha   = 0.15 + energy * 0.1;
-    _ctx.font          = 'bold ' + Math.max(8, Math.round(w * 0.018)) + 'px system-ui,sans-serif';
-    _ctx.fillStyle     = '#00AEEF';
-    _ctx.textAlign     = 'center';
-    _ctx.fillText('SHADOW NEXUS TV', w * 0.5, h * 0.89);
-    _ctx.globalAlpha   = 1;
-    _ctx.textAlign     = 'left';
-
-    // Now Playing overlay — title and artist drawn on top of visualizer
-    var _item = _state.current;
-    if (_item) {
-      var _title  = _item.title  || '';
-      var _artist = _item.artist || '';
-      var _maxW   = w * 0.82;
-
-      // Title
-      if (_title) {
-        var _tSize = Math.max(11, Math.min(16, Math.round(w * 0.028)));
-        _ctx.font         = '700 ' + _tSize + 'px system-ui,sans-serif';
-        _ctx.fillStyle    = 'rgba(220,240,255,0.90)';
-        _ctx.globalAlpha  = 0.9;
-        _ctx.textAlign    = 'center';
-        _ctx.shadowBlur   = 8;
-        _ctx.shadowColor  = 'rgba(0,100,200,0.7)';
-        var _titleText    = _title;
-        while (_ctx.measureText(_titleText).width > _maxW && _titleText.length > 4) {
-          _titleText = _titleText.slice(0, -4) + '…';
+      if (_vizAnalyser) {
+        const data = new Uint8Array(_vizAnalyser.frequencyBinCount);
+        _vizAnalyser.getByteFrequencyData(data);
+        const barW = W / data.length * 2.5;
+        data.forEach((v, i) => {
+          const h = (v / 255) * H * 0.85;
+          const x = i * (barW + 1);
+          const alpha = 0.3 + (v / 255) * 0.7;
+          ctx.fillStyle = `rgba(0,${100 + v * 0.6},${200 + v * 0.2},${alpha})`;
+          ctx.fillRect(x, H - h, barW, h);
+        });
+      } else {
+        // Idle wave if no analyser
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0,174,239,0.3)';
+        ctx.lineWidth = 2;
+        const t = Date.now() / 1000;
+        for (let x = 0; x < W; x++) {
+          const y = H / 2 + Math.sin(x * 0.04 + t * 2) * 20 + Math.sin(x * 0.02 + t) * 10;
+          x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         }
-        _ctx.fillText(_titleText, w * 0.5, h * 0.14);
-        _ctx.shadowBlur = 0;
+        ctx.stroke();
       }
+    }
+    draw();
+  }
 
-      // Artist
-      if (_artist) {
-        var _aSize = Math.max(9, Math.min(13, Math.round(w * 0.022)));
-        _ctx.font         = '600 ' + _aSize + 'px system-ui,sans-serif';
-        _ctx.fillStyle    = 'rgba(0,174,239,0.75)';
-        _ctx.globalAlpha  = 0.75;
-        _ctx.textAlign    = 'center';
-        var _artistText   = _artist;
-        while (_ctx.measureText(_artistText).width > _maxW && _artistText.length > 4) {
-          _artistText = _artistText.slice(0, -4) + '…';
+  function _stopVizAnimation() {
+    _vizRunning = false;
+    if (_vizFrame) { cancelAnimationFrame(_vizFrame); _vizFrame = null; }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PLAY OVERLAY (autoplay blocked)
+  ════════════════════════════════════════════════════════════ */
+
+  function _showPlayOverlay() {
+    const ol = _el('snxTvPlayOverlay');
+    if (ol) ol.classList.add('visible');
+  }
+  function _hidePlayOverlay() {
+    const ol = _el('snxTvPlayOverlay');
+    if (ol) ol.classList.remove('visible');
+  }
+
+  function _onPlayOverlayClick() {
+    _hidePlayOverlay();
+    const item = _mediaQueue[_queueIdx];
+    if (!item) return;
+    const vid = _getVideoEl();
+    const aud = _getAudioEl();
+    const el  = (item.mediaKind === 'video') ? vid : aud;
+    if (!el) return;
+    el.muted = false;
+    el.play().catch(() => {});
+    if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') {
+      _vizAudioCtx.resume().catch(() => {});
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     NOW PLAYING RENDER
+  ════════════════════════════════════════════════════════════ */
+
+  function _renderNowPlaying(item) {
+    const npTitle  = _el('snxTvNpTitle');
+    const npSub    = _el('snxTvNpSub');
+    const npArt    = _el('snxTvNpArt');
+    const npChannel= _el('snxTvNpChannel');
+
+    if (!item) {
+      if (npTitle) npTitle.textContent = 'Nothing playing';
+      if (npSub)   npSub.textContent   = '';
+      if (npArt)   { npArt.innerHTML = '📺'; npArt.style.backgroundImage = ''; }
+      if (npChannel && _activeChannel) npChannel.textContent = _activeChannel.name;
+      return;
+    }
+
+    if (npTitle) npTitle.textContent = item.title  || item.fileName || 'Untitled';
+    if (npSub)   npSub.textContent   = item.artist || (item.mediaKind === 'video' ? 'Video' : '');
+    if (npChannel && _activeChannel) npChannel.textContent = _activeChannel.name;
+    if (npArt) {
+      const art = item.artworkUrl || (_activeChannel && _activeChannel.artworkUrl) || '';
+      if (art) {
+        npArt.style.backgroundImage = 'url(' + art + ')';
+        npArt.innerHTML = '';
+      } else {
+        npArt.style.backgroundImage = '';
+        npArt.innerHTML = KIND_ICON[item.mediaKind] || '🎬';
+      }
+    }
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     TV GUIDE RENDER
+  ════════════════════════════════════════════════════════════ */
+
+  function _renderGuide() {
+    const grid = _el('snxTvGuideGrid');
+    if (!grid) return;
+
+    if (_channels.length === 0) {
+      grid.innerHTML =
+        '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' +
+        (_isFounder() ? 'No channels yet. Use TV Studio to create one.' : 'No channels available.') +
+        '</div>';
+      return;
+    }
+
+    grid.innerHTML = _channels.map(ch => {
+      const isActive  = _activeChannel && _activeChannel.id === ch.id;
+      const artStyle  = ch.artworkUrl ? 'background-image:url(' + ch.artworkUrl + ');' : '';
+      const artContent= ch.artworkUrl ? '' : '📺';
+      const mediaCount= '';  // optional: ch.mediaCount || ''
+      return (
+        '<div class="snx-tv-channel-card' + (isActive ? ' active-channel' : '') + '" ' +
+        'data-ch-id="' + _esc(ch.id) + '" ' +
+        'onclick="window.SNXTv.selectChannel(' + _json(ch.id) + ')" ' +
+        'role="button" tabindex="0" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \')window.SNXTv.selectChannel(' + _json(ch.id) + ')">' +
+          '<div class="snx-tv-ch-art" style="' + artStyle + '">' + artContent + '</div>' +
+          '<div class="snx-tv-ch-info">' +
+            '<div class="snx-tv-ch-name">' + _esc(ch.name) + '</div>' +
+            '<div class="snx-tv-ch-meta">' + (ch.description || '') + '</div>' +
+          '</div>' +
+          (isActive
+            ? '<span class="snx-tv-ch-badge playing"><span class="snx-tv-onair-dot"></span>ON</span>'
+            : '<span class="snx-tv-ch-badge">CH ' + (ch.order !== undefined ? ch.order + 1 : '') + '</span>') +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     TV STUDIO — only Founder
+  ════════════════════════════════════════════════════════════ */
+
+  function _showStudioBar() {
+    const bar = _el('snxTvStudioBar');
+    if (bar) bar.style.display = '';
+  }
+  function _hideStudioBar() {
+    const bar = _el('snxTvStudioBar');
+    if (bar) bar.style.display = 'none';
+  }
+
+  function _toggleStudio() {
+    _studioOpen = !_studioOpen;
+    const panel = _el('snxTvStudioPanel');
+    if (panel) panel.classList.toggle('open', _studioOpen);
+    const btn = _el('snxTvStudioToggleBtn');
+    if (btn) btn.textContent = _studioOpen ? '✕ Close Studio' : '📺 TV Studio';
+    if (_studioOpen) _renderStudioChannels();
+  }
+
+  function _switchStudioTab(tab) {
+    _studioTab = tab;
+    document.querySelectorAll('.snx-tv-studio-tab').forEach(el => {
+      el.classList.toggle('active', el.dataset.tab === tab);
+    });
+    document.querySelectorAll('.snx-tv-studio-pane').forEach(el => {
+      el.classList.toggle('active', el.dataset.pane === tab);
+    });
+  }
+
+  /* ── Studio: Channels tab ── */
+
+  function _renderStudioChannels() {
+    const list = _el('snxTvStudioChList');
+    if (!list) return;
+
+    if (_channels.length === 0) {
+      list.innerHTML = '<li style="color:#4a7a9a;font-size:13px;padding:8px 0;">No channels yet.</li>';
+      return;
+    }
+
+    list.innerHTML = _channels.map(ch => (
+      '<li class="snx-tv-ch-row">' +
+        '<span class="snx-tv-ch-row-name">' + _esc(ch.name) + '</span>' +
+        '<button class="snx-tv-btn snx-tv-btn-primary" ' +
+          'onclick="window.SNXTv.studioOpenChannel(' + _json(ch.id) + ')">Manage Media</button>' +
+        '<button class="snx-tv-btn snx-tv-btn-danger" ' +
+          'onclick="window.SNXTv.studioDeleteChannel(' + _json(ch.id) + ')">Delete</button>' +
+      '</li>'
+    )).join('');
+  }
+
+  /* ── Studio: Create channel ── */
+
+  function _studioCreateChannel() {
+    const nameEl = _el('snxTvNewChName');
+    const descEl = _el('snxTvNewChDesc');
+    const name   = (nameEl ? nameEl.value.trim() : '');
+    const desc   = (descEl ? descEl.value.trim() : '');
+    if (!name) { _showStatus('snxTvCreateChStatus', 'Channel name is required.', 'err'); return; }
+
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
+               + '-' + Date.now().toString(36);
+
+    const data = {
+      id,
+      name,
+      description: desc,
+      artworkUrl: '',
+      order: _channels.length,
+      createdAt: Date.now(),
+    };
+
+    _fsSetDoc(_fsDoc(COL_CHANNELS, id), data)
+      .then(() => {
+        _showStatus('snxTvCreateChStatus', 'Channel "' + name + '" created!', 'ok');
+        if (nameEl) nameEl.value = '';
+        if (descEl) descEl.value = '';
+      })
+      .catch(e => _showStatus('snxTvCreateChStatus', 'Error: ' + e.message, 'err'));
+  }
+
+  /* ── Studio: Delete channel (with confirmation) ── */
+
+  function _studioDeleteChannel(channelId) {
+    const ch = _channels.find(c => c.id === channelId);
+    if (!ch) return;
+    if (!confirm('Delete channel "' + ch.name + '"? This cannot be undone. Media files remain in storage.')) return;
+
+    _fsDeleteDoc(_fsDoc(COL_CHANNELS, channelId))
+      .then(() => {
+        if (_studioChannel && _studioChannel.id === channelId) {
+          _studioChannel = null;
+          _setHtml('snxTvStudioMediaPaneTitle', 'Select a channel above');
+          _setHtml('snxTvStudioMediaList', '');
+          if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
         }
-        _ctx.fillText(_artistText, w * 0.5, h * 0.14 + (_title ? Math.round(w * 0.032) : 0));
-      }
+      })
+      .catch(e => console.warn(LOG, 'delete channel error', e));
+  }
 
-      _ctx.globalAlpha = 1;
-      _ctx.textAlign   = 'left';
-      _ctx.shadowBlur  = 0;
+  /* ── Studio: Open channel media ── */
+
+  function _studioOpenChannel(channelId) {
+    const ch = _channels.find(c => c.id === channelId);
+    if (!ch) return;
+    _studioChannel = ch;
+    _switchStudioTab('media');
+
+    const title = _el('snxTvStudioMediaPaneTitle');
+    if (title) title.textContent = 'Media for: ' + ch.name;
+
+    // Populate channel selector in upload form
+    const sel = _el('snxTvUploadChannelId');
+    if (sel) sel.value = channelId;
+
+    _loadStudioMedia(channelId);
+  }
+
+  function _loadStudioMedia(channelId) {
+    if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
+
+    const col = _fsCollection(COL_MEDIA);
+    const q   = _fsQuery(col,
+      _fsWhere('channelId', '==', channelId),
+      _fsOrderBy('order', 'asc')
+    );
+
+    _studioMediaUnsub = _fsOnSnapshot(q, snap => {
+      _studioMedia = [];
+      snap.forEach(d => _studioMedia.push({ id: d.id, ...d.data() }));
+      _studioMedia.sort((a, b) => (a.order || 0) - (b.order || 0));
+      _renderStudioMedia();
+    });
+  }
+
+  function _renderStudioMedia() {
+    const list = _el('snxTvStudioMediaList');
+    if (!list) return;
+
+    if (_studioMedia.length === 0) {
+      list.innerHTML = '<li style="color:#4a7a9a;font-size:13px;padding:8px 0;">No media. Upload content above.</li>';
+      return;
+    }
+
+    list.innerHTML = _studioMedia.map((m, i) => (
+      '<li class="snx-tv-media-row">' +
+        '<span class="snx-tv-drag-handle" title="Drag to reorder">⠿</span>' +
+        '<span class="snx-tv-media-row-icon">' + (KIND_ICON[m.mediaKind] || '📁') + '</span>' +
+        '<div class="snx-tv-media-row-info">' +
+          '<div class="snx-tv-media-row-title">' + _esc(m.title || m.fileName || 'Untitled') + '</div>' +
+          '<div class="snx-tv-media-row-meta">' + (m.artist ? _esc(m.artist) + ' · ' : '') + (m.mediaKind || '') + '</div>' +
+        '</div>' +
+        '<button class="snx-tv-btn snx-tv-btn-danger" ' +
+          'onclick="window.SNXTv.studioDeleteMedia(' + _json(m.id) + ')">Remove</button>' +
+      '</li>'
+    )).join('');
+  }
+
+  /* ── Studio: Delete media ── */
+
+  function _studioDeleteMedia(mediaId) {
+    const m = _studioMedia.find(x => x.id === mediaId);
+    if (!m) return;
+    if (!confirm('Remove "' + (m.title || 'this item') + '" from this channel?')) return;
+
+    // Delete Firestore doc; R2 file is left in place (no accidental deletions)
+    _fsDeleteDoc(_fsDoc(COL_MEDIA, mediaId))
+      .catch(e => console.warn(LOG, 'delete media error', e));
+  }
+
+  /* ── Studio: Upload ── */
+
+  function _studioUploadMedia() {
+    const fileInput  = _el('snxTvUploadFile');
+    const titleInput = _el('snxTvUploadTitle');
+    const artistInput= _el('snxTvUploadArtist');
+    const kindSel    = _el('snxTvUploadKind');
+    const chIdEl     = _el('snxTvUploadChannelId');
+
+    const file      = fileInput && fileInput.files[0];
+    const title     = titleInput  ? titleInput.value.trim()   : '';
+    const artist    = artistInput ? artistInput.value.trim()  : '';
+    const mediaKind = kindSel     ? kindSel.value             : 'video';
+    const channelId = chIdEl      ? chIdEl.value.trim()       : (_studioChannel && _studioChannel.id) || '';
+
+    if (!file)      { _showStatus('snxTvUploadStatus', 'Please select a file.', 'err'); return; }
+    if (!channelId) { _showStatus('snxTvUploadStatus', 'Please select a channel.', 'err'); return; }
+
+    _showStatus('snxTvUploadStatus', 'Uploading…', 'info');
+    const prog = _el('snxTvUploadProgressWrap');
+    const bar  = _el('snxTvUploadProgressBar');
+    if (prog) prog.classList.add('visible');
+    if (bar)  bar.style.width = '0%';
+
+    _getIdToken().then(token => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('channelId', channelId);
+      fd.append('mediaKind', mediaKind);
+      fd.append('title',  title);
+      fd.append('artist', artist);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', WORKER + '/tv/upload-media');
+      xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+
+      xhr.upload.onprogress = e => {
+        if (e.lengthComputable && bar) {
+          bar.style.width = Math.round(e.loaded / e.total * 90) + '%';
+        }
+      };
+
+      xhr.onload = () => {
+        if (bar) bar.style.width = '100%';
+        let res;
+        try { res = JSON.parse(xhr.responseText); } catch (_) { res = {}; }
+        if (xhr.status === 200 && res.url) {
+          _onUploadSuccess(res, channelId, title, artist, mediaKind);
+        } else {
+          _showStatus('snxTvUploadStatus', 'Upload failed: ' + (res.error || xhr.status), 'err');
+          if (prog) setTimeout(() => prog.classList.remove('visible'), 2000);
+        }
+      };
+      xhr.onerror = () => {
+        _showStatus('snxTvUploadStatus', 'Network error during upload.', 'err');
+        if (prog) prog.classList.remove('visible');
+      };
+      xhr.send(fd);
+    }).catch(e => _showStatus('snxTvUploadStatus', 'Auth error: ' + e.message, 'err'));
+  }
+
+  function _onUploadSuccess(res, channelId, title, artist, mediaKind) {
+    const prog = _el('snxTvUploadProgressWrap');
+
+    // Save metadata to Firestore
+    const mediaData = {
+      channelId,
+      url:       res.url,
+      key:       res.key,
+      mediaKind,
+      title:     title  || res.key.split('/').pop() || 'Untitled',
+      artist:    artist || '',
+      artworkUrl:'',
+      fileName:  res.key.split('/').pop() || '',
+      order:     _studioMedia.length,
+      createdAt: Date.now(),
+    };
+
+    _fsAddDoc(_fsCollection(COL_MEDIA), mediaData)
+      .then(() => {
+        _showStatus('snxTvUploadStatus', '✓ Upload complete! Media added to channel.', 'ok');
+        if (prog) setTimeout(() => prog.classList.remove('visible'), 1500);
+        const fi = _el('snxTvUploadFile');
+        if (fi) fi.value = '';
+        const ti = _el('snxTvUploadTitle');
+        if (ti) ti.value = '';
+        const ai = _el('snxTvUploadArtist');
+        if (ai) ai.value = '';
+      })
+      .catch(e => {
+        _showStatus('snxTvUploadStatus', 'Firestore error: ' + e.message, 'err');
+        if (prog) prog.classList.remove('visible');
+      });
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     UTILITY
+  ════════════════════════════════════════════════════════════ */
+
+  function _esc(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function _json(val) {
+    return JSON.stringify(val);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     PAGE OPEN / CLOSE lifecycle (called by navTo)
+  ════════════════════════════════════════════════════════════ */
+
+  function _pageOpen() {
+    if (!global._snxFirestore || !global._snxFirestore.db) {
+      console.error(LOG, 'Firestore not available — ensure firebase-config.js is loaded');
+      return;
+    }
+
+    _ensurePageDom();
+    _subscribeChannels();
+
+    if (_isFounder()) {
+      _showStudioBar();
+    } else {
+      _hideStudioBar();
     }
   }
 
-  function _resizeCanvas() {
-    if (!_canvas) return;
-    var wrap = _canvas.parentElement;
-    if (!wrap) return;
-    var w = wrap.offsetWidth  || 640;
-    var h = wrap.offsetHeight || 360;
-    if (_canvas.width !== w || _canvas.height !== h) {
-      _canvas.width  = w;
-      _canvas.height = h;
-      _initParticles(w, h);
+  function _pageLeave() {
+    // Don't stop playback when leaving — keep audio in background
+    // Just unsubscribe non-essential listeners
+  }
+
+  function _pageDestroy() {
+    _stopPlayback();
+    if (_channelsUnsub) { _channelsUnsub(); _channelsUnsub = null; }
+    if (_mediaUnsub)    { _mediaUnsub();    _mediaUnsub    = null; }
+    if (_studioMediaUnsub) { _studioMediaUnsub(); _studioMediaUnsub = null; }
+    _stopVizAnimation();
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     ENSURE PAGE DOM (idempotent)
+  ════════════════════════════════════════════════════════════ */
+
+  function _ensurePageDom() {
+    const page = _el('tvPage');
+    if (!page || _el('snxTvPlayerWrap')) return; // already built
+
+    page.innerHTML = [
+      '<h2 class="eclipse-title" style="margin:0 0 14px;">📺 Shadow Nexus TV</h2>',
+
+      /* ── Player ── */
+      '<div class="snx-tv-player-wrap" id="snxTvPlayerWrap">',
+        '<div id="snxTvPlayerInner" style="width:100%;height:100%;position:relative;">',
+          '<video id="snxTvVideo" data-snx-media-exempt="1" ',
+            'playsinline webkit-playsinline preload="metadata" ',
+            'style="display:none;"></video>',
+          '<audio id="snxTvAudio" preload="none"></audio>',
+          '<canvas id="snxTvVisualizer"></canvas>',
+          '<div class="snx-tv-viz-overlay" id="snxTvVizOverlay">',
+            '<div class="snx-tv-viz-title"></div>',
+            '<div class="snx-tv-viz-artist"></div>',
+          '</div>',
+          '<div class="snx-tv-play-overlay" id="snxTvPlayOverlay">',
+            '<button class="snx-tv-play-btn" id="snxTvPlayBtn">▶</button>',
+            '<div class="snx-tv-play-label">Tap to enable playback</div>',
+          '</div>',
+        '</div>',
+        '<span class="snx-tv-channel-badge" id="snxTvChannelBadge">TV</span>',
+      '</div>',
+
+      /* ── Now Playing ── */
+      '<div class="snx-tv-now-playing">',
+        '<div class="snx-tv-np-art" id="snxTvNpArt">📺</div>',
+        '<div class="snx-tv-np-info">',
+          '<div class="snx-tv-np-title" id="snxTvNpTitle">Loading…</div>',
+          '<div class="snx-tv-np-sub"   id="snxTvNpSub"></div>',
+        '</div>',
+        '<div class="snx-tv-np-channel" id="snxTvNpChannel"></div>',
+      '</div>',
+
+      /* ── TV Guide ── */
+      '<div class="snx-tv-guide">',
+        '<p class="snx-tv-guide-title">📡 Channel Guide</p>',
+        '<div class="snx-tv-guide-grid" id="snxTvGuideGrid">',
+          '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">Loading channels…</div>',
+        '</div>',
+      '</div>',
+
+      /* ── Founder Studio Bar (hidden by default) ── */
+      '<div class="snx-tv-studio-bar" id="snxTvStudioBar" style="display:none;">',
+        '<span class="snx-tv-studio-label">👑 Founder Tools</span>',
+        '<button class="snx-tv-studio-toggle-btn" id="snxTvStudioToggleBtn" ',
+          'onclick="window.SNXTv.toggleStudio()">📺 TV Studio</button>',
+      '</div>',
+
+      /* ── Studio Panel ── */
+      '<div class="snx-tv-studio-panel" id="snxTvStudioPanel">',
+
+        /* Tabs */
+        '<div class="snx-tv-studio-tabs">',
+          '<button class="snx-tv-studio-tab active" data-tab="channels" ',
+            'onclick="window.SNXTv.switchStudioTab(\'channels\')">Channels</button>',
+          '<button class="snx-tv-studio-tab" data-tab="media" ',
+            'onclick="window.SNXTv.switchStudioTab(\'media\')">Add Media</button>',
+        '</div>',
+
+        /* Channels pane */
+        '<div class="snx-tv-studio-pane active" data-pane="channels">',
+          '<p style="font-size:12px;color:#5a8aaa;margin:0 0 12px;">Create and manage TV channels.</p>',
+          '<div class="snx-tv-create-ch-form">',
+            '<label for="snxTvNewChName" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">New Channel Name</label>',
+            '<input id="snxTvNewChName" placeholder="e.g. Shadow Nexus TV" style="margin:4px 0 8px;">',
+            '<label for="snxTvNewChDesc" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Description (optional)</label>',
+            '<input id="snxTvNewChDesc" placeholder="Short description" style="margin:4px 0 10px;">',
+            '<button class="snx-tv-btn snx-tv-btn-success" ',
+              'onclick="window.SNXTv.studioCreateChannel()" style="width:100%;padding:8px;">Create Channel</button>',
+            '<div class="snx-tv-status" id="snxTvCreateChStatus"></div>',
+          '</div>',
+          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;">Your Channels</p>',
+          '<ul class="snx-tv-ch-list" id="snxTvStudioChList"></ul>',
+        '</div>',
+
+        /* Media pane */
+        '<div class="snx-tv-studio-pane" data-pane="media">',
+          '<div id="snxTvStudioMediaPaneTitle" style="font-size:13px;font-weight:700;color:#c8e8ff;margin-bottom:14px;">Select a channel from the Channels tab</div>',
+          '<div class="snx-tv-upload-form">',
+            '<label for="snxTvUploadChannelId" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Channel</label>',
+            '<select id="snxTvUploadChannelId" style="margin:4px 0 8px;"></select>',
+            '<label for="snxTvUploadKind" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Media Type</label>',
+            '<select id="snxTvUploadKind" style="margin:4px 0 8px;">',
+              '<option value="video">Video</option>',
+              '<option value="audio">Music / Audio</option>',
+              '<option value="image">Artwork / Image</option>',
+            '</select>',
+            '<label for="snxTvUploadTitle" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Title (optional)</label>',
+            '<input id="snxTvUploadTitle" placeholder="Title" style="margin:4px 0 8px;">',
+            '<label for="snxTvUploadArtist" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">Artist / Creator (optional)</label>',
+            '<input id="snxTvUploadArtist" placeholder="Artist name" style="margin:4px 0 8px;">',
+            '<label for="snxTvUploadFile" style="font-size:11px;font-weight:700;color:#5a8aaa;letter-spacing:.5px;text-transform:uppercase;">File</label>',
+            '<input type="file" id="snxTvUploadFile" accept="video/*,audio/*,image/*" style="margin:4px 0 10px;color:#c8e8ff;">',
+            '<button class="snx-tv-btn snx-tv-btn-success" ',
+              'onclick="window.SNXTv.studioUploadMedia()" style="width:100%;padding:8px;">Upload to Channel</button>',
+            '<div class="snx-tv-progress-wrap" id="snxTvUploadProgressWrap">',
+              '<div class="snx-tv-progress-bar" id="snxTvUploadProgressBar"></div>',
+            '</div>',
+            '<div class="snx-tv-status" id="snxTvUploadStatus"></div>',
+          '</div>',
+          '<p style="font-size:11px;color:#4a7a9a;margin:14px 0 8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;">Channel Media</p>',
+          '<ul class="snx-tv-media-list" id="snxTvStudioMediaList"></ul>',
+        '</div>',
+
+      '</div>', /* end studio panel */
+
+    ].join('');
+
+    /* Wire media element events */
+    const vid = _el('snxTvVideo');
+    const aud = _el('snxTvAudio');
+    if (vid) {
+      vid.addEventListener('ended', _advanceQueue);
+      vid.addEventListener('error', () => {
+        console.warn(LOG, 'video error — advancing queue');
+        setTimeout(_advanceQueue, 1000);
+      });
     }
-  }
-
-  /**
-   * Ensure the Web Audio graph is built for the given element.
-   * Called for ALL media items (not just visualizer mode) so the graph
-   * is established before the first track and never needs to be rebuilt.
-   * Safe to call repeatedly — idempotent.
-   */
-  function ensureGraph(videoEl) {
-    if (!_connected && videoEl) _connectAnalyser(videoEl);
-  }
-
-  function start(videoEl) {
-    _canvas = document.getElementById('snxTvVisualizer');
-    if (!_canvas) return;
-    _ctx = _canvas.getContext('2d');
-    if (!_ctx) return;
-    _resizeCanvas();
-    // Do NOT call _connectAnalyser here — start() is invoked from the render
-    // path (not a user gesture).  The graph is built only from user-gesture
-    // handlers (tap overlay, mute button, volume slider) via ensureGraph().
-    // The canvas animation runs; it will show silence until the graph is built.
-    if (!_active) {
-      _active = true;
-      _raf = requestAnimationFrame(_draw);
+    if (aud) {
+      aud.addEventListener('ended', _advanceQueue);
+      aud.addEventListener('error', () => {
+        console.warn(LOG, 'audio error — advancing queue');
+        setTimeout(_advanceQueue, 1000);
+      });
     }
+
+    /* Play overlay button */
+    const btn = _el('snxTvPlayBtn');
+    if (btn) btn.addEventListener('click', _onPlayOverlayClick);
+
+    /* Populate channel select in upload form reactively */
+    _updateChannelSelect();
   }
 
-  function stop() {
-    _active = false;
-    if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
-    if (_canvas && _ctx) {
-      _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
-    }
-    // IMPORTANT: graph stays connected — audio still flows through gainNode.
-    // Only the canvas animation is stopped here.
+  /* Populate the channel <select> in upload form whenever channels change */
+  function _updateChannelSelect() {
+    const sel = _el('snxTvUploadChannelId');
+    if (!sel) return;
+    const prevVal = sel.value;
+    sel.innerHTML = _channels.map(ch =>
+      '<option value="' + _esc(ch.id) + '">' + _esc(ch.name) + '</option>'
+    ).join('');
+    if (prevVal && _channels.find(c => c.id === prevVal)) sel.value = prevVal;
+    else if (_studioChannel) sel.value = _studioChannel.id;
   }
 
-  function destroy() {
-    // destroy() is only called on sign-out. The AudioContext can be closed
-    // because the entire TV will be re-initialized on next sign-in.
-    stop();
-    if (_audioCtx) {
-      try { _audioCtx.close(); } catch(e) {}
-      _audioCtx = null;
-    }
-    _srcNode   = null;
-    _analyser  = null;
-    _gainNode  = null;
-    _connected = false;
-    _lastVideo = null;
-    _freqData  = null;
-    _timeData  = null;
+  /* ════════════════════════════════════════════════════════════
+     INIT
+  ════════════════════════════════════════════════════════════ */
+
+  function _init() {
+    console.log(LOG, 'module loaded', BUILD);
   }
 
-  // Expose audioCtx, gainNode, and ensureGraph so external code can reach them.
-  return { start: start, stop: stop, destroy: destroy, ensureGraph: ensureGraph,
-    get _audioCtx() { return _audioCtx; },
-    get _gainNode()  { return _gainNode;  }
+  /* ════════════════════════════════════════════════════════════
+     PUBLIC API
+  ════════════════════════════════════════════════════════════ */
+
+  global.SNXTv = {
+    /* Navigation lifecycle */
+    pageOpen:    _pageOpen,
+    pageLeave:   _pageLeave,
+    pageDestroy: _pageDestroy,
+
+    /* Viewer */
+    selectChannel: _selectChannel,
+
+    /* Studio (founder) */
+    toggleStudio:         _toggleStudio,
+    switchStudioTab:      _switchStudioTab,
+    studioCreateChannel:  _studioCreateChannel,
+    studioDeleteChannel:  _studioDeleteChannel,
+    studioOpenChannel:    _studioOpenChannel,
+    studioDeleteMedia:    _studioDeleteMedia,
+    studioUploadMedia:    _studioUploadMedia,
+
+    /* Diagnostics */
+    getBuild:    () => BUILD,
+    getChannels: () => _channels,
+    getQueue:    () => _mediaQueue,
   };
-})();
 
-/* ════════════════════════════════════════════════════════════
-   ── ARTWORK CINEMATIC MODE ────────────────────────────────
-   Ken Burns slow pan + glow pulse animation for artwork panel.
-════════════════════════════════════════════════════════════ */
-
-var _snxArtwork = (function () {
-
-  var _active = false;
-  var _raf    = null;
-  var _t      = 0;
-
-  function _tick() {
-    if (!_active) return;
-    _raf = requestAnimationFrame(_tick);
-    _t  += 0.0008;
-
-    var bg = document.getElementById('snxTvArtworkBg');
-    if (bg) {
-      var px = 50 + Math.sin(_t * 0.7) * 3;
-      var py = 50 + Math.cos(_t * 0.5) * 3;
-      var sc = 1.08 + Math.sin(_t * 0.3) * 0.04;
-      bg.style.backgroundPosition = px + '% ' + py + '%';
-      bg.style.transform          = 'scale(' + sc + ')';
-    }
-
-    var glow = document.getElementById('snxTvArtworkGlow');
-    if (glow) {
-      glow.style.opacity = (0.3 + Math.sin(_t * 1.8) * 0.12).toFixed(3);
-    }
-  }
-
-  function start() {
-    if (!_active) {
-      _active = true;
-      _raf    = requestAnimationFrame(_tick);
-    }
-  }
-
-  function stop() {
-    _active = false;
-    if (_raf) { cancelAnimationFrame(_raf); _raf = null; }
-  }
-
-  return { start: start, stop: stop };
-})();
-
-/* ════════════════════════════════════════════════════════════
-   ── PUBLIC API ────────────────────────────────────────────
-   Exposed as window.SNXTV
-════════════════════════════════════════════════════════════ */
-
-global.SNXTV = {
-  // Lifecycle
-  pageOpen:  pageOpen,
-  pageLeave: pageLeave,
-
-  // Core read/subscribe
-  getState:  getState,
-  subscribe: subscribe,
-
-  // Media Adapter — delegates to SNXTVStudio
-  _adapter:  { getQueue: _getQueue },
-
-  // Playlist loader (called by SNXTVStudio)
-  _loadPlaylistQueue: _loadPlaylistQueue,
-
-  // Timeline resync hook (called by SNXTVTimeline)
-  _timelineResync: _timelineResync,
-
-  // Channel switch (called by viewer channel selector)
-  switchChannel: _switchChannel,
-
-  // Channel selector refresh (called by Studio after channel created/deleted)
-  _refreshChannelSelector: _refreshChannelSelector,
-
-  // Volume API (accessible from external UI if needed)
-  setVolume: function (v) {
-    _volume = Math.max(0, Math.min(1, v));
-    _muted  = (_volume === 0);
-    _saveVolumePrefs();
-    _applyVolume();
-  },
-
-  // Version
-  version: 'SNS-2026-TV-STAGE6-001'
-};
+  _init();
 
 })(window);

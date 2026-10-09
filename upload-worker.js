@@ -2170,6 +2170,135 @@ async function handleBroadcastStatus(request, env, cors, sec) {
 }
 
 
+// ── TV Media Upload (Founder only) ─────────────────────────────────────────
+//
+//   POST /tv/upload-media
+//     Authorization: Bearer <firebase-id-token>
+//     FormData: { file, channelId, mediaKind ('video'|'audio'|'image'), title, artist }
+//
+async function handleTvUpload(request, env, cors, sec) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let founderUid;
+  try { founderUid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.status || 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let formData;
+  try { formData = await request.formData(); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: 'Invalid form data: ' + e.message }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const file       = formData.get('file');
+  const channelId  = (formData.get('channelId') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const mediaKind  = formData.get('mediaKind') || 'video';
+  const title      = (formData.get('title')  || '').slice(0, 200);
+  const artist     = (formData.get('artist') || '').slice(0, 200);
+  if (!file || typeof file === 'string') {
+    return new Response(JSON.stringify({ error: 'No file received' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  if (!channelId) {
+    return new Response(JSON.stringify({ error: 'channelId is required' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  if (!['video', 'audio', 'image'].includes(mediaKind)) {
+    return new Response(JSON.stringify({ error: 'mediaKind must be video, audio, or image' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let mime = file.type || '';
+  const extMime = mimeFromExt(file.name);
+  if (!mime || mime === 'application/octet-stream') mime = extMime || mime;
+  const kindOk =
+    (mediaKind === 'video' && mime.startsWith('video/')) ||
+    (mediaKind === 'audio' && (mime.startsWith('audio/') || mime === 'application/octet-stream')) ||
+    (mediaKind === 'image' && mime.startsWith('image/'));
+  if (!kindOk) {
+    return new Response(JSON.stringify({ error: 'File type "' + mime + '" does not match mediaKind "' + mediaKind + '"' }), {
+      status: 415, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const sizeLimit =
+    mediaKind === 'video' ? MAX_SIZE_VIDEO :
+    mediaKind === 'audio' ? MAX_SIZE_AUDIO :
+    MAX_SIZE_IMAGE;
+  const buffer = await file.arrayBuffer();
+  if (buffer.byteLength > sizeLimit) {
+    const limitMB = Math.round(sizeLimit / 1024 / 1024);
+    return new Response(JSON.stringify({ error: 'File too large (max ' + limitMB + ' MB for ' + mediaKind + ')' }), {
+      status: 413, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const ts       = Date.now();
+  const safeName = (file.name || 'upload').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  const key      = 'tv/' + channelId + '/' + mediaKind + '/' + ts + '_' + safeName;
+  const cleanMime = (mime || 'application/octet-stream').split(';')[0].trim();
+  try {
+    await env.BUCKET.put(key, buffer, {
+      httpMetadata:   { contentType: cleanMime },
+      customMetadata: { uploaderUid: founderUid, originalName: file.name, title, artist, channelId, mediaKind }
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'R2 upload failed: ' + e.message }), {
+      status: 500, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  const publicUrl = 'https://yellow-term-11e6.nthntjrn.workers.dev/' + key;
+  return new Response(JSON.stringify({ url: publicUrl, key, mediaKind, channelId, title, artist }), {
+    status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+  });
+}
+
+// ── TV Media Delete (Founder only) ─────────────────────────────────────────
+//   DELETE /tv/delete-media   Body JSON: { key }
+//
+async function handleTvDeleteMedia(request, env, cors, sec) {
+  if (request.method !== 'DELETE') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+      status: 405, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  let founderUid;
+  try { founderUid = await _requireFounder(request, env); }
+  catch (e) {
+    return new Response(JSON.stringify({ error: e.message }), {
+      status: e.status || 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  void founderUid;
+  let body;
+  try { body = await request.json(); }
+  catch (_) { body = {}; }
+  const key = (body.key || '').replace(/\.\./g, '');
+  if (!key || !key.startsWith('tv/')) {
+    return new Response(JSON.stringify({ error: 'Invalid or missing key — must start with tv/' }), {
+      status: 400, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+  try {
+    await env.BUCKET.delete(key);
+    return new Response(JSON.stringify({ deleted: true, key }), {
+      status: 200, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'R2 delete failed: ' + e.message }), {
+      status: 500, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
+    });
+  }
+}
+
+
+
 export default {
   async fetch(request, env, ctx) {
     const url    = new URL(request.url);
@@ -2217,6 +2346,12 @@ export default {
     if (url.pathname === '/upload-chunk')    return handleUploadChunk(request, env, cors, sec);
     if (url.pathname === '/upload-complete') return handleUploadComplete(request, env, cors, sec);
 
+
+    // ── TV Media endpoints (Founder only) ──
+    if (url.pathname === '/tv/upload-media') return handleTvUpload(request, env, cors, sec);
+    if (url.pathname === '/tv/delete-media') return handleTvDeleteMedia(request, env, cors, sec);
+
+
     // ── Supabase proxy endpoints (Music Hub 2.0) ──
     if (url.pathname === '/supabase-upload') return handleSupabaseUpload(request, env, cors, sec);
     if (url.pathname === '/supabase-delete') return handleSupabaseDelete(request, env, cors, sec);
@@ -2262,7 +2397,6 @@ export default {
         `users/${musicUid}/`,
         `themes/${musicUid}/`,
         `posts/${musicUid}/`,
-        `tv/${musicUid}/`,        // SNS TV Studio uploads
       ];
       if (!reqPath || !musicAllowedPrefixes.some(p => reqPath.startsWith(p))) {
         return new Response(JSON.stringify({ error: 'Invalid path: must start with an allowed prefix for your account' }), {
@@ -2270,18 +2404,15 @@ export default {
         });
       }
 
-      // MIME validation — audio and image allowed for general use;
-      // video is also allowed when the key is under the tv/{uid}/ namespace.
+      // MIME validation — audio and image allowed.
       let mime = file.type || '';
       const extMime = mimeFromExt(file.name);
       if (!mime || mime === 'application/octet-stream') mime = extMime || mime;
       else if (extMime && mime.startsWith('video/') && extMime.startsWith('audio/')) mime = extMime;
 
-      const isTvVideoPath = reqPath.startsWith(`tv/${musicUid}/`);
       if (
         !mime.startsWith('audio/') &&
         !mime.startsWith('image/') &&
-        !(isTvVideoPath && mime.startsWith('video/')) &&
         mime !== 'application/octet-stream'
       ) {
         return new Response(JSON.stringify({ error: `Only audio or image files are allowed for this upload endpoint. Got: ${file.type}` }), {
@@ -2349,7 +2480,6 @@ export default {
                           || key.startsWith(`radio/${deleteUid}/`)
                           || key.startsWith(`themes/${deleteUid}/`)
                           || key.startsWith(`users/${deleteUid}/`)
-                          || key.startsWith(`tv/${deleteUid}/`);  // SNS TV Studio
       if (!deleteKeyOwned) {
         return new Response(JSON.stringify({ error: 'Forbidden: key does not belong to your account' }), {
           status: 403, headers: mergeHeaders(cors, sec, { 'Content-Type': 'application/json' })
