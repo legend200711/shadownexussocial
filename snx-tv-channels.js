@@ -136,6 +136,9 @@ function _lsKey() {
 }
 
 function _loadUserChannels() {
+  // Non-founders cannot create channels — return empty to prevent stale
+  // localStorage entries from showing channels created before this guard.
+  if ((global._snxRole || '') !== 'founder') return [];
   var key = _lsKey();
   if (!key) return [];
   try {
@@ -438,6 +441,16 @@ function _resolveSelectedId(id) {
  * @param {function} onError      — called with an error message string on failure
  */
 function createChannel(name, onSuccess, onError) {
+  // ── Founder-only gate ──────────────────────────────────────────────────────
+  // Channel creation is restricted to the authenticated founder account.
+  // This check is at the function level so direct API calls are also blocked.
+  // The Firestore tv_channels collection independently enforces isFounderEmail()
+  // on the server side, providing a second layer of protection.
+  if ((global._snxRole || '') !== 'founder') {
+    if (typeof onError === 'function') onError('Only the founder can create channels.');
+    return;
+  }
+
   var trimmed = (name || '').trim();
   if (!trimmed) {
     if (typeof onError === 'function') onError('Channel name is required.');
@@ -513,6 +526,8 @@ function _renderChannelPanel() {
     return;
   }
 
+  // Only the authenticated founder may see channel creation controls.
+  // Regular members and guests see only the channel list.
   var isFounder = (global._snxRole || '') === 'founder';
 
   var html = '<div class="snx-tv-ch-list">';
@@ -537,11 +552,15 @@ function _renderChannelPanel() {
       + '</button>';
   }
   html += '</div>';
-  html += '<div class="snx-tv-ch-create-row">'
-    + '<button class="snx-tv-ch-create-btn" id="snxTvChCreateBtn" type="button">'
-    + '+ Create Channel'
-    + '</button>'
-    + '</div>';
+
+  // Founder-only: show Create Channel button
+  if (isFounder) {
+    html += '<div class="snx-tv-ch-create-row">'
+      + '<button class="snx-tv-ch-create-btn" id="snxTvChCreateBtn" type="button">'
+      + '+ Create Channel'
+      + '</button>'
+      + '</div>';
+  }
 
   panel.innerHTML = html;
 
@@ -556,7 +575,7 @@ function _renderChannelPanel() {
     })(buttons[j]);
   }
 
-  // Bind create channel button
+  // Bind create channel button (only rendered for founders)
   var createBtn = panel.querySelector('#snxTvChCreateBtn');
   if (createBtn) {
     createBtn.addEventListener('click', _openCreateChannelModal);
@@ -599,6 +618,13 @@ var _createModalOpen = false;
 
 function _openCreateChannelModal() {
   if (_createModalOpen) return;
+  // Guard: only founders can open the create modal.
+  // createChannel() has its own gate, but this prevents the modal from
+  // appearing at all if a regular member somehow triggers this function.
+  if ((global._snxRole || '') !== 'founder') {
+    _showCreateStatus('Only the founder can create channels.', true);
+    return;
+  }
   if (!_uid()) {
     _showCreateStatus('You must be signed in to create a channel.', true);
     return;
