@@ -2971,19 +2971,21 @@ const SNXTVStudio = {
   setChannel,
   getActiveChannelId: () => _activeChannelId || 'default',
   getChannels: () => _getAllChannels(),
-  // Stage 5: expose for debugging
-  _getPrograms: () => _tvPrograms.slice(),
-  _getSchedule: () => _tvSchedule.slice(),
-  _getSubmissions: () => _tvSubmissions.slice(),
+  // Stage 5: expose for founder debugging only
+  _getPrograms:     () => _isFounder() ? _tvPrograms.slice()    : null,
+  _getSchedule:     () => _isFounder() ? _tvSchedule.slice()    : null,
+  _getSubmissions:  () => _isFounder() ? _tvSubmissions.slice() : null,
 
-  /** Show the studio overlay (called from TV page) */
+  /** Show the studio overlay (called from TV page — founder only) */
   show() {
+    if (!_isFounder()) return;
     const overlay = document.getElementById('snxtvStudioOverlay');
     if (overlay) overlay.classList.add('snxtv-studio-overlay--open');
   },
 
-  /** Show the studio overlay and immediately navigate to the given tab */
+  /** Show the studio overlay and immediately navigate to the given tab (founder only) */
   openOnTab(tab) {
+    if (!_isFounder()) return;
     const overlay = document.getElementById('snxtvStudioOverlay');
     if (overlay) overlay.classList.add('snxtv-studio-overlay--open');
     if (_mounted && tab) {
@@ -2994,6 +2996,7 @@ const SNXTVStudio = {
 
   /** Hide the studio overlay */
   hide() {
+    if (!_isFounder()) return;
     const overlay = document.getElementById('snxtvStudioOverlay');
     if (overlay) overlay.classList.remove('snxtv-studio-overlay--open');
   },
