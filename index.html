@@ -11722,24 +11722,6 @@ body.arcade-fs-ios body::after { display:none !important; }
     </div>
   </div>
 
-  <!-- ── CHANNEL PANEL (Viewer) — always visible, card-based selector ── -->
-  <div class="snx-tv-channel-bar" id="snxTvChannelBar">
-    <div class="snx-tv-ch-header">
-      <span class="snx-tv-ch-header-label">CHANNELS</span>
-      <button class="snx-tv-ch-toggle" id="snxTvChToggle" type="button" aria-label="Toggle channel list">▼</button>
-    </div>
-    <div class="snx-tv-ch-content" id="snxTvChContent">
-      <!-- populated by SNXTVChannels (canonical channel manager) -->
-      <div id="snxTvChannelPanel">
-        <div class="snx-tv-ch-loading">Loading channels…</div>
-      </div>
-    </div>
-    <!-- Hidden <select> kept for programmatic/legacy compatibility -->
-    <select class="snx-tv-channel-sel" id="snxTvChannelSelect" title="Switch Channel" style="display:none;">
-      <option value="default">Shadow Nexus TV</option>
-    </select>
-  </div>
-
   <!-- ── MAIN PLAYER AREA ── -->
   <div class="snx-tv-player-wrap" id="snxTvPlayerWrap">
 
@@ -11835,6 +11817,24 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="snx-tv-un-empty" id="snxTvUnEmpty">Nothing queued</div>
       </div>
     </div>
+  </div>
+
+  <!-- ── CHANNEL PANEL (Viewer) — below Now Playing, card-based selector ── -->
+  <div class="snx-tv-channel-bar" id="snxTvChannelBar">
+    <div class="snx-tv-ch-header">
+      <span class="snx-tv-ch-header-label">CHANNELS</span>
+      <button class="snx-tv-ch-toggle" id="snxTvChToggle" type="button" aria-label="Toggle channel list">▼</button>
+    </div>
+    <div class="snx-tv-ch-content" id="snxTvChContent">
+      <!-- populated by SNXTVChannels (canonical channel manager) -->
+      <div id="snxTvChannelPanel">
+        <div class="snx-tv-ch-loading">Loading channels…</div>
+      </div>
+    </div>
+    <!-- Hidden <select> kept for programmatic/legacy compatibility -->
+    <select class="snx-tv-channel-sel" id="snxTvChannelSelect" title="Switch Channel" style="display:none;">
+      <option value="default">Shadow Nexus TV</option>
+    </select>
   </div>
 
   <!-- ── TV GUIDE PANEL — Stage 3 ── -->

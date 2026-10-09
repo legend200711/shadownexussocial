@@ -1106,7 +1106,17 @@ function _renderPlayer(state) {
     } else if (state.status === 'error') {
       unavailMsg.textContent = state.error || 'Media unavailable';
     } else if (state.status === 'offline') {
-      unavailMsg.textContent = 'No media in TV library. Open TV Studio to add media.';
+      var chName = global.SNXTVChannels && typeof global.SNXTVChannels.getChannels === 'function'
+        ? (function() {
+            var sel = global.SNXTVChannels.getSelectedId ? global.SNXTVChannels.getSelectedId() : null;
+            var list = global.SNXTVChannels.getChannels();
+            var ch = list.find(function(c) { return c.id === sel; });
+            return ch ? ch.name : null;
+          })()
+        : null;
+      unavailMsg.textContent = chName
+        ? 'No media in ' + chName + '. Open TV Studio → Media to add content to this channel.'
+        : 'No media in this channel. Open TV Studio → Media to add content.';
     } else if (state.status === 'idle' && state.isGap) {
       unavailMsg.textContent = state.gapLabel || 'Programming Resumes Soon';
     } else if (state.status === 'idle') {
@@ -2098,7 +2108,7 @@ function _initStudio() {
 
 /**
  * Inject quick-access management buttons into the channel bar footer.
- * Founders see two buttons: "✏ Edit Channel" and "📋 Playlists".
+ * Founders see two buttons: "✏ Edit Channel" and "📺 Manage Media".
  * Called once when Studio is initialized.
  */
 function _injectChannelManageBtn() {
@@ -2112,8 +2122,8 @@ function _injectChannelManageBtn() {
     '<button class="snx-tv-ch-manage-btn" id="snxTvChEditBtn" type="button">'
     + '✏ Edit Channel'
     + '</button>'
-    + '<button class="snx-tv-ch-manage-btn snx-tv-ch-manage-btn--alt" id="snxTvChPlaylistsBtn" type="button">'
-    + '📋 Playlists'
+    + '<button class="snx-tv-ch-manage-btn snx-tv-ch-manage-btn--alt" id="snxTvChMediaBtn" type="button">'
+    + '📺 Manage Media'
     + '</button>';
 
   channelBar.appendChild(row);
@@ -2123,9 +2133,9 @@ function _injectChannelManageBtn() {
       global.SNXTVStudio.openOnTab('channels');
     }
   });
-  document.getElementById('snxTvChPlaylistsBtn').addEventListener('click', function () {
+  document.getElementById('snxTvChMediaBtn').addEventListener('click', function () {
     if (global.SNXTVStudio && typeof global.SNXTVStudio.openOnTab === 'function') {
-      global.SNXTVStudio.openOnTab('playlists');
+      global.SNXTVStudio.openOnTab('media');
     }
   });
 }

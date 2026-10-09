@@ -59,7 +59,7 @@ const COLL_VIDEOS           = 'videos';
 
 let _mounted       = false;
 let _container     = null;
-let _activeTab     = 'dashboard';
+let _activeTab     = 'channels';
 
 // In-memory caches
 let _tvMedia         = [];   // tv_media docs (shared library)
@@ -189,7 +189,7 @@ function mount(parentEl) {
   // Wait one tick for Firestore to be ready
   setTimeout(() => {
     _startLiveListeners();
-    _switchTab('dashboard');
+    _switchTab('channels');
   }, 100);
 
   console.log('[SNX-TV-STUDIO] TV Studio mounted — version', STUDIO_VERSION);
@@ -320,49 +320,23 @@ function _buildDOM() {
     <button class="snxtv-studio-close" id="snxtvStudioClose" type="button" title="Close Studio">✕</button>
   </div>
 
-  <!-- ── CHANNEL SELECTOR ──────────────────────────────────── -->
-  <div class="snxtv-channel-row" id="snxtvChannelRow">
-    <span class="snxtv-channel-label">CHANNEL:</span>
-    <select class="snxtv-select snxtv-channel-sel" id="snxtvChannelSel" style="flex:1;min-width:0;max-width:200px;">
-      <option value="default">Shadow Nexus TV</option>
-    </select>
-    <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvBtnNewChannel" title="Create new channel">+ Channel</button>
-    <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvBtnEditChannel" title="Edit channel">✏</button>
-  </div>
-
   <!-- ── TAB NAV ───────────────────────────────────────────── -->
   <nav class="snxtv-studio-tabs" id="snxtvStudioTabs">
-    <button class="snxtv-tab snxtv-tab--active" data-tab="dashboard">DASHBOARD</button>
-    <button class="snxtv-tab" data-tab="submissions">SUBMISSIONS</button>
+    <button class="snxtv-tab snxtv-tab--active" data-tab="channels">CHANNELS</button>
     <button class="snxtv-tab" data-tab="media">MEDIA</button>
-    <button class="snxtv-tab" data-tab="playlists">PLAYLISTS</button>
-    <button class="snxtv-tab" data-tab="programming">PROGRAMMING</button>
-    <button class="snxtv-tab" data-tab="schedule">SCHEDULE</button>
-    <button class="snxtv-tab" data-tab="channels">CHANNELS</button>
+    <button class="snxtv-tab" data-tab="submissions">SUBMISSIONS</button>
     <button class="snxtv-tab" data-tab="settings">SETTINGS</button>
   </nav>
 
   <!-- ── PANELS ────────────────────────────────────────────── -->
-  <div class="snxtv-panel" id="snxtvPanelDashboard">
-    <div id="snxtvDashboardPanel"></div>
-  </div>
-  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelSubmissions">
-    <div id="snxtvSubmissionsPanel"></div>
+  <div class="snxtv-panel" id="snxtvPanelChannels">
+    <div id="snxtvChannelsPanel"></div>
   </div>
   <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelMedia">
     <div id="snxtvMediaPanel"></div>
   </div>
-  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelPlaylists">
-    <div id="snxtvPlaylistsPanel"></div>
-  </div>
-  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelProgramming">
-    <div id="snxtvProgrammingPanel"></div>
-  </div>
-  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelSchedule">
-    <div id="snxtvSchedulePanel"></div>
-  </div>
-  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelChannels">
-    <div id="snxtvChannelsPanel"></div>
+  <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelSubmissions">
+    <div id="snxtvSubmissionsPanel"></div>
   </div>
   <div class="snxtv-panel snxtv-panel--hidden" id="snxtvPanelSettings">
     <div id="snxtvSettingsPanel"></div>
@@ -386,35 +360,15 @@ function _bindEvents() {
   tabs.forEach(btn => {
     btn.addEventListener('click', () => _switchTab(btn.dataset.tab));
   });
-
-  // Channel selector
-  const channelSel = _container.querySelector('#snxtvChannelSel');
-  if (channelSel) {
-    channelSel.addEventListener('change', () => {
-      const val = channelSel.value;
-      const id  = (val === 'default') ? null : val;
-      // Switch channel context in Studio
-      setChannel(id);
-      // Switch viewer + timeline to the same channel
-      if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
-        global.SNXTVTimeline.setChannel(id);
-      }
-      if (global.SNXTV && typeof global.SNXTV.switchChannel === 'function') {
-        global.SNXTV.switchChannel(id);
-      }
-    });
-  }
-
-  // New channel button
-  const newChanBtn = _container.querySelector('#snxtvBtnNewChannel');
-  if (newChanBtn) newChanBtn.addEventListener('click', _openCreateChannelModal);
-
-  // Edit channel button
-  const editChanBtn = _container.querySelector('#snxtvBtnEditChannel');
-  if (editChanBtn) editChanBtn.addEventListener('click', () => _openEditChannelModal(_activeChannelId));
 }
 
 function _switchTab(tab) {
+  // Only the four visible tabs are routed. Any legacy tab name (playlists,
+  // programming, schedule, dashboard) redirects to channels so openOnTab()
+  // calls from external code don't break.
+  const validTabs = ['channels', 'media', 'submissions', 'settings'];
+  if (!validTabs.includes(tab)) tab = 'channels';
+
   _activeTab = tab;
 
   const allTabs = _container.querySelectorAll('.snxtv-tab');
@@ -423,16 +377,13 @@ function _switchTab(tab) {
   const allPanels = _container.querySelectorAll('.snxtv-panel');
   allPanels.forEach(p => p.classList.add('snxtv-panel--hidden'));
 
-  const activePanel = _container.querySelector(`#snxtvPanel${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+  const cap = tab.charAt(0).toUpperCase() + tab.slice(1);
+  const activePanel = _container.querySelector(`#snxtvPanel${cap}`);
   if (activePanel) activePanel.classList.remove('snxtv-panel--hidden');
 
-  if (tab === 'dashboard')   _renderDashboardPanel();
-  if (tab === 'submissions') _renderSubmissionsPanel();
-  if (tab === 'media')       _renderMediaPanel();
-  if (tab === 'playlists')   _renderPlaylistsPanel();
-  if (tab === 'programming') _renderProgrammingPanel();
-  if (tab === 'schedule')    _renderSchedulePanel();
   if (tab === 'channels')    _renderChannelsPanel();
+  if (tab === 'media')       _renderMediaPanel();
+  if (tab === 'submissions') _renderSubmissionsPanel();
   if (tab === 'settings')    _renderSettingsPanel();
 }
 
@@ -553,24 +504,33 @@ function _renderMediaPanel() {
   const el = _container && _container.querySelector('#snxtvMediaPanel');
   if (!el) return;
 
-  // Count items missing duration for the repair button badge
-  const missingCount = _tvMedia.filter(m => !(m.duration > 0)).length;
-  const repairBadge  = missingCount > 0 ? ` (${missingCount} missing)` : ' ✓';
+  // Channel context for this panel
+  const ch    = _activeChannel();
+  const chLabel = _esc(ch.name || ch.id);
+
+  // Count items for the active channel
+  const channelFilter = _activeChannelId || 'default';
+  const channelItems  = _tvMedia.filter(m => (m.channelId || 'default') === channelFilter);
+  const missingCount  = channelItems.filter(m => !(m.duration > 0)).length;
+  const repairBadge   = missingCount > 0 ? ` (${missingCount} missing)` : ' ✓';
 
   el.innerHTML = `
 <div class="snxtv-section">
   <div class="snxtv-section-header">
-    <span>TV Media Library</span>
-    <button class="snxtv-btn snxtv-btn--primary" id="snxtvBtnAddFromSNS">+ Add from SNS Media</button>
+    <span>Channel Media — ${chLabel}</span>
+    <button class="snxtv-btn snxtv-btn--primary" id="snxtvBtnAddFromSNS">+ Add Music / Video</button>
     <button class="snxtv-btn snxtv-btn--ghost" id="snxtvBtnUploadNew">↑ Upload New</button>
     <button class="snxtv-btn snxtv-btn--ghost" id="snxtvBtnRepairDurations" title="Load each item with missing duration and save the real duration">⏱ Repair Durations${_esc(repairBadge)}</button>
+  </div>
+  <div style="padding:4px 14px 6px;font-size:11px;color:rgba(0,212,255,0.4);">
+    Media added here is stored directly in this channel. Switch channels using the selector above.
   </div>
   <div id="snxtvRepairStatus" style="display:none;font-size:11px;color:rgba(0,212,255,0.8);padding:4px 0;"></div>
   <div id="snxtvMediaGrid" class="snxtv-media-grid"></div>
 </div>
 <div class="snxtv-section snxtv-section--hidden" id="snxtvSnsLibSection">
   <div class="snxtv-section-header">
-    <span>SNS Media — Select to Add to TV</span>
+    <span>SNS Media — Select to Add to ${chLabel}</span>
     <button class="snxtv-btn snxtv-btn--ghost" id="snxtvBtnCloseSNS">✕ Close</button>
   </div>
   <div class="snxtv-section-tabs" id="snxtvSnsLibTabs">
@@ -581,7 +541,7 @@ function _renderMediaPanel() {
 </div>
 <div class="snxtv-section snxtv-section--hidden" id="snxtvUploadSection">
   <div class="snxtv-section-header">
-    <span>Upload Media to SNS + TV</span>
+    <span>Upload Media to ${chLabel}</span>
     <button class="snxtv-btn snxtv-btn--ghost" id="snxtvBtnCloseUpload">✕ Cancel</button>
   </div>
   ${_renderUploadForm()}
@@ -614,10 +574,15 @@ function _renderMediaPanel() {
 }
 
 function _renderTvMediaGrid() {
-  if (!_tvMedia.length) {
-    return '<div class="snxtv-empty">No media in TV library yet. Add from SNS Media or upload new.</div>';
+  // Show only media belonging to the active channel
+  const channelFilter = _activeChannelId || 'default';
+  const items = _tvMedia.filter(m => (m.channelId || 'default') === channelFilter);
+
+  if (!items.length) {
+    const ch = _activeChannel();
+    return `<div class="snxtv-empty">No media in ${_esc(ch.name || 'this channel')} yet. Use "+ Add Music / Video" or "↑ Upload New" above.</div>`;
   }
-  return _tvMedia.map(item => `
+  return items.map(item => `
 <div class="snxtv-media-card" data-id="${_esc(item.id)}">
   <div class="snxtv-media-thumb">${item.artworkUrl ? `<img src="${_esc(item.artworkUrl)}" alt="">` : (item.mediaType === 'video' ? '🎬' : '🎵')}</div>
   <div class="snxtv-media-info">
@@ -625,8 +590,7 @@ function _renderTvMediaGrid() {
     <div class="snxtv-media-meta">${item.mediaType === 'video' ? '📹' : '🎵'} ${item.mediaType || '?'} · ${_fmtDur(item.duration)}</div>
   </div>
   <div class="snxtv-media-actions">
-    <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm snxtv-btn-addtopl" data-id="${_esc(item.id)}" title="Add to playlist">+PL</button>
-    <button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-btn-remove" data-id="${_esc(item.id)}" title="Remove from TV library">✕</button>
+    <button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-btn-remove" data-id="${_esc(item.id)}" title="Remove from channel">✕</button>
   </div>
 </div>`).join('');
 }
@@ -636,9 +600,6 @@ function _bindMediaCardEvents() {
   if (!grid) return;
   grid.querySelectorAll('.snxtv-btn-remove').forEach(btn => {
     btn.addEventListener('click', () => _removeTvMedia(btn.dataset.id));
-  });
-  grid.querySelectorAll('.snxtv-btn-addtopl').forEach(btn => {
-    btn.addEventListener('click', () => _promptAddToPlaylist(btn.dataset.id));
   });
 }
 
@@ -686,9 +647,10 @@ function _detectUrlDuration(url, mediaType) {
  * Shows live progress in the Media panel repair status bar.
  */
 async function _repairMissingDurations() {
-  const missing = _tvMedia.filter(m => !(m.duration > 0) && m.mediaUrl);
+  const channelFilter = _activeChannelId || 'default';
+  const missing = _tvMedia.filter(m => !(m.duration > 0) && m.mediaUrl && (m.channelId || 'default') === channelFilter);
   if (!missing.length) {
-    _toast('✓ All TV media items already have duration metadata.');
+    _toast('✓ All media items for this channel already have duration metadata.');
     return;
   }
 
@@ -912,13 +874,15 @@ async function _addToTvMedia(sourceType, sourceId) {
       mediaUrl,
       artworkUrl,
       duration,
+      channelId: _activeChannelId || 'default',  // direct-to-channel assignment
       sourceId,                    // Firestore doc ID of the original SNS item
       sourceCollection: sourceDoc.collection, // 'profileMusic' | 'videos'
       sourceType,                  // 'music' | 'video'
       addedBy:   (_cu() || {}).uid || '',
       createdAt: serverTimestamp()
     });
-    _toast('✓ Added to TV Media Library');
+    const ch = _activeChannel();
+    _toast('✓ Added to ' + (ch.name || 'channel'));
     // Refresh the SNS lib to update "In TV" badges
     if (sourceType === 'music') {
       const grid = _container && _container.querySelector('#snxtvSnsLibGrid');
@@ -1264,7 +1228,7 @@ async function _doUpload() {
           }
         }
 
-        // ── Add to tv_media ──
+        // ── Add to tv_media (direct-to-channel) ──
         if (db) {
           try {
             await addDoc(collection(db, COLL_TV_MEDIA), {
@@ -1275,6 +1239,7 @@ async function _doUpload() {
               mediaUrl:         resp.url,
               artworkUrl,
               duration:         detectedDuration,
+              channelId:        _activeChannelId || 'default',  // direct-to-channel
               sourceId:         firestoreId || r2Key,
               sourceCollection: isVideo ? COLL_VIDEOS : COLL_PROFILE_MUSIC,
               sourceType:       isVideo ? 'video' : 'music',
@@ -1287,7 +1252,8 @@ async function _doUpload() {
           }
         }
 
-        if (statusEl) statusEl.textContent = `✓ ${isVideo ? 'Video' : 'Audio'} added to TV Media Library!`;
+        const chUpload = _activeChannel();
+        if (statusEl) statusEl.textContent = `✓ ${isVideo ? 'Video' : 'Audio'} added to ${chUpload.name || 'channel'}!`;
         if (fileInput)   fileInput.value   = '';
         if (titleInput)  titleInput.value  = '';
         if (artistInput) artistInput.value = '';
@@ -1662,22 +1628,34 @@ async function _loadPlaylistToTV(plId) {
 
 function getAdapterQueue() {
   // Return currently loaded playlist queue if set,
-  // otherwise fall back to all tv_media in order.
+  // otherwise fall back to tv_media filtered by active channel.
   if (_currentPlaylistQueue && _currentPlaylistQueue.length) {
     return _currentPlaylistQueue.slice();
   }
-  // Shared media library — no channel filter here (channel isolation is at schedule level)
-  return _tvMedia
-    .filter(m => m.mediaUrl)
-    .map(m => ({
-      id:        m.id,
-      title:     m.title || 'Untitled',
-      artist:    m.artist || '',
-      mediaType: m.mediaType === 'video' ? 'video' : 'audio',
-      mediaUrl:  m.mediaUrl,
-      artwork:   m.artworkUrl || '',
-      duration:  m.duration || 0,
-    }));
+
+  // Filter media by active channel so each channel plays its own content.
+  // tv_media docs without a channelId field belong to the 'default' channel
+  // for backward compatibility.
+  const channelFilter = _activeChannelId || 'default';
+  const filtered = _tvMedia.filter(m => {
+    if (!m.mediaUrl) return false;
+    const docChannel = m.channelId || 'default';
+    return docChannel === channelFilter;
+  });
+
+  // If the current channel has no media of its own, fall back to the shared
+  // default library so the viewer is never left with a completely empty player.
+  const source = filtered.length > 0 ? filtered : _tvMedia.filter(m => m.mediaUrl);
+
+  return source.map(m => ({
+    id:        m.id,
+    title:     m.title || 'Untitled',
+    artist:    m.artist || '',
+    mediaType: m.mediaType === 'video' ? 'video' : 'audio',
+    mediaUrl:  m.mediaUrl,
+    artwork:   m.artworkUrl || '',
+    duration:  m.duration || 0,
+  }));
 }
 
 let _currentPlaylistQueue = null;
@@ -2358,83 +2336,9 @@ function _fmtDateTime(ms) {
    Shows a quick summary of TV state without duplicating editors.
 ════════════════════════════════════════════════════════════ */
 
+// _renderDashboardPanel kept for compatibility — redirects to channels tab.
 function _renderDashboardPanel() {
-  const el = _container && _container.querySelector('#snxtvDashboardPanel');
-  if (!el) return;
-
-  const nowMs = Date.now();
-  const pendingCount   = _tvSubmissions.filter(s => s.status === 'pending').length;
-  const approvedCount  = _tvSubmissions.filter(s => s.status === 'approved').length;
-
-  // Find current on-air program from schedule
-  let onAirLabel = '—';
-  let onAirSub   = '';
-  if (global.SNXTVTimeline) {
-    const resolved = global.SNXTVTimeline.resolve(nowMs);
-    if (resolved && resolved.mode === 'playing' && resolved.program) {
-      onAirLabel = resolved.program.name || 'Untitled';
-      if (resolved.currentItem) onAirSub = resolved.currentItem.title || '';
-    } else if (resolved && resolved.nextProgram) {
-      onAirLabel = 'Gap';
-      onAirSub = 'Next: ' + (resolved.nextProgram.name || 'Untitled');
-    }
-  }
-
-  const tvState = global.SNXTV ? global.SNXTV.getState() : {};
-  const statusBadge = tvState.onAir
-    ? '<span style="color:#00d4ff;font-weight:700;">● ON AIR</span>'
-    : '<span style="color:rgba(255,255,255,0.4);">○ Off Air</span>';
-
-  el.innerHTML = `
-<div class="snxtv-section">
-  <div class="snxtv-section-header"><span>TV Dashboard</span></div>
-  <div style="padding:10px 12px;display:flex;flex-direction:column;gap:10px;">
-
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:120px;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.18);border-radius:8px;padding:12px;">
-        <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:1px;margin-bottom:4px;">STATUS</div>
-        <div style="font-size:13px;">${statusBadge}</div>
-      </div>
-      <div style="flex:1;min-width:120px;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.18);border-radius:8px;padding:12px;">
-        <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:1px;margin-bottom:4px;">NOW PLAYING</div>
-        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(onAirLabel)}</div>
-        ${onAirSub ? `<div style="font-size:10px;color:rgba(255,255,255,0.45);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(onAirSub)}</div>` : ''}
-      </div>
-    </div>
-
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <div style="flex:1;min-width:80px;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.18);border-radius:8px;padding:10px;text-align:center;">
-        <div style="font-size:22px;font-weight:700;color:#00d4ff;">${_tvMedia.length}</div>
-        <div style="font-size:10px;color:rgba(255,255,255,0.4);">MEDIA</div>
-      </div>
-      <div style="flex:1;min-width:80px;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.18);border-radius:8px;padding:10px;text-align:center;">
-        <div style="font-size:22px;font-weight:700;color:#00d4ff;">${_tvPlaylists.length}</div>
-        <div style="font-size:10px;color:rgba(255,255,255,0.4);">PLAYLISTS</div>
-      </div>
-      <div style="flex:1;min-width:80px;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.18);border-radius:8px;padding:10px;text-align:center;">
-        <div style="font-size:22px;font-weight:700;color:#00d4ff;">${_tvPrograms.length}</div>
-        <div style="font-size:10px;color:rgba(255,255,255,0.4);">PROGRAMS</div>
-      </div>
-      <div style="flex:1;min-width:80px;background:${pendingCount > 0 ? 'rgba(255,200,0,0.1)' : 'rgba(0,212,255,0.07)'};border:1px solid ${pendingCount > 0 ? 'rgba(255,200,0,0.4)' : 'rgba(0,212,255,0.18)'};border-radius:8px;padding:10px;text-align:center;cursor:pointer;" id="snxtvDashSubBadge">
-        <div style="font-size:22px;font-weight:700;color:${pendingCount > 0 ? '#ffc800' : '#00d4ff'};">${pendingCount}</div>
-        <div style="font-size:10px;color:rgba(255,255,255,0.4);">PENDING</div>
-      </div>
-    </div>
-
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
-      <button class="snxtv-btn snxtv-btn--primary snxtv-btn--sm" id="snxtvDashGoSubmissions">View Submissions</button>
-      <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvDashGoMedia">Media Library</button>
-      <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm" id="snxtvDashGoSchedule">Schedule</button>
-    </div>
-
-  </div>
-</div>
-`;
-
-  el.querySelector('#snxtvDashGoSubmissions') && el.querySelector('#snxtvDashGoSubmissions').addEventListener('click', () => _switchTab('submissions'));
-  el.querySelector('#snxtvDashSubBadge')      && el.querySelector('#snxtvDashSubBadge').addEventListener('click', () => _switchTab('submissions'));
-  el.querySelector('#snxtvDashGoMedia')       && el.querySelector('#snxtvDashGoMedia').addEventListener('click', () => _switchTab('media'));
-  el.querySelector('#snxtvDashGoSchedule')    && el.querySelector('#snxtvDashGoSchedule').addEventListener('click', () => _switchTab('schedule'));
+  if (_mounted) _switchTab('channels');
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -2644,36 +2548,8 @@ function _renderSettingsPanel() {
 
     el.innerHTML = `
 <div class="snxtv-section">
-  <div class="snxtv-section-header"><span>Channel Settings</span></div>
+  <div class="snxtv-section-header"><span>TV Settings</span></div>
   <div style="padding:10px 12px;display:flex;flex-direction:column;gap:14px;">
-
-    <div>
-      <label class="snxtv-form-label">Channel Name</label>
-      <input type="text" id="snxtvCfgName" value="${_esc(cfg.channelName || '24-Hour TV')}" maxlength="80"
-        style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.3);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:7px 10px;border-radius:6px;font-size:12px;">
-    </div>
-
-    <div>
-      <label class="snxtv-form-label">Channel Tagline / Sub-title</label>
-      <input type="text" id="snxtvCfgTagline" value="${_esc(cfg.tagline || 'Shadow Nexus Social')}" maxlength="120"
-        style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.3);border:1px solid rgba(0,212,255,0.2);color:#fff;padding:7px 10px;border-radius:6px;font-size:12px;">
-    </div>
-
-    <div>
-      <label class="snxtv-form-label">Fallback Behavior (when schedule is empty)</label>
-      <select id="snxtvCfgFallback" class="snxtv-select">
-        <option value="standby"   ${(cfg.fallbackMode || 'standby') === 'standby'   ? 'selected' : ''}>Standby Slate — show "Programming Resumes Soon"</option>
-        <option value="playlist"  ${cfg.fallbackMode === 'playlist'  ? 'selected' : ''}>Loop Fallback Playlist</option>
-      </select>
-    </div>
-
-    <div id="snxtvCfgFallbackPl" style="display:${(cfg.fallbackMode || 'standby') === 'playlist' ? 'block' : 'none'};">
-      <label class="snxtv-form-label">Fallback Playlist</label>
-      <select id="snxtvCfgFallbackPlSelect" class="snxtv-select">
-        <option value="">— none —</option>
-        ${_tvPlaylists.map(pl => `<option value="${_esc(pl.id)}" ${cfg.fallbackPlaylistId === pl.id ? 'selected' : ''}>${_esc(pl.name || 'Untitled')}</option>`).join('')}
-      </select>
-    </div>
 
     <div>
       <label class="snxtv-form-label">Audio-Only Display Mode</label>
@@ -2702,13 +2578,6 @@ function _renderSettingsPanel() {
 </div>
 `;
 
-    // Show/hide fallback playlist selector
-    const fallbackSel = el.querySelector('#snxtvCfgFallback');
-    const fallbackPlRow = el.querySelector('#snxtvCfgFallbackPl');
-    fallbackSel.addEventListener('change', () => {
-      fallbackPlRow.style.display = fallbackSel.value === 'playlist' ? 'block' : 'none';
-    });
-
     el.querySelector('#snxtvCfgSave').addEventListener('click', async () => {
       const statusEl = el.querySelector('#snxtvCfgStatus');
       const saveBtn  = el.querySelector('#snxtvCfgSave');
@@ -2716,17 +2585,13 @@ function _renderSettingsPanel() {
       if (statusEl) statusEl.textContent = 'Saving…';
       try {
         await setDoc(doc(db, COLL_TV_SETTINGS, 'channel'), {
-          channelName:         el.querySelector('#snxtvCfgName').value.trim() || '24-Hour TV',
-          tagline:             el.querySelector('#snxtvCfgTagline').value.trim(),
-          fallbackMode:        el.querySelector('#snxtvCfgFallback').value,
-          fallbackPlaylistId:  el.querySelector('#snxtvCfgFallbackPlSelect') ? el.querySelector('#snxtvCfgFallbackPlSelect').value : '',
           audioVisualMode:     el.querySelector('#snxtvCfgAudioVisual').value,
           submissionsEnabled:  el.querySelector('#snxtvCfgSubmissionsEnabled').value === '1',
           updatedAt:           serverTimestamp(),
           updatedBy:           (_cu() || {}).uid || '',
         }, { merge: true });
         if (statusEl) statusEl.textContent = '✓ Saved.';
-        _toast('✓ Channel settings saved.');
+        _toast('✓ Settings saved.');
       } catch (e) {
         if (statusEl) statusEl.textContent = '✗ ' + e.message;
         _toast('Save failed: ' + e.message);
@@ -2782,115 +2647,194 @@ async function submitContent(data) {
    CHANNELS PANEL — Create / Edit / Delete TV Channels
 ════════════════════════════════════════════════════════════ */
 
+/* ════════════════════════════════════════════════════════════
+   CHANNELS PANEL — primary Studio landing panel.
+   Shows all channels with an inline "Open & Manage Media"
+   button per channel, plus an inline Create Channel form.
+════════════════════════════════════════════════════════════ */
+
 function _renderChannelsPanel() {
   const el = _container && _container.querySelector('#snxtvChannelsPanel');
   if (!el) return;
 
-  // Use merged list so presets always appear even before Firestore seeding
-  const channels = _getAllChannels();
+  // Merged list: preset definitions + Firestore channels (no 'default' alias shown)
+  const channels = _getAllChannels().filter(ch => ch.id !== 'default');
+
+  // Count media per channel for display
+  const mediaCountMap = {};
+  _tvMedia.forEach(m => {
+    const cid = m.channelId || 'default';
+    mediaCountMap[cid] = (mediaCountMap[cid] || 0) + 1;
+  });
 
   el.innerHTML = `
 <div class="snxtv-section">
-  <div class="snxtv-section-header">
+  <div class="snxtv-section-header" style="justify-content:space-between;">
     <span>TV Channels</span>
-    <button class="snxtv-btn snxtv-btn--primary snxtv-btn--sm" id="snxtvBtnNewChannel2">+ Create Channel</button>
   </div>
-  <div style="padding:8px 12px;font-size:11px;color:rgba(255,255,255,0.4);line-height:1.5;">
-    Each channel has its own playlists, programs, schedule, and now-playing state.
-    The shared media library is available to all channels.
-  </div>
-  <div id="snxtvChannelList">
-    ${channels.map(ch => {
-      const isActive = ch.id === (_activeChannelId || 'default');
-      const isLegacyDefault = ch.id === 'default';
-      return `
-    <div class="snxtv-pl-row" style="${isActive ? 'border-left:3px solid #00d4ff;' : ''}">
-      <div class="snxtv-pl-info">
-        <div class="snxtv-pl-name">${ch.logoEmoji ? ch.logoEmoji + ' ' : ''}${_esc(ch.name || ch.id)}</div>
-        <div class="snxtv-pl-meta">${_esc(ch.description || '')}${isLegacyDefault ? ' · Legacy alias' : (ch.isPreset ? ' · Preset' : '')} · ${_esc(ch.status || 'active')}</div>
-      </div>
-      <div class="snxtv-pl-actions">
-        ${!isLegacyDefault ? `
-        <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm snxtv-ch-edit" data-id="${_esc(ch.id)}">✏ Edit</button>
-        ${!ch.isPreset ? `<button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-ch-delete" data-id="${_esc(ch.id)}">🗑</button>` : ''}
-        ` : '<span style="font-size:10px;color:rgba(255,255,255,0.3);">Built-in</span>'}
-      </div>
-    </div>`;
-    }).join('')}
-  </div>
-</div>`;
 
-  el.querySelector('#snxtvBtnNewChannel2') && el.querySelector('#snxtvBtnNewChannel2').addEventListener('click', _openCreateChannelModal);
-  el.querySelectorAll('.snxtv-ch-edit').forEach(btn => btn.addEventListener('click', () => _openEditChannelModal(btn.dataset.id)));
-  el.querySelectorAll('.snxtv-ch-delete').forEach(btn => btn.addEventListener('click', () => _deleteChannel(btn.dataset.id)));
+  <!-- Channel list -->
+  <div id="snxtvChannelList" style="padding:0 0 4px;">
+    ${channels.map(ch => {
+      const isActive  = ch.id === (_activeChannelId || 'snx-ch-shadow-nexus-tv');
+      const mediaCount = mediaCountMap[ch.id] || 0;
+      const emoji     = ch.logoEmoji || '📺';
+      const isPresetChannel = !!ch.isPreset;
+      return `<div class="snxtv-ch-row${isActive ? ' snxtv-ch-row--active' : ''}" data-ch-id="${_esc(ch.id)}">
+        <div class="snxtv-ch-row-left">
+          <span class="snxtv-ch-row-emoji">${emoji}</span>
+          <div class="snxtv-ch-row-info">
+            <div class="snxtv-ch-row-name">${_esc(ch.name || ch.id)}</div>
+            <div class="snxtv-ch-row-meta">${mediaCount} item${mediaCount !== 1 ? 's' : ''}${ch.description ? ' · ' + _esc(ch.description) : ''}${isPresetChannel ? ' · Built-in' : ''}</div>
+          </div>
+        </div>
+        <div class="snxtv-ch-row-actions">
+          <button class="snxtv-btn snxtv-btn--primary snxtv-btn--sm snxtv-ch-open-media" data-id="${_esc(ch.id)}" title="Open this channel and manage its media">📺 Open &amp; Add Media</button>
+          <button class="snxtv-btn snxtv-btn--ghost snxtv-btn--sm snxtv-ch-edit" data-id="${_esc(ch.id)}" title="Rename channel">✏</button>
+          ${!isPresetChannel ? `<button class="snxtv-btn snxtv-btn--danger snxtv-btn--sm snxtv-ch-delete" data-id="${_esc(ch.id)}" title="Delete channel">🗑</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+    ${channels.length === 0 ? '<div class="snxtv-empty" style="padding:16px;">No channels yet. Create one below.</div>' : ''}
+  </div>
+
+</div>
+
+<!-- ── Create Channel Form (inline, always visible) ── -->
+<div class="snxtv-section" style="margin-top:14px;" id="snxtvCreateChSection">
+  <div class="snxtv-section-header"><span>Create New Channel</span></div>
+  <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
+    <div>
+      <label class="snxtv-form-label">Channel Name *</label>
+      <input type="text" id="snxtvNewChName" maxlength="80" placeholder="e.g. Legend Music"
+        style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.35);border:1px solid rgba(0,212,255,0.22);border-radius:6px;color:#fff;padding:9px 12px;font-size:13px;">
+    </div>
+    <div>
+      <label class="snxtv-form-label">Description (optional)</label>
+      <input type="text" id="snxtvNewChDesc" maxlength="200" placeholder="What plays on this channel?"
+        style="width:100%;box-sizing:border-box;background:rgba(0,0,0,0.35);border:1px solid rgba(0,212,255,0.22);border-radius:6px;color:#fff;padding:9px 12px;font-size:13px;">
+    </div>
+    <div id="snxtvNewChStatus" style="font-size:12px;color:rgba(255,255,255,0.5);min-height:16px;"></div>
+    <div>
+      <button class="snxtv-btn snxtv-btn--primary" id="snxtvBtnCreateCh" style="min-width:140px;">+ Create Channel</button>
+    </div>
+  </div>
+</div>
+`;
+
+  // "Open & Add Media" — switch active channel in Studio + viewer, then go to Media tab
+  el.querySelectorAll('.snxtv-ch-open-media').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      // Switch internal Studio channel context
+      const newId = (id === 'snx-ch-shadow-nexus-tv') ? null : id;
+      setChannel(newId);
+      // Also switch the viewer + timeline
+      if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
+        global.SNXTVTimeline.setChannel(newId);
+      }
+      if (global.SNXTV && typeof global.SNXTV.switchChannel === 'function') {
+        global.SNXTV.switchChannel(id);  // viewer uses the full preset ID
+      }
+      _switchTab('media');
+    });
+  });
+
+  el.querySelectorAll('.snxtv-ch-edit').forEach(btn => {
+    btn.addEventListener('click', () => _openEditChannelModal(btn.dataset.id));
+  });
+  el.querySelectorAll('.snxtv-ch-delete').forEach(btn => {
+    btn.addEventListener('click', () => _deleteChannel(btn.dataset.id));
+  });
+
+  // Create Channel submit
+  const createBtn = el.querySelector('#snxtvBtnCreateCh');
+  if (createBtn) {
+    createBtn.addEventListener('click', async () => {
+      const nameInput = el.querySelector('#snxtvNewChName');
+      const descInput = el.querySelector('#snxtvNewChDesc');
+      const statusEl  = el.querySelector('#snxtvNewChStatus');
+      const name = (nameInput && nameInput.value.trim()) || '';
+      if (!name) {
+        if (statusEl) { statusEl.style.color = '#ff7070'; statusEl.textContent = 'Channel name is required.'; }
+        if (nameInput) nameInput.focus();
+        return;
+      }
+      const desc = (descInput && descInput.value.trim()) || '';
+      createBtn.disabled = true;
+      if (statusEl) { statusEl.style.color = 'rgba(255,255,255,0.5)'; statusEl.textContent = 'Creating…'; }
+      try {
+        await _createChannelDirect(name, desc);
+        if (nameInput) nameInput.value = '';
+        if (descInput) descInput.value = '';
+        if (statusEl) { statusEl.style.color = '#00d45a'; statusEl.textContent = '✓ Channel created!'; }
+        setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+      } catch (e) {
+        if (statusEl) { statusEl.style.color = '#ff7070'; statusEl.textContent = '✗ ' + e.message; }
+      }
+      createBtn.disabled = false;
+    });
+  }
 }
 
-async function _openCreateChannelModal() {
-  const name = prompt('Channel Name:');
-  if (!name || !name.trim()) return;
-  const desc = prompt('Description (optional):') || '';
+/**
+ * Create a new channel in Firestore and update all live caches.
+ * Shared between the inline form and any programmatic calls.
+ */
+async function _createChannelDirect(name, desc) {
   const { addDoc, collection, serverTimestamp } = _fs();
   const db = _db();
-  if (!db) return;
-  try {
-    const docRef = await addDoc(collection(db, COLL_TV_CHANNELS), {
-      name:        name.trim(),
-      description: desc.trim(),
-      status:      'active',
-      artworkUrl:  '',
-      createdBy:   (_cu() || {}).uid || '',
-      createdAt:   serverTimestamp(),
-      updatedAt:   serverTimestamp(),
-    });
+  if (!db) throw new Error('Firestore not ready.');
+  if (!name || !name.trim()) throw new Error('Channel name is required.');
 
-    // Optimistically add to local cache so the panel and selectors update
-    // immediately — before the Firestore onSnapshot fires.
-    const newChannel = {
-      id:          docRef.id,
-      name:        name.trim(),
-      description: desc.trim(),
-      status:      'active',
-      artworkUrl:  '',
-      createdBy:   (_cu() || {}).uid || '',
-    };
-    if (!_tvChannels.find(c => c.id === docRef.id)) {
-      _tvChannels = _tvChannels.concat([newChannel]);
-    }
+  const docRef = await addDoc(collection(db, COLL_TV_CHANNELS), {
+    name:        name.trim(),
+    description: desc ? desc.trim() : '',
+    status:      'active',
+    artworkUrl:  '',
+    createdBy:   (_cu() || {}).uid || '',
+    createdAt:   serverTimestamp(),
+    updatedAt:   serverTimestamp(),
+  });
 
-    // Also inject into the Timeline cache so _refreshChannelSelector (which reads
-    // from SNXTVTimeline.getChannels()) picks up the new channel immediately,
-    // before the Firestore onSnapshot callback fires.
-    if (global.SNXTVTimeline && typeof global.SNXTVTimeline.injectChannel === 'function') {
-      global.SNXTVTimeline.injectChannel(newChannel);
-    }
-
-    _toast('✓ Channel created: ' + name.trim());
-
-    // Update the Studio header channel selector
-    _renderChannelSelectorInHeader();
-
-    // Update the Studio channels panel
-    if (_activeTab === 'channels') _renderChannelsPanel();
-
-    // Notify the TV viewer to refresh its channel selector
-    if (global.SNXTV && typeof global.SNXTV._refreshChannelSelector === 'function') {
-      global.SNXTV._refreshChannelSelector();
-    }
-    // Also notify SNXTVChannels so its Firestore listener picks up the new channel
-    if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
-      global.SNXTVChannels.refresh();
-    }
-  } catch (e) {
-    _toast('Could not create channel: ' + e.message);
+  // Optimistic local cache update (Firestore snapshot will confirm shortly)
+  const newChannel = {
+    id:          docRef.id,
+    name:        name.trim(),
+    description: desc ? desc.trim() : '',
+    status:      'active',
+    artworkUrl:  '',
+    isPreset:    false,
+    createdBy:   (_cu() || {}).uid || '',
+  };
+  if (!_tvChannels.find(c => c.id === docRef.id)) {
+    _tvChannels = _tvChannels.concat([newChannel]);
   }
+
+  // Inject into Timeline cache for immediate viewer selector update
+  if (global.SNXTVTimeline && typeof global.SNXTVTimeline.injectChannel === 'function') {
+    global.SNXTVTimeline.injectChannel(newChannel);
+  }
+
+  _toast('✓ Channel created: ' + name.trim());
+
+  // Refresh viewer channel selector
+  if (global.SNXTV && typeof global.SNXTV._refreshChannelSelector === 'function') {
+    global.SNXTV._refreshChannelSelector();
+  }
+  if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
+    global.SNXTVChannels.refresh();
+  }
+
+  // Re-render channels panel so the new channel appears immediately
+  if (_activeTab === 'channels') _renderChannelsPanel();
 }
 
 async function _openEditChannelModal(channelId) {
   if (!channelId || channelId === 'default') {
-    _toast('The legacy "default" alias channel cannot be edited here. Edit "Shadow Nexus TV" from the channels list.');
+    _toast('This channel cannot be edited here.');
     return;
   }
-  // Look in merged list so preset channels are always found
   const allChannels = _getAllChannels();
   const ch = allChannels.find(c => c.id === channelId) || _tvChannels.find(c => c.id === channelId);
   if (!ch) { _toast('Channel not found.'); return; }
@@ -2904,17 +2848,13 @@ async function _openEditChannelModal(channelId) {
   const db = _db();
   if (!db) return;
   try {
-    // Use setDoc + merge:true so this works even if the doc doesn't exist yet
-    // (covers preset channels that haven't been seeded to Firestore yet)
     await setDoc(doc(db, COLL_TV_CHANNELS, channelId), {
       name:        newName.trim() || ch.name,
       description: newDesc.trim(),
       updatedAt:   serverTimestamp(),
     }, { merge: true });
     _toast('✓ Channel updated.');
-    _renderChannelSelectorInHeader();
     if (_activeTab === 'channels') _renderChannelsPanel();
-    // Notify the viewer channel panel so it reflects the new name
     if (global.SNXTVChannels && typeof global.SNXTVChannels.refresh === 'function') {
       global.SNXTVChannels.refresh();
     }
@@ -2929,7 +2869,7 @@ async function _deleteChannel(channelId) {
     return;
   }
   const ch = _tvChannels.find(c => c.id === channelId);
-  if (!confirm(`Delete channel "${ch ? ch.name : channelId}"?\n\nThis removes the channel definition only.\nShared media is NOT deleted.\nSchedule entries and programs for this channel will remain in Firestore but will no longer appear.`)) return;
+  if (!confirm(`Delete channel "${ch ? ch.name : channelId}"?\n\nThe channel definition will be removed.\nAll media items added to this channel remain in the TV Media library.`)) return;
 
   const { doc, deleteDoc } = _fs();
   const db = _db();
@@ -2937,7 +2877,6 @@ async function _deleteChannel(channelId) {
   try {
     await deleteDoc(doc(db, COLL_TV_CHANNELS, channelId));
     _toast('Channel deleted.');
-    // If we were on this channel, switch to default
     if (_activeChannelId === channelId) {
       setChannel(null);
       if (global.SNXTVTimeline && typeof global.SNXTVTimeline.setChannel === 'function') {
