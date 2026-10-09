@@ -378,14 +378,18 @@
     if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
     if (aud) { try { aud.pause(); aud.removeAttribute('src'); aud.load(); } catch (_) {} }
 
-    // CRITICAL: aud.removeAttribute('src') + aud.load() internally resets the
-    // browser's media pipeline.  The existing MediaElementAudioSourceNode
-    // (_vizSource) becomes stale — its internal connection to the element is
-    // broken.  If we reuse it on the next track, the audio plays into a dead
-    // graph and produces silence.  Null it out so _startVizAnimation always
-    // creates a fresh source node for the next track.
-    if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
-    _vizSource = null;
+    // Do NOT disconnect _vizSource here.  Once createMediaElementSource() has
+    // been called on the audio element it permanently captures that element's
+    // routing through the Web Audio graph.  Disconnecting the source node severs
+    // the source→analyser→destination chain; the next createMediaElementSource()
+    // call on the same element throws an InvalidStateError (already connected),
+    // the catch block nulls _vizSource/_vizAnalyser, and audio is silently
+    // routed into the now-disconnected original node — producing silence on
+    // every channel switch after the first.
+    //
+    // Keeping the graph intact is safe: the audio element is paused and its src
+    // cleared above, so nothing is routed through the graph until the next
+    // _playItem() call sets a new src and calls play().
 
     _hideVisualizer();
     _setPlayState('waiting');
@@ -580,11 +584,10 @@
     const aud = _getAudioEl();
     if (!canvas || !aud) return;
 
-    // Wire up Web Audio only once per audio element instance.
-    // createMediaElementSource() can only be called once per element per context —
-    // _vizSource is nulled by _stopPlayback on every channel/track switch, so
-    // needsWire is true on every new track.  This ensures createMediaElementSource
-    // is called exactly once per playback session, never twice on the same element.
+    // Wire up Web Audio only once per audio element lifetime.
+    // createMediaElementSource() can only be called once per element per context.
+    // _vizSource is preserved across channel switches (never nulled by _stopPlayback),
+    // so needsWire is true only on the very first audio track ever played.
     const needsWire = !_vizSource;
     console.log(LOG, 'viz wire check: needsWire=' + needsWire + ' src=' + (!!_vizSource) + ' aud.src=' + (aud.src || '(none)'));
     if (needsWire) {
@@ -605,9 +608,9 @@
         console.log(LOG, 'Web Audio graph wired. ctx.state=' + _vizAudioCtx.state
           + ' src.mediaElement==aud=' + (_vizSource.mediaElement === aud));
       } catch (e) {
-        // createMediaElementSource threw (e.g. already connected in another context).
-        // Null everything — HTML5 audio continues without Web Audio; visualizer
-        // shows the fallback sine-wave animation instead of frequency bars.
+        // createMediaElementSource threw — this should not happen since we no
+        // longer null _vizSource, but guard anyway.  Audio still plays via HTML5;
+        // visualizer falls back to the sine-wave animation.
         console.warn(LOG, 'AudioContext setup error (visualizer disabled):', e.message);
         _vizSource   = null;
         _vizAnalyser = null;
