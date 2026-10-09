@@ -377,6 +377,16 @@
     const aud = _getAudioEl();
     if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
     if (aud) { try { aud.pause(); aud.removeAttribute('src'); aud.load(); } catch (_) {} }
+
+    // CRITICAL: aud.removeAttribute('src') + aud.load() internally resets the
+    // browser's media pipeline.  The existing MediaElementAudioSourceNode
+    // (_vizSource) becomes stale — its internal connection to the element is
+    // broken.  If we reuse it on the next track, the audio plays into a dead
+    // graph and produces silence.  Null it out so _startVizAnimation always
+    // creates a fresh source node for the next track.
+    if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
+    _vizSource = null;
+
     _hideVisualizer();
     _setPlayState('waiting');
     _resetHud();
@@ -567,38 +577,47 @@
 
     // Wire up Web Audio only once per audio element instance.
     // createMediaElementSource() can only be called once per element per context —
-    // reuse _vizSource if it already wraps this exact element.
-    const needsWire = !_vizSource || _vizSource.mediaElement !== aud;
+    // _vizSource is nulled by _stopPlayback on every channel/track switch, so
+    // needsWire is true on every new track.  This ensures createMediaElementSource
+    // is called exactly once per playback session, never twice on the same element.
+    const needsWire = !_vizSource;
+    console.log(LOG, 'viz wire check: needsWire=' + needsWire + ' src=' + (!!_vizSource) + ' aud.src=' + (aud.src || '(none)'));
     if (needsWire) {
       try {
         if (!_vizAudioCtx) {
           _vizAudioCtx = new (global.AudioContext || global.webkitAudioContext)();
         }
-        // Disconnect the previous source if it exists
-        if (_vizSource) { try { _vizSource.disconnect(); } catch (_) {} }
-        if (_vizAnalyser) { try { _vizAnalyser.disconnect(); } catch (_) {} }
+        // Clean up any orphaned analyser from a failed previous wire
+        if (_vizAnalyser) { try { _vizAnalyser.disconnect(); } catch (_) {} _vizAnalyser = null; }
 
         _vizSource   = _vizAudioCtx.createMediaElementSource(aud);
         _vizAnalyser = _vizAudioCtx.createAnalyser();
         _vizAnalyser.fftSize = 128;
-        // source → analyser → speakers (both visualizer AND audio output)
+        // source → analyser → destination (speakers).  Both visualizer bars AND
+        // audio output flow through this graph.
         _vizSource.connect(_vizAnalyser);
         _vizAnalyser.connect(_vizAudioCtx.destination);
-        console.log(LOG, 'Web Audio graph wired; ctx state:', _vizAudioCtx.state);
+        console.log(LOG, 'Web Audio graph wired. ctx.state=' + _vizAudioCtx.state
+          + ' src.mediaElement==aud=' + (_vizSource.mediaElement === aud));
       } catch (e) {
-        // If Web Audio fails for any reason, fall back gracefully:
-        // null out the analyser so the fallback waveform draws instead,
-        // but do NOT silence the audio element — direct HTML5 playback
-        // continues independently of the Web Audio graph.
+        // createMediaElementSource threw (e.g. already connected in another context).
+        // Null everything — HTML5 audio continues without Web Audio; visualizer
+        // shows the fallback sine-wave animation instead of frequency bars.
         console.warn(LOG, 'AudioContext setup error (visualizer disabled):', e.message);
         _vizSource   = null;
         _vizAnalyser = null;
       }
     }
 
-    // Resume a suspended context (e.g. browser autoplay policy)
+    // Resume a suspended context (browsers start AudioContext suspended until a
+    // user gesture has occurred).
     if (_vizAudioCtx && _vizAudioCtx.state === 'suspended') {
-      _vizAudioCtx.resume().catch(() => {});
+      console.log(LOG, 'AudioContext suspended — resuming...');
+      _vizAudioCtx.resume().then(() => {
+        console.log(LOG, 'AudioContext resumed; state=' + _vizAudioCtx.state);
+      }).catch(err => {
+        console.warn(LOG, 'AudioContext resume failed:', err.message);
+      });
     }
 
     const ctx = canvas.getContext('2d');
@@ -2160,6 +2179,70 @@
     getChannels: () => _channels,
     getQueue:    () => _mediaQueue,
     getLibrary:  () => _libraryAll,
+
+    /**
+     * SNXTv.diag() — run from the browser console to get the full audio
+     * pipeline state without exposing sensitive URL tokens.
+     *
+     * Usage:  copy(JSON.stringify(SNXTv.diag(), null, 2))
+     */
+    diag() {
+      const aud = _el('snxTvAudio');
+      const vid = _el('snxTvVideo');
+
+      function redactUrl(u) {
+        if (!u) return '(empty)';
+        try {
+          const url = new URL(u);
+          // Remove any query-string tokens (e.g. Supabase signed URLs)
+          if (url.search) url.search = '?[redacted]';
+          return url.toString();
+        } catch (_) { return u.slice(0, 80) + (u.length > 80 ? '…' : ''); }
+      }
+
+      function elDiag(el, name) {
+        if (!el) return { error: name + ' element not found in DOM' };
+        return {
+          tag:          el.tagName,
+          src:          redactUrl(el.src),
+          currentSrc:   redactUrl(el.currentSrc),
+          readyState:   el.readyState,    // 0=HAVE_NOTHING 1=HAVE_METADATA 2=HAVE_CURRENT_DATA 3=HAVE_FUTURE_DATA 4=HAVE_ENOUGH_DATA
+          networkState: el.networkState,  // 0=EMPTY 1=IDLE 2=LOADING 3=NO_SOURCE
+          currentTime:  el.currentTime,
+          duration:     el.duration,
+          paused:       el.paused,
+          ended:        el.ended,
+          muted:        el.muted,
+          volume:       el.volume,
+          error:        el.error ? { code: el.error.code, message: el.error.message } : null,
+        };
+      }
+
+      const report = {
+        build:          BUILD,
+        playState:      _playState,
+        playing:        _playing,
+        autoplayBlocked: _autoplayBlocked,
+        queueLength:    _mediaQueue.length,
+        queueIdx:       _queueIdx,
+        currentItem:    _mediaQueue[_queueIdx]
+          ? { title: _mediaQueue[_queueIdx].title, mediaKind: _mediaQueue[_queueIdx].mediaKind,
+              url: redactUrl(_mediaQueue[_queueIdx].url) }
+          : null,
+        activeChannel:  _activeChannel ? { id: _activeChannel.id, name: _activeChannel.name } : null,
+        audioEl:        elDiag(aud, 'snxTvAudio'),
+        videoEl:        elDiag(vid, 'snxTvVideo'),
+        webAudio: {
+          contextState:  _vizAudioCtx ? _vizAudioCtx.state : 'not created',
+          sourceNode:    _vizSource   ? 'present (mediaElement==aud: ' + (_vizSource.mediaElement === aud) + ')' : 'null',
+          analyserNode:  _vizAnalyser ? 'present' : 'null',
+          vizRunning:    _vizRunning,
+        },
+      };
+
+      console.log(LOG, 'DIAGNOSTIC REPORT:\n' + JSON.stringify(report, null, 2));
+      return report;
+    },
   };
 
   _init();
