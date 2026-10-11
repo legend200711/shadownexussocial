@@ -21705,7 +21705,7 @@ function navTo(pageId) {
             _openTvPage();
         }
     } else {
-        // Leaving TV page — let audio keep playing (same as Radio behaviour)
+        // Leaving TV page — stop all playback immediately.
         if (window.SNXTv && typeof window.SNXTv.pageLeave === 'function') {
             window.SNXTv.pageLeave();
         }

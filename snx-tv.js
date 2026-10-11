@@ -53,6 +53,7 @@
   let _queueIdx      = 0;
   let _playing       = false;
   let _autoplayBlocked = false;
+  let _advanceTimer  = null;   // pending setTimeout handle for image/error queue advance
   let _channelsUnsub   = null;
   let _chItemsUnsub    = null;  // assignment listener for active channel
   let _libraryCache    = {};    // mediaId → media doc (avoids redundant reads)
@@ -373,6 +374,7 @@
 
   function _stopPlayback() {
     _playing = false;
+    if (_advanceTimer !== null) { clearTimeout(_advanceTimer); _advanceTimer = null; }
     const vid = _getVideoEl();
     const aud = _getAudioEl();
     if (vid) { try { vid.pause(); vid.removeAttribute('src'); vid.load(); } catch (_) {} }
@@ -438,7 +440,7 @@
       _playing = true;
       _showImageItem(item);
       _setPlayState('playing');
-      setTimeout(_advanceQueue, 10000);
+      _advanceTimer = setTimeout(_advanceQueue, 10000);
     }
   }
 
@@ -470,6 +472,8 @@
   }
 
   function _advanceQueue() {
+    _advanceTimer = null;
+    if (!_playing) return;  // guard: ignore stale callbacks after _stopPlayback()
     if (_mediaQueue.length === 0) { _showWaiting(); return; }
     _queueIdx = (_queueIdx + 1) % _mediaQueue.length;
     _playItem(_mediaQueue[_queueIdx]);
@@ -2041,7 +2045,8 @@
         console.warn(LOG, el.tagName, 'media error',
           err ? 'code=' + err.code + ' ' + err.message : '(unknown)');
         _setPlayState('failed');
-        setTimeout(_advanceQueue, 2000);
+        if (_advanceTimer !== null) clearTimeout(_advanceTimer);
+        _advanceTimer = setTimeout(_advanceQueue, 2000);
       });
       el.addEventListener('waiting', () => {
         // Buffering stall — keep showing what state we were in unless loading
@@ -2112,7 +2117,8 @@
   }
 
   function _pageLeave() {
-    // Keep playback running in background — don't stop
+    _stopPlayback();
+    _stopVizAnimation();
   }
 
   function _pageDestroy() {
