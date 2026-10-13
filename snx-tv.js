@@ -82,12 +82,22 @@
   }
 
   /** Persist a checkpoint atomically. generation guards against stale callbacks. */
-  function _pbSave(channelId, mediaId, currentTime, playing) {
+  function _pbSave(channelId, mediaId, currentTime, playing, duration) {
     const gen = ++_lastSaveGeneration;
     try {
       // Re-check generation after any async gap; for the sync path it is always current.
       if (gen !== _lastSaveGeneration) return;
-      const rec = { channelId, mediaId, currentTime: Math.floor(currentTime), playing, savedAt: Date.now() };
+      const rec = {
+        channelId,
+        mediaId,
+        currentTime: Math.floor(currentTime),
+        playing,
+        savedAt: Date.now(),
+        // duration lets _pbTimeline() know when this item ends so it can advance
+        // the virtual station clock while the viewer is away — same principle as
+        // Radio's epochMs + _timeline() model.
+        duration: (typeof duration === 'number' && duration > 0) ? Math.ceil(duration) : 0,
+      };
       localStorage.setItem(PB_KEY, JSON.stringify(rec));
     } catch (_) { /* quota or private-browsing — silently ignore */ }
   }
@@ -99,7 +109,73 @@
     if (!item) return;
     const mediaEl = item.mediaKind === 'video' ? _getVideoEl() : _getAudioEl();
     if (!mediaEl || !isFinite(mediaEl.currentTime) || mediaEl.currentTime <= 0) return;
-    _pbSave(_activeChannel.id, item.id, mediaEl.currentTime, !mediaEl.paused);
+    // Include the live duration so the restore can advance the virtual clock.
+    const dur = isFinite(mediaEl.duration) ? mediaEl.duration : (item.duration || 0);
+    _pbSave(_activeChannel.id, item.id, mediaEl.currentTime, !mediaEl.paused, dur);
+  }
+
+  /**
+   * Given a saved checkpoint and the current media queue, compute which item
+   * the station would be on right now and the correct seek position.
+   *
+   * This mirrors SNX-Radio's _timeline() model: the station clock kept advancing
+   * while the viewer was away, so we calculate the elapsed wall-clock time since
+   * the checkpoint and walk forward through the queue accordingly.
+   *
+   * Returns { idx, positionSec } or null if the checkpoint is unusable.
+   */
+  function _pbTimeline(saved, queue) {
+    if (!saved || !queue || queue.length === 0) return null;
+
+    // Elapsed real-world seconds since we saved the checkpoint
+    const elapsedSinceCheckpointMs = Date.now() - (saved.savedAt || 0);
+    if (elapsedSinceCheckpointMs < 0) return null;
+    const elapsedSec = elapsedSinceCheckpointMs / 1000;
+
+    // Find the item that was playing when we left
+    const savedIdx = queue.findIndex(m => m.id === saved.mediaId);
+    if (savedIdx === -1) return null;
+
+    // How far were we into that item?
+    const posAtLeave = saved.currentTime || 0;
+
+    // If the item's duration is unknown we can still seek to the saved position
+    // (we just can't advance past it).  Treat unknown duration as "infinite".
+    const dur = saved.duration > 0 ? saved.duration : Infinity;
+
+    // Remaining seconds left in the checkpoint item when we left
+    const remainingInItem = dur - posAtLeave;
+
+    if (elapsedSec < remainingInItem) {
+      // Still within the same item — just advance the position
+      return { idx: savedIdx, positionSec: posAtLeave + elapsedSec };
+    }
+
+    // The item finished while we were away.  Walk forward through the queue,
+    // consuming each item's duration until we land on the right one.
+    // Use only items that have a known positive duration; items without
+    // a duration are treated as complete so we skip past them.
+    let remaining = elapsedSec - remainingInItem;
+    const len = queue.length;
+
+    for (let i = 1; i < len; i++) {
+      const itemIdx = (savedIdx + i) % len;
+      const item    = queue[itemIdx];
+      // Use saved duration for the checkpoint item; fall back to item.duration
+      // for subsequent items (these come from the media library records).
+      const itemDur = (typeof item.duration === 'number' && item.duration > 0)
+        ? item.duration
+        : null;
+
+      if (itemDur === null || remaining < itemDur) {
+        // Land here
+        return { idx: itemIdx, positionSec: itemDur !== null ? remaining : 0 };
+      }
+      remaining -= itemDur;
+    }
+
+    // Wrapped all the way around: start at the beginning of the first item
+    return { idx: 0, positionSec: 0 };
   }
 
   /** Start the periodic checkpoint interval. */
@@ -390,16 +466,17 @@
     if (_mediaQueue.length === 0) { _showWaiting(); return; }
     _clearWaiting();
     if (!_playing) {
-      // Check whether we have a saved position to restore for this channel
+      // Use _pbTimeline() to compute the station's current position accounting
+      // for time that passed while the viewer was away — matching Radio's behaviour.
       const saved = _pbLoad();
-      if (saved && _activeChannel && saved.channelId === _activeChannel.id && saved.mediaId) {
-        const savedIdx = _mediaQueue.findIndex(m => m.id === saved.mediaId);
-        if (savedIdx !== -1 && saved.currentTime > 0) {
-          // Restore: play the saved item and schedule a seek after loadedmetadata
-          _queueIdx = savedIdx;
-          _restoreSeekPending = true;
-          _restoreSeekTime = saved.currentTime;
-          console.log(LOG, 'restoring playback', saved.mediaId, 'at', saved.currentTime + 's');
+      if (saved && _activeChannel && saved.channelId === _activeChannel.id) {
+        const result = _pbTimeline(saved, _mediaQueue);
+        if (result) {
+          _queueIdx = result.idx;
+          _restoreSeekPending = result.positionSec > 0;
+          _restoreSeekTime    = result.positionSec;
+          console.log(LOG, 'timeline restore — item:', _mediaQueue[_queueIdx].title || _mediaQueue[_queueIdx].id,
+            'idx:', result.idx, 'pos:', result.positionSec.toFixed(1) + 's');
           _playItem(_mediaQueue[_queueIdx]);
           return;
         }
@@ -847,20 +924,29 @@
       _vizAudioCtx.resume().catch(() => {});
     }
 
+    // Re-compute the authoritative station position at the moment the viewer
+    // taps "Enable Sound" — the saved checkpoint may now be stale (time passed
+    // since the page loaded or since the autoplay block was first shown).
+    if (_activeChannel) {
+      const saved = _pbLoad();
+      if (saved && saved.channelId === _activeChannel.id) {
+        const result = _pbTimeline(saved, _mediaQueue);
+        if (result) {
+          // Switch to the correct item if the timeline advanced
+          if (result.idx !== _queueIdx) {
+            _queueIdx = result.idx;
+          }
+          _restoreSeekPending = result.positionSec > 0;
+          _restoreSeekTime    = result.positionSec;
+        }
+      }
+    }
+
     const item = _mediaQueue[_queueIdx];
     if (!item) return;
 
     // Re-play the current item from scratch so src, load, and play all
     // happen in the user-gesture callback, satisfying autoplay policy.
-    // If we had a pending seek restore, re-arm it so the seek happens after metadata.
-    if (!_restoreSeekPending) {
-      const saved = _pbLoad();
-      if (saved && _activeChannel && saved.channelId === _activeChannel.id &&
-          saved.mediaId === item.id && saved.currentTime > 0) {
-        _restoreSeekPending = true;
-        _restoreSeekTime = saved.currentTime;
-      }
-    }
     _playItem(item);
   }
 
@@ -2216,6 +2302,14 @@
     _ensurePageDom();
 
     const _open = () => {
+      if (_activeChannel && _mediaQueue.length > 0 && !_playing) {
+        // Viewer is returning to a channel they already selected — re-join
+        // the station timeline rather than rebuilding all subscriptions.
+        // This is equivalent to Radio's pageEnter() → _joinTimeline().
+        console.log(LOG, 'pageOpen — viewer returning to', _activeChannel.name, ', re-joining timeline');
+        _joinTimeline();
+        return;
+      }
       _subscribeChannels();
       if (_isFounder()) {
         _showStudioBar();
@@ -2233,12 +2327,52 @@
     }
   }
 
+  /**
+   * _pageEnter() — lightweight re-join called when the viewer returns to tvPage.
+   *
+   * Mirrors SNXRadio.pageEnter(): does NOT rebuild subscriptions or recreate DOM.
+   * Re-computes the authoritative station position from the saved checkpoint
+   * and resumes playback from there.
+   *
+   * The SPA (index.html navTo) may call pageOpen() every visit; this function
+   * is the internal path reached from _pageOpen() when the channel is already
+   * active and the queue is loaded.
+   */
+  function _joinTimeline() {
+    if (!_activeChannel || _mediaQueue.length === 0) return;
+    if (_playing) return; // already playing — nothing to do
+
+    const saved  = _pbLoad();
+    let   target = null;
+
+    if (saved && saved.channelId === _activeChannel.id) {
+      target = _pbTimeline(saved, _mediaQueue);
+    }
+
+    if (target) {
+      _queueIdx = target.idx;
+      _restoreSeekPending = target.positionSec > 0;
+      _restoreSeekTime    = target.positionSec;
+      console.log(LOG, 'joinTimeline — item:', _mediaQueue[_queueIdx].title || _mediaQueue[_queueIdx].id,
+        'idx:', target.idx, 'pos:', target.positionSec.toFixed(1) + 's');
+    } else {
+      // No valid checkpoint — start from index 0
+      _queueIdx = 0;
+      _restoreSeekPending = false;
+      _restoreSeekTime    = 0;
+      console.log(LOG, 'joinTimeline — no checkpoint, starting from idx 0');
+    }
+
+    _playItem(_mediaQueue[_queueIdx]);
+  }
+
   function _pageLeave() {
     // Capture final position BEFORE stopping playback (which clears the src)
     _pbCheckpoint();
     _pbStopCheckpoint();
     _stopPlayback();
     _stopVizAnimation();
+    console.log(LOG, 'pageLeave — local playback stopped, station state preserved in localStorage');
   }
 
   function _pageDestroy() {
@@ -2271,6 +2405,8 @@
     pageOpen:    _pageOpen,
     pageLeave:   _pageLeave,
     pageDestroy: _pageDestroy,
+    /* pageEnter: lightweight re-join for SPAs that track enter/leave separately */
+    pageEnter:   _joinTimeline,
 
     /* Viewer */
     selectChannel: _selectChannel,
@@ -2311,10 +2447,20 @@
     closeDeleteConfirmDialog:  _closeDeleteConfirmDialog,
 
     /* Diagnostics */
-    getBuild:    () => BUILD,
-    getChannels: () => _channels,
-    getQueue:    () => _mediaQueue,
-    getLibrary:  () => _libraryAll,
+    getBuild:       () => BUILD,
+    getChannels:    () => _channels,
+    getQueue:       () => _mediaQueue,
+    getLibrary:     () => _libraryAll,
+    getCheckpoint:  () => _pbLoad(),
+    /* Test the timeline calculation — e.g. SNXTv.testTimeline() from console */
+    testTimeline: () => {
+      const saved = _pbLoad();
+      const result = saved && _activeChannel && saved.channelId === _activeChannel.id
+        ? _pbTimeline(saved, _mediaQueue)
+        : null;
+      console.log(LOG, 'testTimeline — checkpoint:', saved, 'result:', result);
+      return { checkpoint: saved, result };
+    },
 
     /**
      * SNXTv.diag() — run from the browser console to get the full audio
@@ -2354,6 +2500,11 @@
         };
       }
 
+      const savedPb = _pbLoad();
+      const tlResult = (savedPb && _activeChannel && savedPb.channelId === _activeChannel.id)
+        ? _pbTimeline(savedPb, _mediaQueue)
+        : null;
+
       const report = {
         build:          BUILD,
         playState:      _playState,
@@ -2366,6 +2517,11 @@
               url: redactUrl(_mediaQueue[_queueIdx].url) }
           : null,
         activeChannel:  _activeChannel ? { id: _activeChannel.id, name: _activeChannel.name } : null,
+        timeline: {
+          checkpoint:  savedPb  ? { mediaId: savedPb.mediaId, currentTime: savedPb.currentTime,
+                                    duration: savedPb.duration, savedSecsAgo: Math.round((Date.now() - savedPb.savedAt) / 1000) } : null,
+          computed:    tlResult ? { idx: tlResult.idx, positionSec: +tlResult.positionSec.toFixed(1) } : null,
+        },
         audioEl:        elDiag(aud, 'snxTvAudio'),
         videoEl:        elDiag(vid, 'snxTvVideo'),
         webAudio: {
