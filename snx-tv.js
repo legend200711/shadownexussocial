@@ -30,7 +30,7 @@
      CONSTANTS
   ════════════════════════════════════════════════════════════ */
 
-  const BUILD  = 'SNS-2026-TV-STATION-001';
+  const BUILD  = 'SNS-2026-TV-STATION-002';
   const WORKER = 'https://yellow-term-11e6.nthntjrn.workers.dev';
   const LOG    = '[SNX-TV]';
 
@@ -189,6 +189,15 @@
     if (_pbCheckpointTimer !== null) { clearInterval(_pbCheckpointTimer); _pbCheckpointTimer = null; }
   }
 
+  /* ════════════════════════════════════════════════════════════
+     VIEW STATE  (home | player)
+  ════════════════════════════════════════════════════════════ */
+
+  let _tvView        = 'home';    // 'home' | 'player'
+  let _guideOpen     = false;     // TV Guide panel open?
+  let _allChItemsUnsub = null;    // all-channel-items sub (founder)
+  let _allChItemChannelNames = {}; // mediaId → [channelName…]
+
   /* Studio state */
   let _studioOpen    = false;
   let _studioTab     = 'library';  // 'library' | 'channels'
@@ -331,6 +340,7 @@
         snap.forEach(d => _channels.push({ id: d.id, ...d.data() }));
         _channels.sort((a, b) => (a.order || 0) - (b.order || 0));
         _renderGuide();
+        _renderHomeChannels();
         _renderStudioChannelList();
         _renderChContentChannelPicker();
         if (!_activeChannel && _channels.length > 0) {
@@ -353,6 +363,8 @@
   function _showGuideError(msg) {
     const grid = _el('snxTvGuideGrid');
     if (grid) grid.innerHTML = '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' + msg + '</div>';
+    const hGrid = _el('snxTvHomeChGrid');
+    if (hGrid) hGrid.innerHTML = '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">' + msg + '</div>';
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -842,6 +854,12 @@
   function _setPlayState(state) {
     _playState = state;
     _updateHudState(state);
+    // Update loading overlay
+    const loading = _el('snxTvPlayerLoading');
+    if (loading) loading.style.display = (state === 'loading') ? 'flex' : 'none';
+    // Update hero Live indicator when playback starts/stops
+    const heroLive = _el('snxTvHeroLive');
+    if (heroLive) heroLive.style.display = (state === 'playing') ? '' : 'none';
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -965,6 +983,7 @@
       if (npSub)   npSub.textContent   = '';
       if (npArt)   { npArt.innerHTML = '📺'; npArt.style.backgroundImage = ''; }
       if (npChannel && _activeChannel) npChannel.textContent = _activeChannel.name;
+      _updateHomeHero(null);
       return;
     }
 
@@ -988,6 +1007,174 @@
         npArt.innerHTML = KIND_ICON[item.mediaKind] || '🎬';
       }
     }
+    _updateHomeHero(item);
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     HOME SCREEN — hero update, channel grid
+  ════════════════════════════════════════════════════════════ */
+
+  /** Update the hero area on the home screen when the now-playing item changes. */
+  function _updateHomeHero(item) {
+    const heroTitle   = _el('snxTvHeroTitle');
+    const heroSub     = _el('snxTvHeroSub');
+    const heroBg      = _el('snxTvHeroBg');
+    const heroLive    = _el('snxTvHeroLive');
+
+    if (!heroTitle) return; // home view not rendered yet
+
+    if (!item || !_activeChannel) {
+      if (heroTitle) heroTitle.textContent = 'Shadow Nexus TV';
+      if (heroSub)   heroSub.textContent   = 'Select a channel to start watching';
+      if (heroBg)    { heroBg.style.backgroundImage = ''; heroBg.removeAttribute('data-art'); }
+      if (heroLive)  heroLive.style.display = 'none';
+      return;
+    }
+
+    heroTitle.textContent = item.title || item.fileName || 'Now Playing';
+    const artist = item.artist || '';
+    const chName = _activeChannel.name || '';
+    const parts  = [chName, artist].filter(Boolean);
+    heroSub.textContent = parts.join(' · ') || '';
+
+    const art = item.artworkUrl || _activeChannel.artworkUrl || '';
+    if (heroBg && art && art !== heroBg.dataset.art) {
+      heroBg.style.backgroundImage = 'url(' + art + ')';
+      heroBg.dataset.art = art;
+    }
+
+    if (heroLive) heroLive.style.display = (_playState === 'playing') ? '' : 'none';
+  }
+
+  /** Render the Live Channels grid on the home screen. */
+  function _renderHomeChannels() {
+    const grid = _el('snxTvHomeChGrid');
+    if (!grid) return;
+
+    if (_channels.length === 0) {
+      grid.innerHTML = '<div class="snx-tv-home-empty">No channels available yet.</div>';
+      return;
+    }
+
+    grid.innerHTML = _channels.map((ch, i) => {
+      const isActive   = _activeChannel && _activeChannel.id === ch.id;
+      const artStyle   = ch.artworkUrl ? 'style="background-image:url(' + _esc(ch.artworkUrl) + ');"' : '';
+      const artContent = ch.artworkUrl ? '' : '<span class="snx-tv-hch-fallback">📺</span>';
+      const chNum      = 'CH ' + (ch.order !== undefined ? ch.order + 1 : i + 1);
+
+      // Current item info from active channel queue
+      let nowTitle = ch.description || 'Live';
+      let progressHtml = '';
+      if (isActive && _mediaQueue.length > 0) {
+        const cur = _mediaQueue[_queueIdx];
+        if (cur) {
+          nowTitle = cur.title || cur.fileName || 'Now Playing';
+          // try to get progress from media element
+          const mediaEl = cur.mediaKind === 'video' ? _el('snxTvVideo') : _el('snxTvAudio');
+          if (mediaEl && isFinite(mediaEl.duration) && mediaEl.duration > 0) {
+            const pct = Math.min(100, (mediaEl.currentTime / mediaEl.duration) * 100);
+            progressHtml = '<div class="snx-tv-hch-progress"><div class="snx-tv-hch-bar" style="width:' + pct.toFixed(1) + '%"></div></div>';
+          }
+        }
+      }
+
+      return (
+        '<div class="snx-tv-home-ch-card' + (isActive ? ' active' : '') + '" ' +
+        'data-ch-id="' + _esc(ch.id) + '" ' +
+        'onclick="window.SNXTv.watchChannel(' + _json(ch.id) + ')" ' +
+        'role="button" tabindex="0" ' +
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \')window.SNXTv.watchChannel(' + _json(ch.id) + ')">' +
+          '<div class="snx-tv-hch-art" ' + artStyle + '>' + artContent + '</div>' +
+          '<div class="snx-tv-hch-body">' +
+            '<div class="snx-tv-hch-num">' + _esc(chNum) + '</div>' +
+            '<div class="snx-tv-hch-name">' + _esc(ch.name) + '</div>' +
+            '<div class="snx-tv-hch-now">' + _esc(nowTitle) + '</div>' +
+            progressHtml +
+          '</div>' +
+          (isActive && _playState === 'playing'
+            ? '<div class="snx-tv-hch-live"><span class="snx-tv-onair-dot"></span>LIVE</div>'
+            : '<div class="snx-tv-hch-watch">Watch</div>') +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  /** Render the TV Guide panel (current + upcoming programs for active channel). */
+  function _renderTvGuide() {
+    const panel = _el('snxTvGuidePanel');
+    if (!panel) return;
+
+    if (!_activeChannel) {
+      panel.innerHTML = '<div class="snx-tv-guide-empty">Select a channel to see the program guide.</div>';
+      return;
+    }
+
+    if (_mediaQueue.length === 0) {
+      panel.innerHTML = '<div class="snx-tv-guide-empty">No programs scheduled for this channel yet.</div>';
+      return;
+    }
+
+    const now = Date.now();
+    const curItem = _mediaQueue[_queueIdx];
+
+    // Build time-based schedule from active media element position
+    let startTimeSec = 0;
+    if (curItem) {
+      const mediaEl = curItem.mediaKind === 'video' ? _el('snxTvVideo') : _el('snxTvAudio');
+      if (mediaEl && isFinite(mediaEl.currentTime)) {
+        startTimeSec = -mediaEl.currentTime; // negative = already elapsed
+      }
+    }
+
+    const rows = _mediaQueue.map((item, idx) => {
+      const isCurrent = idx === _queueIdx;
+      const dur        = (item.duration && isFinite(item.duration)) ? item.duration : null;
+      const durStr     = dur ? _fmtTime(dur) : '';
+
+      // Rough start-time offset from now (seconds)
+      let timeLabel = '';
+      if (isCurrent) {
+        timeLabel = 'Now';
+      } else if (dur !== null) {
+        // Walk forward from current position
+        // (simplified — just show "Next" for first item after current)
+        timeLabel = idx === (_queueIdx + 1) % _mediaQueue.length ? 'Next' : 'Up next';
+      }
+
+      let progressHtml = '';
+      if (isCurrent) {
+        const mediaEl = curItem && (curItem.mediaKind === 'video' ? _el('snxTvVideo') : _el('snxTvAudio'));
+        if (mediaEl && isFinite(mediaEl.duration) && mediaEl.duration > 0) {
+          const pct = Math.min(100, (mediaEl.currentTime / mediaEl.duration) * 100);
+          progressHtml = '<div class="snx-tv-gprog"><div class="snx-tv-gprog-fill" style="width:' + pct.toFixed(1) + '%"></div></div>';
+        }
+      }
+
+      const artStyle = item.artworkUrl ? 'style="background-image:url(' + _esc(item.artworkUrl) + ');"' : '';
+      const artFb    = item.artworkUrl ? '' : (KIND_ICON[item.mediaKind] || '📺');
+
+      return (
+        '<div class="snx-tv-guide-row' + (isCurrent ? ' current' : '') + '">' +
+          '<div class="snx-tv-guide-row-art" ' + artStyle + '>' + artFb + '</div>' +
+          '<div class="snx-tv-guide-row-info">' +
+            '<div class="snx-tv-guide-row-title">' + _esc(item.title || item.fileName || 'Untitled') + '</div>' +
+            (item.artist ? '<div class="snx-tv-guide-row-sub">' + _esc(item.artist) + '</div>' : '') +
+            progressHtml +
+          '</div>' +
+          '<div class="snx-tv-guide-row-meta">' +
+            (timeLabel ? '<span class="snx-tv-guide-time' + (isCurrent ? ' now' : '') + '">' + timeLabel + '</span>' : '') +
+            (durStr ? '<span class="snx-tv-guide-dur">' + durStr + '</span>' : '') +
+          '</div>' +
+        '</div>'
+      );
+    }).join('');
+
+    panel.innerHTML =
+      '<div class="snx-tv-guide-ch-header">' +
+        '<span class="snx-tv-guide-ch-name">' + _esc(_activeChannel.name) + '</span>' +
+        (_playState === 'playing' ? '<span class="snx-tv-guide-live"><span class="snx-tv-onair-dot"></span>ON AIR</span>' : '') +
+      '</div>' +
+      '<div class="snx-tv-guide-rows">' + rows + '</div>';
   }
 
   /* ════════════════════════════════════════════════════════════
@@ -1006,10 +1193,28 @@
       return;
     }
 
-    grid.innerHTML = _channels.map(ch => {
+    grid.innerHTML = _channels.map((ch, i) => {
       const isActive   = _activeChannel && _activeChannel.id === ch.id;
       const artStyle   = ch.artworkUrl ? 'background-image:url(' + _esc(ch.artworkUrl) + ');' : '';
       const artContent = ch.artworkUrl ? '' : '📺';
+
+      // For active channel, show current program title and progress
+      let nowMeta = ch.description || '';
+      let progressHtml = '';
+      if (isActive && _mediaQueue.length > 0) {
+        const cur = _mediaQueue[_queueIdx];
+        if (cur) {
+          nowMeta = cur.title || cur.fileName || ch.description || '';
+          const mediaEl = cur.mediaKind === 'video' ? _el('snxTvVideo') : _el('snxTvAudio');
+          if (mediaEl && isFinite(mediaEl.duration) && mediaEl.duration > 0) {
+            const pct = Math.min(100, (mediaEl.currentTime / mediaEl.duration) * 100);
+            progressHtml = '<div class="snx-tv-ch-progress"><div class="snx-tv-ch-prog-fill" style="width:' + pct.toFixed(1) + '%"></div></div>';
+          }
+        }
+      }
+
+      const chNum = 'CH ' + (ch.order !== undefined ? ch.order + 1 : i + 1);
+
       return (
         '<div class="snx-tv-channel-card' + (isActive ? ' active-channel' : '') + '" ' +
         'data-ch-id="' + _esc(ch.id) + '" ' +
@@ -1019,29 +1224,114 @@
           '<div class="snx-tv-ch-art" style="' + artStyle + '">' + artContent + '</div>' +
           '<div class="snx-tv-ch-info">' +
             '<div class="snx-tv-ch-name">' + _esc(ch.name) + '</div>' +
-            '<div class="snx-tv-ch-meta">' + _esc(ch.description || '') + '</div>' +
+            '<div class="snx-tv-ch-meta">' + _esc(nowMeta) + '</div>' +
+            progressHtml +
           '</div>' +
-          (isActive
-            ? '<span class="snx-tv-ch-badge playing"><span class="snx-tv-onair-dot"></span>ON</span>'
-            : '<span class="snx-tv-ch-badge">CH ' + ((ch.order !== undefined ? ch.order + 1 : '')) + '</span>') +
+          (isActive && _playState === 'playing'
+            ? '<span class="snx-tv-ch-badge playing"><span class="snx-tv-onair-dot"></span>LIVE</span>'
+            : '<span class="snx-tv-ch-badge">' + _esc(chNum) + '</span>') +
         '</div>'
       );
     }).join('');
+
+    // Also refresh the TV guide panel if it's open
+    if (_guideOpen) _renderTvGuide();
+    // Also refresh the home channel grid
+    _renderHomeChannels();
+  }
+
+  /* ════════════════════════════════════════════════════════════
+     VIEW NAVIGATION  (home ↔ player)
+  ════════════════════════════════════════════════════════════ */
+
+  function _showHomeView() {
+    _tvView = 'home';
+    const hv = _el('snxTvHomeView');
+    const pv = _el('snxTvPlayerView');
+    if (hv) hv.style.display = '';
+    if (pv) pv.style.display = 'none';
+    _updateHomeHero(_mediaQueue[_queueIdx] || null);
+    _renderHomeChannels();
+  }
+
+  function _showPlayerView() {
+    _tvView = 'player';
+    const hv = _el('snxTvHomeView');
+    const pv = _el('snxTvPlayerView');
+    if (hv) hv.style.display = 'none';
+    if (pv) pv.style.display = '';
+    // Update player channel label
+    const label = _el('snxTvPlayerChLabel');
+    if (label && _activeChannel) label.textContent = _activeChannel.name;
+    // If a channel is already loaded but not playing (e.g. autoplay blocked), re-join
+    if (_activeChannel && _mediaQueue.length > 0 && !_playing) {
+      _joinTimeline();
+    }
+  }
+
+  /**
+   * watchChannel — select a channel AND navigate to the player view.
+   * Called from the home screen channel cards.
+   */
+  function _watchChannel(channelId) {
+    _selectChannel(channelId, false);
+    _showPlayerView();
+  }
+
+  /**
+   * toggleGuide — show/hide the What's On guide panel.
+   */
+  function _toggleGuide() {
+    _guideOpen = !_guideOpen;
+    const drawer = _el('snxTvGuideDrawer');
+    if (drawer) drawer.style.display = _guideOpen ? '' : 'none';
+    if (_guideOpen) {
+      _renderTvGuide();
+      // On home view, navigate to player so guide is visible
+      if (_tvView === 'home') _showPlayerView();
+    }
+  }
+
+  /**
+   * toggleFullscreen — request/exit fullscreen for the player wrapper.
+   */
+  function _toggleFullscreen() {
+    const wrap = _el('snxTvPlayerWrap');
+    if (!wrap) return;
+    const doc = global.document;
+    const isFs = !!(doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement);
+    if (isFs) {
+      (doc.exitFullscreen || doc.webkitExitFullscreen || doc.mozCancelFullScreen).call(doc);
+    } else {
+      (wrap.requestFullscreen || wrap.webkitRequestFullscreen || wrap.mozRequestFullScreen).call(wrap);
+    }
   }
 
   /* ════════════════════════════════════════════════════════════
      TV STUDIO BAR & PANEL (founder only)
   ════════════════════════════════════════════════════════════ */
 
-  function _showStudioBar() { _show('snxTvStudioBar'); }
-  function _hideStudioBar() { _hide('snxTvStudioBar'); }
+  function _showStudioBar() {
+    _show('snxTvStudioBar');
+    // Also show the player-view studio bar if present
+    const pb = _el('snxTvStudioBarPlayer');
+    if (pb) pb.style.display = '';
+  }
+  function _hideStudioBar() {
+    _hide('snxTvStudioBar');
+    const pb = _el('snxTvStudioBarPlayer');
+    if (pb) pb.style.display = 'none';
+  }
 
   function _toggleStudio() {
     _studioOpen = !_studioOpen;
     const panel = _el('snxTvStudioPanel');
     if (panel) panel.classList.toggle('open', _studioOpen);
-    const btn = _el('snxTvStudioToggleBtn');
-    if (btn) btn.textContent = _studioOpen ? '✕ Close Studio' : '📺 TV Studio';
+    // Update toggle buttons in both views
+    ['snxTvStudioToggleBtn', 'snxTvStudioToggleBtnPlayer'].forEach(id => {
+      const btn = _el(id);
+      if (btn) btn.textContent = _studioOpen ? '✕ Close Studio' : '📺 TV Studio';
+    });
     if (_studioOpen) {
       _subscribeLibrary();
       _switchStudioTab(_studioTab || 'library');
@@ -1155,10 +1445,6 @@
     // Scan loaded channel items (all channels) — we keep a global map
     return _allChItemChannelNames[mediaId] || [];
   }
-
-  // Map of mediaId → [channelName, ...] populated by _subscribeAllChItems
-  let _allChItemChannelNames = {};
-  let _allChItemsUnsub = null;
 
   function _subscribeAllChItems() {
     if (_allChItemsUnsub) return;
@@ -1973,65 +2259,136 @@
 
     page.innerHTML = [
 
-      '<h2 class="eclipse-title" style="margin:0 0 14px;">📺 Shadow Nexus TV</h2>',
+      /* ══════════════════════════════════════════
+         HOME VIEW
+      ══════════════════════════════════════════ */
+      '<div class="snx-tv-view" id="snxTvHomeView">',
 
-      /* ── Player ── */
-      '<div class="snx-tv-player-wrap" id="snxTvPlayerWrap">',
-        '<div id="snxTvPlayerInner" style="width:100%;height:100%;position:relative;">',
-          '<video id="snxTvVideo" data-snx-media-exempt="1" playsinline webkit-playsinline preload="metadata" style="display:none;"></video>',
-          '<audio id="snxTvAudio" preload="none" crossorigin="anonymous"></audio>',
-          '<canvas id="snxTvVisualizer"></canvas>',
-          '<div class="snx-tv-viz-overlay" id="snxTvVizOverlay">',
-            '<div class="snx-tv-viz-title"></div>',
-            '<div class="snx-tv-viz-artist"></div>',
-          '</div>',
-          /* HUD — real playback timeline, always visible at bottom of player */
-          '<div class="snx-tv-hud" id="snxTvHud">',
-            '<span class="snx-tv-hud-elapsed" id="snxTvHudElapsed">00:00</span>',
-            '<div class="snx-tv-hud-track">',
-              '<div class="snx-tv-hud-bar-wrap">',
-                '<div class="snx-tv-hud-bar" id="snxTvHudBar"></div>',
-              '</div>',
-              '<div class="snx-tv-hud-times">',
-                '<span id="snxTvHudDuration">--:--</span>',
-                '<span id="snxTvHudRemaining" class="snx-tv-hud-remaining"></span>',
-              '</div>',
+        /* ── Hero / Featured ── */
+        '<div class="snx-tv-hero" id="snxTvHero">',
+          '<div class="snx-tv-hero-bg" id="snxTvHeroBg"></div>',
+          '<div class="snx-tv-hero-overlay"></div>',
+          '<div class="snx-tv-hero-content">',
+            '<div class="snx-tv-hero-eyebrow">',
+              '<span class="snx-tv-service-badge">📺 SHADOW NEXUS TV</span>',
+              '<span class="snx-tv-hero-live" id="snxTvHeroLive" style="display:none;"><span class="snx-tv-onair-dot"></span> LIVE NOW</span>',
             '</div>',
-            '<span class="snx-tv-hud-state" id="snxTvHudState"></span>',
+            '<h1 class="snx-tv-hero-title" id="snxTvHeroTitle">Shadow Nexus TV</h1>',
+            '<p class="snx-tv-hero-sub" id="snxTvHeroSub">Loading channels…</p>',
+            '<div class="snx-tv-hero-actions">',
+              '<button class="snx-tv-watch-btn" onclick="window.SNXTv.showPlayerView()">▶ Watch Now</button>',
+              '<button class="snx-tv-guide-btn" onclick="window.SNXTv.toggleGuide()">📋 What\'s On</button>',
+            '</div>',
           '</div>',
-          /* Autoplay-blocked prompt — small, only shown when browser requires interaction */
-          '<div class="snx-tv-play-overlay" id="snxTvPlayOverlay">',
-            '<button class="snx-tv-play-btn" id="snxTvPlayBtn">▶ Enable Sound</button>',
+        '</div>',
+
+        /* ── Live Channels Section ── */
+        '<div class="snx-tv-section">',
+          '<div class="snx-tv-section-header">',
+            '<h2 class="snx-tv-section-title">Live Channels</h2>',
+          '</div>',
+          '<div class="snx-tv-home-ch-grid" id="snxTvHomeChGrid">',
+            '<div class="snx-tv-home-loading">Loading channels…</div>',
           '</div>',
         '</div>',
-        '<span class="snx-tv-channel-badge" id="snxTvChannelBadge">TV</span>',
-      '</div>',
 
-      /* ── Now Playing ── */
-      '<div class="snx-tv-now-playing">',
-        '<div class="snx-tv-np-art" id="snxTvNpArt">📺</div>',
-        '<div class="snx-tv-np-info">',
-          '<div class="snx-tv-np-title" id="snxTvNpTitle">Loading…</div>',
-          '<div class="snx-tv-np-sub"   id="snxTvNpSub"></div>',
+        /* ── Founder Studio Bar (home) ── */
+        '<div class="snx-tv-studio-bar" id="snxTvStudioBar" style="display:none;">',
+          '<span class="snx-tv-studio-label">👑 Founder Tools</span>',
+          '<button class="snx-tv-studio-toggle-btn" id="snxTvStudioToggleBtn" onclick="window.SNXTv.toggleStudio()">📺 TV Studio</button>',
         '</div>',
-        '<div class="snx-tv-np-channel" id="snxTvNpChannel"></div>',
-      '</div>',
 
-      /* ── TV Guide ── */
-      '<div class="snx-tv-guide">',
-        '<p class="snx-tv-guide-title">📡 Channel Guide</p>',
-        '<div class="snx-tv-guide-grid" id="snxTvGuideGrid">',
-          '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">Loading channels…</div>',
+      '</div>',
+      /* end home view */
+
+      /* ══════════════════════════════════════════
+         PLAYER VIEW
+      ══════════════════════════════════════════ */
+      '<div class="snx-tv-view" id="snxTvPlayerView" style="display:none;">',
+
+        /* ── Back nav + channel badge ── */
+        '<div class="snx-tv-player-topbar">',
+          '<button class="snx-tv-back-btn" onclick="window.SNXTv.showHomeView()">← Back</button>',
+          '<span class="snx-tv-player-ch-label" id="snxTvPlayerChLabel">TV</span>',
+          '<button class="snx-tv-guide-btn-sm" onclick="window.SNXTv.toggleGuide()">📋 Guide</button>',
         '</div>',
-      '</div>',
 
-      /* ── Founder Studio Bar ── */
-      '<div class="snx-tv-studio-bar" id="snxTvStudioBar" style="display:none;">',
-        '<span class="snx-tv-studio-label">👑 Founder Tools</span>',
-        '<button class="snx-tv-studio-toggle-btn" id="snxTvStudioToggleBtn" onclick="window.SNXTv.toggleStudio()">📺 TV Studio</button>',
-      '</div>',
+        /* ── Player ── */
+        '<div class="snx-tv-player-wrap" id="snxTvPlayerWrap">',
+          '<div id="snxTvPlayerInner" style="width:100%;height:100%;position:relative;">',
+            '<video id="snxTvVideo" data-snx-media-exempt="1" playsinline webkit-playsinline preload="metadata" style="display:none;"></video>',
+            '<audio id="snxTvAudio" preload="none" crossorigin="anonymous"></audio>',
+            '<canvas id="snxTvVisualizer"></canvas>',
+            '<div class="snx-tv-viz-overlay" id="snxTvVizOverlay">',
+              '<div class="snx-tv-viz-title"></div>',
+              '<div class="snx-tv-viz-artist"></div>',
+            '</div>',
+            /* Loading overlay */
+            '<div class="snx-tv-player-loading" id="snxTvPlayerLoading" style="display:none;">',
+              '<div class="snx-tv-spinner"></div>',
+            '</div>',
+            /* HUD — real playback timeline, always visible at bottom of player */
+            '<div class="snx-tv-hud" id="snxTvHud">',
+              '<span class="snx-tv-hud-elapsed" id="snxTvHudElapsed">00:00</span>',
+              '<div class="snx-tv-hud-track">',
+                '<div class="snx-tv-hud-bar-wrap">',
+                  '<div class="snx-tv-hud-bar" id="snxTvHudBar"></div>',
+                '</div>',
+                '<div class="snx-tv-hud-times">',
+                  '<span id="snxTvHudDuration">--:--</span>',
+                  '<span id="snxTvHudRemaining" class="snx-tv-hud-remaining"></span>',
+                '</div>',
+              '</div>',
+              '<button class="snx-tv-fullscreen-btn" id="snxTvFullscreenBtn" title="Fullscreen" onclick="window.SNXTv.toggleFullscreen()">⛶</button>',
+              '<span class="snx-tv-hud-state" id="snxTvHudState"></span>',
+            '</div>',
+            /* Autoplay-blocked prompt — small, only shown when browser requires interaction */
+            '<div class="snx-tv-play-overlay" id="snxTvPlayOverlay">',
+              '<button class="snx-tv-play-btn" id="snxTvPlayBtn">▶ Enable Sound</button>',
+            '</div>',
+          '</div>',
+          '<span class="snx-tv-channel-badge" id="snxTvChannelBadge">TV</span>',
+        '</div>',
 
-      /* ── Studio Panel ── */
+        /* ── Now Playing ── */
+        '<div class="snx-tv-now-playing">',
+          '<div class="snx-tv-np-art" id="snxTvNpArt">📺</div>',
+          '<div class="snx-tv-np-info">',
+            '<div class="snx-tv-np-title" id="snxTvNpTitle">Loading…</div>',
+            '<div class="snx-tv-np-sub"   id="snxTvNpSub"></div>',
+          '</div>',
+          '<div class="snx-tv-np-channel" id="snxTvNpChannel"></div>',
+        '</div>',
+
+        /* ── TV Guide (collapsible, in player view) ── */
+        '<div class="snx-tv-guide-drawer" id="snxTvGuideDrawer" style="display:none;">',
+          '<div class="snx-tv-guide-drawer-header">',
+            '<span class="snx-tv-guide-drawer-title">📋 What\'s On</span>',
+            '<button class="snx-tv-guide-close" onclick="window.SNXTv.toggleGuide()">✕</button>',
+          '</div>',
+          '<div class="snx-tv-guide-panel" id="snxTvGuidePanel">',
+            '<div class="snx-tv-guide-empty">Loading…</div>',
+          '</div>',
+        '</div>',
+
+        /* ── Channel Guide (compact horizontal in player) ── */
+        '<div class="snx-tv-guide">',
+          '<p class="snx-tv-guide-title">📡 Channel Guide</p>',
+          '<div class="snx-tv-guide-grid" id="snxTvGuideGrid">',
+            '<div style="color:#3a6a9a;font-size:13px;padding:10px 2px;">Loading channels…</div>',
+          '</div>',
+        '</div>',
+
+        /* ── Founder Studio Bar (player view) ── */
+        '<div class="snx-tv-studio-bar" id="snxTvStudioBarPlayer" style="display:none;">',
+          '<span class="snx-tv-studio-label">👑 Founder Tools</span>',
+          '<button class="snx-tv-studio-toggle-btn" id="snxTvStudioToggleBtnPlayer" onclick="window.SNXTv.toggleStudio()">📺 TV Studio</button>',
+        '</div>',
+
+      '</div>',
+      /* end player view */
+
+      /* ── Studio Panel (shared, outside views) ── */
       '<div class="snx-tv-studio-panel" id="snxTvStudioPanel">',
 
         /* Tabs */
@@ -2408,8 +2765,13 @@
     /* pageEnter: lightweight re-join for SPAs that track enter/leave separately */
     pageEnter:   _joinTimeline,
 
-    /* Viewer */
-    selectChannel: _selectChannel,
+    /* Viewer navigation */
+    selectChannel:  _selectChannel,
+    watchChannel:   _watchChannel,
+    showHomeView:   _showHomeView,
+    showPlayerView: _showPlayerView,
+    toggleGuide:    _toggleGuide,
+    toggleFullscreen: _toggleFullscreen,
 
     /* Studio top-level */
     toggleStudio:    _toggleStudio,

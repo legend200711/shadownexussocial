@@ -805,3 +805,614 @@
 /* ════════════════════════════════════════════════════════════════
    END LIBRARY ADDITIONS
 ════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════
+   TV SERVICE UPGRADE — SNS-2026-TV-STATION-002
+   Home screen, hero, channel grid, player view, TV guide, theater mode
+════════════════════════════════════════════════════════════════ */
+
+/* ── View containers ── */
+.snx-tv-view {
+  width: 100%;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HOME SCREEN — HERO / FEATURED
+════════════════════════════════════════════════════════════════ */
+.snx-tv-hero {
+  position: relative;
+  width: 100%;
+  min-height: 220px;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #030d22 0%, #071428 60%, #0a1a3a 100%);
+  border: 1px solid rgba(0,174,239,0.20);
+  box-shadow: 0 4px 40px rgba(0,80,200,0.14);
+}
+@media (min-width: 600px) {
+  .snx-tv-hero { min-height: 280px; }
+}
+
+.snx-tv-hero-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: background-image 0.6s ease;
+  border-radius: 16px;
+}
+.snx-tv-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    120deg,
+    rgba(2,8,20,0.92) 0%,
+    rgba(3,12,28,0.76) 50%,
+    rgba(5,15,35,0.55) 100%
+  );
+  border-radius: 16px;
+}
+.snx-tv-hero-content {
+  position: relative;
+  z-index: 2;
+  padding: 28px 22px 24px;
+  max-width: 520px;
+}
+.snx-tv-hero-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.snx-tv-service-badge {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: #00AEEF;
+  background: rgba(0,174,239,0.10);
+  border: 1px solid rgba(0,174,239,0.28);
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+.snx-tv-hero-live {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #39FF14;
+  background: rgba(57,255,20,0.10);
+  border: 1px solid rgba(57,255,20,0.30);
+  padding: 3px 10px;
+  border-radius: 4px;
+  animation: snxTvOnairPulse 2s ease-in-out infinite;
+}
+.snx-tv-hero-title {
+  font-size: 22px;
+  font-weight: 900;
+  color: #e8f4ff;
+  margin: 0 0 8px;
+  line-height: 1.2;
+  text-shadow: 0 1px 8px rgba(0,80,200,0.4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@media (min-width: 600px) {
+  .snx-tv-hero-title { font-size: 28px; }
+}
+.snx-tv-hero-sub {
+  font-size: 13px;
+  color: #7aa8c8;
+  margin: 0 0 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-tv-hero-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.snx-tv-watch-btn {
+  background: linear-gradient(90deg, #0066cc, #00AEEF);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 22px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  letter-spacing: 0.4px;
+  box-shadow: 0 2px 16px rgba(0,100,220,0.40);
+  transition: opacity 0.18s, transform 0.12s;
+}
+.snx-tv-watch-btn:hover  { opacity: 0.9; transform: translateY(-1px); }
+.snx-tv-watch-btn:active { opacity: 0.8; transform: scale(0.98); }
+.snx-tv-guide-btn {
+  background: rgba(0,20,50,0.70);
+  color: #a0c8e8;
+  border: 1px solid rgba(0,174,239,0.28);
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.18s, color 0.18s;
+}
+.snx-tv-guide-btn:hover { border-color: rgba(0,174,239,0.65); color: #c8e8ff; }
+
+/* ════════════════════════════════════════════════════════════════
+   HOME SCREEN — SECTIONS
+════════════════════════════════════════════════════════════════ */
+.snx-tv-section {
+  margin-bottom: 24px;
+}
+.snx-tv-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.snx-tv-section-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #a0c8e8;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HOME CHANNEL CARDS
+════════════════════════════════════════════════════════════════ */
+.snx-tv-home-ch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .snx-tv-home-ch-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+}
+@media (max-width: 360px) {
+  .snx-tv-home-ch-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.snx-tv-home-ch-card {
+  background: rgba(7,20,42,0.92);
+  border: 1px solid rgba(0,174,239,0.16);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.snx-tv-home-ch-card:hover {
+  border-color: rgba(0,174,239,0.50);
+  box-shadow: 0 0 18px rgba(0,100,220,0.22);
+  transform: translateY(-2px);
+}
+.snx-tv-home-ch-card:active { transform: scale(0.97); }
+.snx-tv-home-ch-card.active {
+  border-color: rgba(0,174,239,0.72);
+  box-shadow: 0 0 24px rgba(0,100,220,0.32);
+}
+
+.snx-tv-hch-art {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: linear-gradient(135deg, #030d22 0%, #071428 100%);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.snx-tv-hch-fallback {
+  font-size: 28px;
+  opacity: 0.5;
+}
+
+.snx-tv-hch-body {
+  padding: 10px 10px 28px;
+  flex: 1;
+}
+.snx-tv-hch-num {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #3a6a9a;
+  margin-bottom: 3px;
+}
+.snx-tv-hch-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #c8e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+.snx-tv-hch-now {
+  font-size: 11px;
+  color: #5a8aaa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+.snx-tv-hch-progress {
+  height: 2px;
+  background: rgba(0,174,239,0.15);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.snx-tv-hch-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00AEEF, #39FF14);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+.snx-tv-hch-live {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(57,255,20,0.12);
+  border: 1px solid rgba(57,255,20,0.40);
+  color: #39FF14;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.snx-tv-hch-watch {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0,100,220,0.12);
+  color: #00AEEF;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  padding: 5px;
+  border-top: 1px solid rgba(0,174,239,0.15);
+  letter-spacing: 0.4px;
+  transition: background 0.15s;
+}
+.snx-tv-home-ch-card:hover .snx-tv-hch-watch {
+  background: rgba(0,120,255,0.22);
+}
+
+.snx-tv-home-empty,
+.snx-tv-home-loading {
+  color: #3a6a9a;
+  font-size: 13px;
+  padding: 12px 4px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   PLAYER VIEW — TOP BAR
+════════════════════════════════════════════════════════════════ */
+.snx-tv-player-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 4px 0;
+}
+.snx-tv-back-btn {
+  background: rgba(0,20,50,0.60);
+  border: 1px solid rgba(0,174,239,0.22);
+  color: #7aa8c8;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.snx-tv-back-btn:hover { border-color: rgba(0,174,239,0.55); color: #c8e8ff; }
+.snx-tv-player-ch-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 700;
+  color: #c8e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-tv-guide-btn-sm {
+  background: rgba(0,20,50,0.60);
+  border: 1px solid rgba(0,174,239,0.22);
+  color: #7aa8c8;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.snx-tv-guide-btn-sm:hover { border-color: rgba(0,174,239,0.55); color: #c8e8ff; }
+
+/* ════════════════════════════════════════════════════════════════
+   PLAYER — LOADING OVERLAY + SPINNER
+════════════════════════════════════════════════════════════════ */
+.snx-tv-player-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(2,8,20,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+.snx-tv-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(0,174,239,0.20);
+  border-top-color: #00AEEF;
+  border-radius: 50%;
+  animation: snxTvSpin 0.8s linear infinite;
+}
+@keyframes snxTvSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HUD — FULLSCREEN BUTTON
+════════════════════════════════════════════════════════════════ */
+.snx-tv-fullscreen-btn {
+  background: none;
+  border: none;
+  color: rgba(0,174,239,0.70);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.snx-tv-fullscreen-btn:hover { color: #00AEEF; }
+
+/* ════════════════════════════════════════════════════════════════
+   CHANNEL GUIDE — PROGRAM PROGRESS BAR
+════════════════════════════════════════════════════════════════ */
+.snx-tv-ch-progress {
+  height: 2px;
+  background: rgba(0,174,239,0.12);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 5px;
+}
+.snx-tv-ch-prog-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00AEEF, #39FF14);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   TV GUIDE DRAWER (What's On panel)
+════════════════════════════════════════════════════════════════ */
+.snx-tv-guide-drawer {
+  background: rgba(4,12,28,0.96);
+  border: 1px solid rgba(0,174,239,0.18);
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.snx-tv-guide-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,174,239,0.12);
+  background: rgba(0,20,50,0.50);
+}
+.snx-tv-guide-drawer-title {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #7aa8c8;
+}
+.snx-tv-guide-close {
+  background: none;
+  border: none;
+  color: #4a7a9a;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+.snx-tv-guide-close:hover { color: #c8e8ff; }
+
+.snx-tv-guide-panel {
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.snx-tv-guide-panel::-webkit-scrollbar { width: 4px; }
+.snx-tv-guide-panel::-webkit-scrollbar-track { background: transparent; }
+.snx-tv-guide-panel::-webkit-scrollbar-thumb { background: rgba(0,174,239,0.25); border-radius: 4px; }
+
+.snx-tv-guide-ch-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(0,174,239,0.10);
+}
+.snx-tv-guide-ch-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #c8e8ff;
+}
+.snx-tv-guide-live {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #39FF14;
+  background: rgba(57,255,20,0.08);
+  border: 1px solid rgba(57,255,20,0.28);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.snx-tv-guide-rows {}
+.snx-tv-guide-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0,174,239,0.07);
+  transition: background 0.14s;
+}
+.snx-tv-guide-row:last-child { border-bottom: none; }
+.snx-tv-guide-row:hover { background: rgba(0,60,120,0.14); }
+.snx-tv-guide-row.current {
+  background: rgba(0,100,220,0.10);
+  border-left: 2px solid #00AEEF;
+}
+
+.snx-tv-guide-row-art {
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #030d22, #071428);
+  background-size: cover;
+  background-position: center;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  border: 1px solid rgba(0,174,239,0.14);
+}
+.snx-tv-guide-row-info {
+  flex: 1;
+  min-width: 0;
+}
+.snx-tv-guide-row-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #c8e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snx-tv-guide-row-sub {
+  font-size: 11px;
+  color: #5a8aaa;
+  margin-top: 1px;
+}
+.snx-tv-gprog {
+  height: 2px;
+  background: rgba(0,174,239,0.14);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 5px;
+}
+.snx-tv-gprog-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00AEEF, #39FF14);
+  border-radius: 2px;
+  transition: width 1s linear;
+}
+
+.snx-tv-guide-row-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.snx-tv-guide-time {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4a7a9a;
+  letter-spacing: 0.4px;
+}
+.snx-tv-guide-time.now {
+  color: #00AEEF;
+  background: rgba(0,174,239,0.10);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.snx-tv-guide-dur {
+  font-size: 10px;
+  color: #3a5a7a;
+  letter-spacing: 0.3px;
+}
+.snx-tv-guide-empty {
+  color: #3a6a9a;
+  font-size: 12px;
+  padding: 16px 14px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   FULLSCREEN  (player in native fullscreen mode)
+════════════════════════════════════════════════════════════════ */
+.snx-tv-player-wrap:fullscreen,
+.snx-tv-player-wrap:-webkit-full-screen,
+.snx-tv-player-wrap:-moz-full-screen {
+  border-radius: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  aspect-ratio: unset !important;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE ADJUSTMENTS FOR NEW ELEMENTS
+════════════════════════════════════════════════════════════════ */
+@media (max-width: 600px) {
+  .snx-tv-hero { min-height: 180px; margin-bottom: 16px; }
+  .snx-tv-hero-content { padding: 18px 14px 16px; }
+  .snx-tv-hero-title { font-size: 17px; }
+  .snx-tv-watch-btn { padding: 8px 16px; font-size: 12px; }
+  .snx-tv-guide-btn { padding: 8px 12px; font-size: 12px; }
+  .snx-tv-guide-panel { max-height: 260px; }
+  .snx-tv-guide-row { padding: 8px 10px; gap: 8px; }
+  .snx-tv-guide-row-art { width: 30px; height: 30px; font-size: 12px; }
+  .snx-tv-guide-row-title { font-size: 11px; }
+  .snx-tv-hch-name { font-size: 11px; }
+  .snx-tv-hch-now { font-size: 10px; }
+  .snx-tv-fullscreen-btn { font-size: 13px; }
+  .snx-tv-player-topbar { margin-bottom: 8px; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   END TV SERVICE UPGRADE STYLES
+════════════════════════════════════════════════════════════════ */
