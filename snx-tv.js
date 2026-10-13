@@ -62,6 +62,57 @@
   // States: 'waiting' | 'loading' | 'playing' | 'paused' | 'blocked' | 'ended' | 'failed'
   let _playState = 'waiting';
 
+  /* ════════════════════════════════════════════════════════════
+     PLAYBACK PERSISTENCE  (localStorage — no Firebase ticks)
+  ════════════════════════════════════════════════════════════ */
+
+  const PB_KEY              = 'snx_tv_pb';   // localStorage key
+  const PB_CHECKPOINT_INTERVAL = 10000;       // save every 10 s while playing
+  let _pbCheckpointTimer    = null;            // setInterval handle
+  let _restoreSeekPending   = false;           // true while we are waiting to seek
+  let _restoreSeekTime      = 0;               // seconds to seek to once metadata loads
+  let _lastSaveGeneration   = 0;               // prevents stale async writes
+
+  /** Read the saved checkpoint (or null). */
+  function _pbLoad() {
+    try {
+      const raw = localStorage.getItem(PB_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  }
+
+  /** Persist a checkpoint atomically. generation guards against stale callbacks. */
+  function _pbSave(channelId, mediaId, currentTime, playing) {
+    const gen = ++_lastSaveGeneration;
+    try {
+      // Re-check generation after any async gap; for the sync path it is always current.
+      if (gen !== _lastSaveGeneration) return;
+      const rec = { channelId, mediaId, currentTime: Math.floor(currentTime), playing, savedAt: Date.now() };
+      localStorage.setItem(PB_KEY, JSON.stringify(rec));
+    } catch (_) { /* quota or private-browsing — silently ignore */ }
+  }
+
+  /** Capture the current media position and write a checkpoint. */
+  function _pbCheckpoint() {
+    if (!_activeChannel) return;
+    const item = _mediaQueue[_queueIdx];
+    if (!item) return;
+    const mediaEl = item.mediaKind === 'video' ? _getVideoEl() : _getAudioEl();
+    if (!mediaEl || !isFinite(mediaEl.currentTime) || mediaEl.currentTime <= 0) return;
+    _pbSave(_activeChannel.id, item.id, mediaEl.currentTime, !mediaEl.paused);
+  }
+
+  /** Start the periodic checkpoint interval. */
+  function _pbStartCheckpoint() {
+    _pbStopCheckpoint();
+    _pbCheckpointTimer = setInterval(_pbCheckpoint, PB_CHECKPOINT_INTERVAL);
+  }
+
+  /** Stop the periodic checkpoint interval. */
+  function _pbStopCheckpoint() {
+    if (_pbCheckpointTimer !== null) { clearInterval(_pbCheckpointTimer); _pbCheckpointTimer = null; }
+  }
+
   /* Studio state */
   let _studioOpen    = false;
   let _studioTab     = 'library';  // 'library' | 'channels'
@@ -207,7 +258,7 @@
         _renderStudioChannelList();
         _renderChContentChannelPicker();
         if (!_activeChannel && _channels.length > 0) {
-          _selectChannel(_channels[0].id);
+          _selectChannel(_channels[0].id, true);
         }
       } catch (e) {
         console.warn(LOG, 'channels snapshot error', e);
@@ -339,6 +390,21 @@
     if (_mediaQueue.length === 0) { _showWaiting(); return; }
     _clearWaiting();
     if (!_playing) {
+      // Check whether we have a saved position to restore for this channel
+      const saved = _pbLoad();
+      if (saved && _activeChannel && saved.channelId === _activeChannel.id && saved.mediaId) {
+        const savedIdx = _mediaQueue.findIndex(m => m.id === saved.mediaId);
+        if (savedIdx !== -1 && saved.currentTime > 0) {
+          // Restore: play the saved item and schedule a seek after loadedmetadata
+          _queueIdx = savedIdx;
+          _restoreSeekPending = true;
+          _restoreSeekTime = saved.currentTime;
+          console.log(LOG, 'restoring playback', saved.mediaId, 'at', saved.currentTime + 's');
+          _playItem(_mediaQueue[_queueIdx]);
+          return;
+        }
+      }
+      // No valid saved position — start from the beginning as before
       _queueIdx = 0;
       _playItem(_mediaQueue[0]);
     }
@@ -348,10 +414,18 @@
      CHANNEL SELECTION
   ════════════════════════════════════════════════════════════ */
 
-  function _selectChannel(channelId) {
+  function _selectChannel(channelId, _isAutoSelect) {
     const ch = _channels.find(c => c.id === channelId);
     if (!ch) return;
 
+    // If the viewer explicitly picked a different channel, drop any pending restore
+    // so we don't carry a stale position across channels.
+    if (!_isAutoSelect && _activeChannel && _activeChannel.id !== channelId) {
+      _restoreSeekPending = false;
+      _restoreSeekTime = 0;
+    }
+
+    _pbStopCheckpoint();
     _stopPlayback();
     _activeChannel = ch;
 
@@ -404,6 +478,16 @@
     _clearWaiting();
     _resetHud();
     _setPlayState('loading');
+
+    // Clear any restore that was set for a DIFFERENT item — keeps position-to-item
+    // matching correct when _advanceQueue() moves to a new track.
+    if (_restoreSeekPending) {
+      const saved = _pbLoad();
+      if (!saved || saved.mediaId !== item.id) {
+        _restoreSeekPending = false;
+        _restoreSeekTime = 0;
+      }
+    }
 
     const vid = _getVideoEl();
     const aud = _getAudioEl();
@@ -768,6 +852,15 @@
 
     // Re-play the current item from scratch so src, load, and play all
     // happen in the user-gesture callback, satisfying autoplay policy.
+    // If we had a pending seek restore, re-arm it so the seek happens after metadata.
+    if (!_restoreSeekPending) {
+      const saved = _pbLoad();
+      if (saved && _activeChannel && saved.channelId === _activeChannel.id &&
+          saved.mediaId === item.id && saved.currentTime > 0) {
+        _restoreSeekPending = true;
+        _restoreSeekTime = saved.currentTime;
+      }
+    }
     _playItem(item);
   }
 
@@ -1458,7 +1551,7 @@
           // Pick any remaining channel (snapshot will have already removed this one)
           const remaining = _channels.filter(c => c.id !== channelId);
           if (remaining.length > 0) {
-            _selectChannel(remaining[0].id);
+            _selectChannel(remaining[0].id, true);
           } else {
             _showWaiting();
           }
@@ -2011,6 +2104,23 @@
       el.addEventListener('loadedmetadata', () => {
         // Duration is now known — update HUD immediately
         _tickHud(el);
+        // If a restore seek is pending for this element, apply it now that
+        // the browser knows the track duration and can accept a seek.
+        if (_restoreSeekPending) {
+          const item = _mediaQueue[_queueIdx];
+          const isSameEl = (item && item.mediaKind === 'video')
+            ? el === _getVideoEl()
+            : el === _getAudioEl();
+          if (isSameEl) {
+            const seekTo = _restoreSeekTime;
+            _restoreSeekPending = false;
+            _restoreSeekTime = 0;
+            if (seekTo > 0 && seekTo < (el.duration || Infinity)) {
+              console.log(LOG, 'seeking to saved position', seekTo + 's');
+              el.currentTime = seekTo;
+            }
+          }
+        }
       });
       el.addEventListener('durationchange', () => {
         _tickHud(el);
@@ -2021,9 +2131,12 @@
         if (_playState === 'loading' && el.currentTime > 0) {
           _setPlayState('playing');
         }
+        // Update in-memory checkpoint data; the interval timer does the actual write
+        // so we avoid a localStorage write on every tick (~4 Hz).
       });
       el.addEventListener('play', () => {
         // 'play' fires when play() is called — not yet necessarily audible
+        _pbStartCheckpoint();
       });
       el.addEventListener('playing', () => {
         // 'playing' fires when media actually starts rendering frames/audio
@@ -2035,8 +2148,11 @@
         if (_playState !== 'blocked' && _playState !== 'waiting') {
           _setPlayState('paused');
         }
+        // Write a checkpoint on pause so we capture the exact position
+        _pbCheckpoint();
       });
       el.addEventListener('ended', () => {
+        _pbStopCheckpoint();
         _setPlayState('ended');
         _advanceQueue();
       });
@@ -2044,6 +2160,7 @@
         const err = el.error;
         console.warn(LOG, el.tagName, 'media error',
           err ? 'code=' + err.code + ' ' + err.message : '(unknown)');
+        _pbStopCheckpoint();
         _setPlayState('failed');
         if (_advanceTimer !== null) clearTimeout(_advanceTimer);
         _advanceTimer = setTimeout(_advanceQueue, 2000);
@@ -2117,11 +2234,16 @@
   }
 
   function _pageLeave() {
+    // Capture final position BEFORE stopping playback (which clears the src)
+    _pbCheckpoint();
+    _pbStopCheckpoint();
     _stopPlayback();
     _stopVizAnimation();
   }
 
   function _pageDestroy() {
+    _pbCheckpoint();
+    _pbStopCheckpoint();
     _stopPlayback();
     if (_channelsUnsub)   { _channelsUnsub();   _channelsUnsub   = null; }
     if (_chItemsUnsub)    { _chItemsUnsub();    _chItemsUnsub    = null; }
