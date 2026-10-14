@@ -138,6 +138,7 @@ function _buildDOM() {
     <button class="snxrs-tab" data-tab="settings">SETTINGS</button>
     <button class="snxrs-tab" data-tab="requests">REQUESTS</button>
     <button class="snxrs-tab" data-tab="broadcast">BROADCAST</button>
+    <button class="snxrs-tab" data-tab="submissions">SUBMISSIONS</button>
   </nav>
 
   <!-- ══ DASHBOARD ════════════════════════════════════════ -->
@@ -484,6 +485,34 @@ function _buildDOM() {
     </div>
   </div>
 
+  <!-- ══ SUBMISSIONS ══════════════════════════════════════ -->
+  <div class="snxrs-panel snxrs-hidden" id="snxrsPanelSubmissions">
+
+    <div class="snxrs-section">
+      <div class="snxrs-section-title">MUSIC SUBMISSIONS</div>
+      <p class="snxrs-hint" style="margin-bottom:12px;line-height:1.5;">
+        Tracks submitted by users and artists for Radio airplay consideration.
+        Approve a submission to add it to the station's track library, or reject it to decline.
+        Deleting a submission removes it from this list and is permanent.
+      </p>
+
+      <!-- Filter bar -->
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+        <button class="snxrs-rq-filter snxrs-rq-filter--active" data-subsfilter="all"   id="snxrsSubFilterAll">ALL</button>
+        <button class="snxrs-rq-filter" data-subsfilter="pending"   id="snxrsSubFilterPending">⏳ PENDING</button>
+        <button class="snxrs-rq-filter" data-subsfilter="approved"  id="snxrsSubFilterApproved">✅ APPROVED</button>
+        <button class="snxrs-rq-filter" data-subsfilter="rejected"  id="snxrsSubFilterRejected">✗ REJECTED</button>
+        <button class="snxrs-btn snxrs-btn--sm" id="snxrsSubRefreshBtn" style="margin-left:auto;">↺ REFRESH</button>
+      </div>
+
+      <!-- Submission list -->
+      <div id="snxrsSubmissionList">
+        <p class="snxrs-empty">Loading submissions…</p>
+      </div>
+    </div>
+
+  </div>
+
 </div><!-- end snxrs-wrap -->
   `;
 }
@@ -502,7 +531,7 @@ function _switchTab(tab) {
   });
 
   // Show/hide panels
-  const panels = ['dashboard', 'tracks', 'playlists', 'programs', 'schedule', 'settings', 'requests', 'broadcast'];
+  const panels = ['dashboard', 'tracks', 'playlists', 'programs', 'schedule', 'settings', 'requests', 'broadcast', 'submissions'];
   panels.forEach(p => {
     const el = document.getElementById(`snxrsPanelPanel${_cap(p)}`) ||
                document.getElementById(`snxrsPanel${_cap(p)}`);
@@ -519,6 +548,7 @@ function _switchTab(tab) {
   if (tab === 'settings')   _loadSettings();
   if (tab === 'requests')   _loadRequests();
   if (tab === 'broadcast')  _loadBroadcastDestinations();
+  if (tab === 'submissions') _loadSubmissions();
 }
 
 function _cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
@@ -605,6 +635,17 @@ function _bindEvents() {
   $('snxrsBcRefreshBtn').addEventListener('click',   () => _loadBroadcastDestinations());
   $('snxrsBcStartBtn').addEventListener('click',     _onBroadcastStart);
   $('snxrsBcStopBtn').addEventListener('click',      _onBroadcastStop);
+
+  // ── SUBMISSIONS ──
+  $('snxrsSubRefreshBtn').addEventListener('click', () => _loadSubmissions());
+  const subFilters = _container.querySelectorAll('[data-subsfilter]');
+  subFilters.forEach(btn => {
+    btn.addEventListener('click', () => {
+      subFilters.forEach(b => b.classList.remove('snxrs-rq-filter--active'));
+      btn.classList.add('snxrs-rq-filter--active');
+      _renderSubmissions();
+    });
+  });
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -2185,6 +2226,249 @@ async function _onBroadcastStop() {
     _setMsg(msg, '✗ ' + e.message, 'error');
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   MUSIC SUBMISSIONS — Admin Review Panel
+   Collection: /radioSubmissions/{subId}
+   Access: Founder only (enforced by Firestore rules + isFounderEmail())
+══════════════════════════════════════════════════════════════ */
+
+const COL_SUBS = 'radioSubmissions';
+
+let _submissions     = [];   // all docs loaded from Firestore
+let _subLastLoaded   = 0;
+
+async function _loadSubmissions() {
+  const listEl = document.getElementById('snxrsSubmissionList');
+  if (!listEl) return;
+  listEl.innerHTML = '<p class="snxrs-empty">Loading…</p>';
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) {
+    listEl.innerHTML = '<p class="snxrs-empty snxrs-empty--error">Firestore not ready</p>';
+    return;
+  }
+
+  try {
+    let snap;
+    if (mods.collection && mods.getDocs && mods.query && mods.orderBy) {
+      const q = mods.query(mods.collection(db, COL_SUBS), mods.orderBy('submittedAt', 'desc'));
+      snap = await mods.getDocs(q);
+    } else if (db.collection) {
+      snap = await db.collection(COL_SUBS).orderBy('submittedAt', 'desc').get();
+    } else {
+      throw new Error('No Firestore API available');
+    }
+    _submissions = [];
+    snap.forEach(d => _submissions.push({ _id: d.id, ...d.data() }));
+    _subLastLoaded = Date.now();
+    _renderSubmissions();
+  } catch (err) {
+    listEl.innerHTML = `<p class="snxrs-empty snxrs-empty--error">Error loading submissions: ${_esc(err.message)}</p>`;
+  }
+}
+
+function _renderSubmissions() {
+  const listEl = document.getElementById('snxrsSubmissionList');
+  if (!listEl) return;
+
+  // Active filter
+  const activeFilter = (() => {
+    const btn = _container && _container.querySelector('[data-subsfilter].snxrs-rq-filter--active');
+    return btn ? (btn.dataset.subsfilter || 'all') : 'all';
+  })();
+
+  const docs = activeFilter === 'all'
+    ? _submissions
+    : _submissions.filter(s => s.status === activeFilter);
+
+  if (!docs.length) {
+    listEl.innerHTML = `<p class="snxrs-empty">No ${activeFilter === 'all' ? '' : activeFilter + ' '}submissions.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = docs.map(s => {
+    const status = s.status || 'pending';
+    const badgeCls = status === 'approved' ? 'snxrs-badge--green'
+                   : status === 'rejected'  ? 'snxrs-badge--red'
+                   : 'snxrs-badge--grey';
+    const badgeLabel = status === 'approved' ? 'APPROVED'
+                     : status === 'rejected'  ? 'REJECTED'
+                     : 'PENDING';
+    const artHtml = s.artworkUrl
+      ? `<img src="${_esc(s.artworkUrl)}" class="snxrs-sub-art" alt="art" />`
+      : `<div class="snxrs-sub-art snxrs-sub-art--fallback">🎵</div>`;
+    const reviewNote = s.reviewNote
+      ? `<div class="snxrs-sub-note">Note: ${_esc(s.reviewNote)}</div>` : '';
+    const approveBtn = status !== 'approved'
+      ? `<button class="snxrs-btn snxrs-btn--sm snxrs-btn--green"
+           onclick="window.SNXRadioStudio._subApprove('${_esc(s._id)}')">✅ Approve</button>` : '';
+    const rejectBtn  = status !== 'rejected'
+      ? `<button class="snxrs-btn snxrs-btn--sm snxrs-btn--red"
+           onclick="window.SNXRadioStudio._subReject('${_esc(s._id)}')">✗ Reject</button>` : '';
+    const deleteBtn  = `<button class="snxrs-btn snxrs-btn--sm snxrs-btn--red"
+           onclick="window.SNXRadioStudio._subDelete('${_esc(s._id)}', '${_esc(s.songTitle || '')}')">🗑</button>`;
+    const listenBtn  = s.audioUrl
+      ? `<a class="snxrs-btn snxrs-btn--sm" href="${_esc(s.audioUrl)}" target="_blank" rel="noopener">▶ Listen</a>` : '';
+    const addToLibBtn = status === 'approved'
+      ? `<button class="snxrs-btn snxrs-btn--sm snxrs-btn--primary"
+           onclick="window.SNXRadioStudio._subAddToLibrary('${_esc(s._id)}')">+ Add to Library</button>` : '';
+
+    return `
+<div class="snxrs-sub-row" data-subid="${_esc(s._id)}">
+  <div class="snxrs-sub-art-wrap">${artHtml}</div>
+  <div class="snxrs-sub-info">
+    <div class="snxrs-sub-title">${_esc(s.songTitle || '—')}</div>
+    <div class="snxrs-sub-meta">${_esc(s.artistName || '—')}${s.genre ? ' · ' + _esc(s.genre) : ''}</div>
+    ${s.description ? `<div class="snxrs-sub-desc">${_esc(s.description)}</div>` : ''}
+    ${s.contactEmail ? `<div class="snxrs-sub-contact">📧 ${_esc(s.contactEmail)}</div>` : ''}
+    ${reviewNote}
+    <div class="snxrs-sub-by">Submitted by: ${_esc(s.submittedByName || s.submittedByUid || '—')}</div>
+  </div>
+  <div class="snxrs-sub-actions">
+    <span class="snxrs-badge ${badgeCls}">${badgeLabel}</span>
+    <div class="snxrs-sub-btn-row">
+      ${listenBtn}
+      ${approveBtn}
+      ${rejectBtn}
+      ${addToLibBtn}
+      ${deleteBtn}
+    </div>
+  </div>
+</div>`;
+  }).join('');
+}
+
+// ── Approve (update status, optionally write review note) ────────────────
+window.SNXRadioStudio._subApprove = async function (subId) {
+  const sub = _submissions.find(s => s._id === subId);
+  if (!sub) return;
+
+  const note = prompt('Optional review note for the artist (leave blank for none):') ?? '';
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
+  try {
+    const ref  = mods.doc ? mods.doc(db, COL_SUBS, subId) : db.collection(COL_SUBS).doc(subId);
+    const upd  = mods.updateDoc || ((r, d) => r.update(d));
+    await upd(ref, {
+      status:     'approved',
+      reviewNote: note.trim(),
+      reviewedAt: mods.serverTimestamp ? mods.serverTimestamp() : new Date(),
+    });
+    const idx = _submissions.findIndex(s => s._id === subId);
+    if (idx !== -1) { _submissions[idx].status = 'approved'; _submissions[idx].reviewNote = note.trim(); }
+    _renderSubmissions();
+  } catch (err) {
+    alert('Approve failed: ' + err.message);
+  }
+};
+
+// ── Reject ────────────────────────────────────────────────────────────────
+window.SNXRadioStudio._subReject = async function (subId) {
+  const sub = _submissions.find(s => s._id === subId);
+  if (!sub) return;
+
+  const note = prompt('Optional note for the artist (reason for not selecting):') ?? '';
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
+  try {
+    const ref = mods.doc ? mods.doc(db, COL_SUBS, subId) : db.collection(COL_SUBS).doc(subId);
+    const upd = mods.updateDoc || ((r, d) => r.update(d));
+    await upd(ref, {
+      status:     'rejected',
+      reviewNote: note.trim(),
+      reviewedAt: mods.serverTimestamp ? mods.serverTimestamp() : new Date(),
+    });
+    const idx = _submissions.findIndex(s => s._id === subId);
+    if (idx !== -1) { _submissions[idx].status = 'rejected'; _submissions[idx].reviewNote = note.trim(); }
+    _renderSubmissions();
+  } catch (err) {
+    alert('Reject failed: ' + err.message);
+  }
+};
+
+// ── Delete ────────────────────────────────────────────────────────────────
+window.SNXRadioStudio._subDelete = async function (subId, title) {
+  if (!confirm(`Delete submission "${title || subId}"?\n\nThis permanently removes it from the review queue.`)) return;
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) return;
+
+  try {
+    const ref = mods.doc ? mods.doc(db, COL_SUBS, subId) : db.collection(COL_SUBS).doc(subId);
+    const del = mods.deleteDoc || ((r) => r.delete());
+    await del(ref);
+    _submissions = _submissions.filter(s => s._id !== subId);
+    _renderSubmissions();
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+  }
+};
+
+// ── Add Approved Track to Radio Library ──────────────────────────────────
+// Promotes an approved submission into /radioTracks (same schema as Studio Upload).
+// Does NOT auto-start playback. Does NOT interrupt current broadcast.
+// Deduplicates: checks for an existing track with the same audioUrl.
+window.SNXRadioStudio._subAddToLibrary = async function (subId) {
+  const sub = _submissions.find(s => s._id === subId);
+  if (!sub) return;
+  if (sub.status !== 'approved') { alert('Only approved submissions can be added to the library.'); return; }
+
+  if (!sub.audioUrl) { alert('No audio URL found for this submission.'); return; }
+
+  const db   = _getFirestore();
+  const mods = _getFirestoreMods();
+  if (!db || !mods) { alert('Firestore not ready'); return; }
+
+  // Deduplication check: scan in-memory tracks first
+  const dup = _tracks.find(t => t.audioUrl === sub.audioUrl);
+  if (dup) { alert(`This track is already in the library as "${dup.title || dup.id}".`); return; }
+
+  // Gather track metadata (allow Founder to edit before adding)
+  const title  = prompt('Track title (edit if needed):', sub.songTitle || '') ?? '';
+  if (!title.trim()) return; // cancelled
+  const artist = prompt('Artist name (edit if needed):', sub.artistName || '') ?? '';
+  if (!artist.trim()) return;
+
+  try {
+    const newTrack = {
+      title:       title.trim(),
+      artist:      artist.trim(),
+      genre:       sub.genre || '',
+      audioUrl:    sub.audioUrl,
+      audioKey:    sub.audioKey  || '',
+      artworkUrl:  sub.artworkUrl || '',
+      artworkKey:  sub.artworkKey || '',
+      duration:    0,   // will be computed by player on first play
+      enabled:     true,
+      sourceSubId: sub._id,        // link back to submission for audit
+      createdAt:   mods.serverTimestamp ? mods.serverTimestamp() : new Date(),
+    };
+
+    let addDoc, collection;
+    if (mods.addDoc) {
+      addDoc     = mods.addDoc;
+      collection = mods.collection;
+    } else if (db.collection) {
+      // Compat SDK fallback
+      await db.collection(COL_TRACKS).add(newTrack);
+      alert(`✅ "${title}" added to Radio library. It will appear in the Tracks tab.`);
+      _switchTab('tracks');
+      return;
+    }
+
+    await addDoc(collection(db, COL_TRACKS), newTrack);
+    alert(`✅ "${title}" added to Radio library. It will appear in the Tracks tab.`);
+    _switchTab('tracks');
+  } catch (err) {
+    alert('Add to library failed: ' + err.message);
+  }
+};
 
 /* ══════════════════════════════════════════════════════════════
    STARTUP LOG

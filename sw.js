@@ -129,6 +129,8 @@ const NETWORK_FIRST_FILES_LAZY = [
   'snx-radio-comments.js',
   'snx-radio-requests.js',
   'snx-radio-presence.js',
+  'snx-radio-submit.js',
+  'snx-radio-submit.css',
   'snx-radio.css',
   'snx-audio-coordinator.js',
   // DJ engine — network-first so mic v1.1.0 is never served from stale cache

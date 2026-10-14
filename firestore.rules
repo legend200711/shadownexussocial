@@ -1845,5 +1845,60 @@ service cloud.firestore {
       allow create, update, delete: if isFounderEmail();
     }
 
+    // ── Radio Music Submissions ────────────────────────────────────────────
+    //
+    //   /radioSubmissions/{subId}
+    //     submittedByUid    — Firebase UID of submitter (required, immutable)
+    //     artistName        — string
+    //     songTitle         — string
+    //     genre             — string (optional)
+    //     description       — string (optional)
+    //     contactEmail      — string (optional)
+    //     ownershipConfirmed— boolean (must be true on create)
+    //     audioUrl          — R2 CDN URL of uploaded audio file
+    //     audioKey          — R2 object key (for deletion)
+    //     artworkUrl        — R2 CDN URL of artwork (optional)
+    //     artworkKey        — R2 object key for artwork (optional)
+    //     status            — 'pending' | 'approved' | 'rejected'
+    //     reviewNote        — string (Founder note, optional)
+    //     submittedAt       — server timestamp
+    //     reviewedAt        — server timestamp (set on approve/reject)
+    //
+    // CREATE:
+    //   Any signed-in, non-anonymous user may submit.
+    //   submittedByUid must equal the caller's UID.
+    //   ownershipConfirmed must be true (copyright gate enforced server-side).
+    //   status must be 'pending' on create.
+    //
+    // READ:
+    //   Submitter can read their own submissions.
+    //   Founder can read all submissions for admin review.
+    //   Other users cannot read submissions (audio URLs and contact info are private).
+    //
+    // UPDATE:
+    //   Founder only — for approve / reject / add review note.
+    //   Submitter cannot change status or audio URLs.
+    //
+    // DELETE:
+    //   Founder only — cleanup after review or on artist request.
+    //   Submitter cannot delete (avoids accidental deletion of pending review).
+
+    match /radioSubmissions/{subId} {
+
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.submittedByUid == request.auth.uid
+        && request.resource.data.ownershipConfirmed == true
+        && request.resource.data.status == 'pending';
+
+      allow read: if isFounderEmail()
+        || (isSignedIn()
+            && resource.data.submittedByUid == request.auth.uid);
+
+      allow update: if isFounderEmail();
+
+      allow delete: if isFounderEmail();
+    }
+
   }
 }

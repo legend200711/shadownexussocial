@@ -224,6 +224,16 @@ function _buildDOM() {
       </button>
     </div>
 
+    <!-- ─── Submit Your Music button ─────────────────────── -->
+    <div class="snxr-submit-music-wrap" id="snxrSubmitMusicWrap">
+      <button class="snxr-submit-music-btn" id="snxrSubmitMusicBtn" type="button">
+        🎶 SUBMIT YOUR MUSIC
+      </button>
+    </div>
+
+    <!-- ─── Submit Music Panel (toggled) ─────────────────── -->
+    <div class="snxr-submit-panel snxr-hidden" id="snxrSubmitPanel"></div>
+
     <!-- ─── Info strip ───────────────────────────────────── -->
     <div class="snxr-info-strip">
       <span class="snxr-info-strip-text" id="snxrInfoStrip">Shadow Nexus Radio · 24/7 Music · Live Events · Shadow Nexus</span>
@@ -256,6 +266,7 @@ function _buildDOM() {
     'snxrRecentSection', 'snxrRecentList',
     'snxrInfoStrip',
     'snxrRequestWrap', 'snxrRequestBtn',
+    'snxrSubmitMusicWrap', 'snxrSubmitMusicBtn', 'snxrSubmitPanel',
   ];
   ids.forEach(id => { E[id] = document.getElementById(id); });
 }
@@ -327,6 +338,35 @@ function _bindEvents() {
     E.snxrRequestBtn.addEventListener('click', () => {
       if (window.SNXRadioRequests) {
         window.SNXRadioRequests.openModal();
+      }
+    });
+  }
+
+  // SUBMIT YOUR MUSIC button — toggle submission panel
+  if (E.snxrSubmitMusicBtn) {
+    E.snxrSubmitMusicBtn.addEventListener('click', () => {
+      const panel = E.snxrSubmitPanel;
+      if (!panel) return;
+      const isOpen = !panel.classList.contains('snxr-hidden');
+      if (isOpen) {
+        panel.classList.add('snxr-hidden');
+        E.snxrSubmitMusicBtn.textContent = '🎶 SUBMIT YOUR MUSIC';
+        if (window.SNXRadioSubmit) window.SNXRadioSubmit.unmount();
+      } else {
+        panel.classList.remove('snxr-hidden');
+        E.snxrSubmitMusicBtn.textContent = '✕ Close Submission Form';
+        // Mount submission form if SNXRadioSubmit is loaded
+        if (window.SNXRadioSubmit) {
+          window.SNXRadioSubmit.mount(panel);
+        } else {
+          panel.innerHTML = '<div style="padding:20px;color:#5a8aaa;font-size:13px;">Loading submission form…</div>';
+          // Lazy-load snx-radio-submit.js if not yet available
+          if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('radio-submit')) {
+            window.SNXFeatureLoader.loadFeature('radio-submit')
+              .then(() => { if (window.SNXRadioSubmit) window.SNXRadioSubmit.mount(panel); })
+              .catch(() => { panel.innerHTML = '<div style="padding:20px;color:#ff8899;">Could not load submission form. Please refresh and try again.</div>'; });
+          }
+        }
       }
     });
   }

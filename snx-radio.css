@@ -1746,6 +1746,50 @@
 }
 
 /* ═══════════════════════════════════════════════════════════
+   SUBMIT MUSIC — player button + panel
+   .snxr-submit-music-wrap / .snxr-submit-music-btn / .snxr-submit-panel
+═══════════════════════════════════════════════════════════ */
+
+.snxr-submit-music-wrap {
+  text-align: center;
+  padding: 4px 0 0;
+  display: flex;
+  justify-content: center;
+  margin: 8px 0 4px;
+}
+.snxr-submit-music-btn {
+  background: rgba(0,20,55,0.70);
+  border: 1px solid rgba(159,122,234,0.50);
+  color: #9f7aea;
+  border-radius: 22px;
+  padding: 9px 24px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.18s, box-shadow 0.18s, color 0.18s;
+  width: 100%;
+  max-width: 300px;
+  font-family: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+.snxr-submit-music-btn:hover {
+  background: rgba(80,30,140,0.40);
+  box-shadow: 0 0 14px rgba(159,122,234,0.35);
+  color: #c8a8ff;
+}
+.snxr-submit-music-btn:active { transform: scale(0.97); }
+
+.snxr-submit-panel {
+  margin-top: 12px;
+  border: 1px solid rgba(159,122,234,0.20);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(4,10,26,0.95);
+  padding: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════
    SONG REQUEST — player button
    .snxr-request-wrap / .snxr-request-btn
 ═══════════════════════════════════════════════════════════ */
@@ -2338,3 +2382,118 @@
     text-align: center;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   RADIO STUDIO — SUBMISSION REVIEW ROWS  (SNS-2026-RADIO-SUBMIT-001)
+   Scoped to .snxrs-sub-* — does not affect any other SNS styles.
+═══════════════════════════════════════════════════════════════ */
+
+.snxrs-sub-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(0,174,239,0.10);
+  flex-wrap: wrap;
+}
+.snxrs-sub-row:last-child { border-bottom: none; }
+
+.snxrs-sub-art-wrap { flex-shrink: 0; }
+.snxrs-sub-art {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid rgba(0,174,239,0.22);
+  display: block;
+}
+.snxrs-sub-art--fallback {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  background: rgba(0,10,30,0.70);
+  border: 1px solid rgba(0,174,239,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.snxrs-sub-info { flex: 1; min-width: 0; }
+.snxrs-sub-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #c8e8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snxrs-sub-meta {
+  font-size: 11px;
+  color: #5a8aaa;
+  margin-top: 2px;
+}
+.snxrs-sub-desc {
+  font-size: 11px;
+  color: #4a7a9a;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snxrs-sub-contact {
+  font-size: 11px;
+  color: #7a8aaa;
+  margin-top: 2px;
+}
+.snxrs-sub-note {
+  font-size: 11px;
+  color: #9f7aea;
+  margin-top: 3px;
+  font-style: italic;
+}
+.snxrs-sub-by {
+  font-size: 10px;
+  color: #3a5a7a;
+  margin-top: 4px;
+}
+
+.snxrs-sub-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.snxrs-sub-btn-row {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Danger/red badge for rejected status */
+.snxrs-badge--red {
+  background: rgba(255,51,68,0.12);
+  border: 1px solid rgba(255,51,68,0.40);
+  color: #ff7788;
+}
+
+/* Primary action button (add-to-library) */
+.snxrs-btn--primary {
+  background: rgba(0,50,140,0.50);
+  border: 1px solid rgba(0,174,239,0.55);
+  color: #00AEEF;
+}
+.snxrs-btn--primary:hover {
+  background: rgba(0,80,200,0.35);
+  box-shadow: 0 0 10px rgba(0,174,239,0.25);
+}
+
+/* Small btn variant */
+.snxrs-btn--sm {
+  padding: 4px 9px;
+  font-size: 11px;
+}
+
+/* END SUBMISSION REVIEW ROWS */

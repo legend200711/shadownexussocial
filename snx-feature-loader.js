@@ -54,14 +54,15 @@
     // /radioTracks listener that snx-radio.js and snx-radio-requests.js consume.
     radio: {
       label: 'RADIO',
-      css:  ['snx-radio.css?v=SNS-2026-RADIO-PAGE-001'],
+      css:  ['snx-radio.css?v=SNS-2026-RADIO-PAGE-001', 'snx-radio-submit.css?v=SNS-2026-RADIO-SUBMIT-001'],
       scripts: [
         'snx-radio-track-store.js?v=SNS-2026-STAGE2C-001',
         'snx-radio.js?v=SNS-2026-RADIO-PAGE-001',
         'snx-radio-player.js?v=SNS-2026-RADIO-PAGE-001',
         'snx-radio-comments.js?v=SNS-2026-RADIO-COMMENTS-001',
         'snx-radio-requests.js?v=SNS-2026-RADIO-REQUESTS-001',
-        'snx-radio-presence.js?v=SNS-2026-RADIO-PRESENCE-001'
+        'snx-radio-presence.js?v=SNS-2026-RADIO-PRESENCE-001',
+        'snx-radio-submit.js?v=SNS-2026-RADIO-SUBMIT-001'
       ],
       // Called after all scripts load; wires up the radio page UI.
       // The actual init is handled by window.snxRadioPageOpen() which already
