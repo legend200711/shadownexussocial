@@ -38,8 +38,8 @@
  *   v100
  */
 
-const CACHE_VERSION = 'v104';
-const BUILD_ID      = 'SNS-2026-TV-REBUILD-001';
+const CACHE_VERSION = 'v105';
+const BUILD_ID      = 'SNS-2026-TV-REMOVE-001';
 const CACHE_NAME    = `shadow-nexus-${CACHE_VERSION}`;
 const MEDIA_CACHE   = `shadow-nexus-media-${CACHE_VERSION}`;
 
@@ -128,9 +128,6 @@ const NETWORK_FIRST_FILES_LAZY = [
   'snx-radio-studio.js',
   'snx-radio-comments.js',
   'snx-radio-requests.js',
-  // TV files (lazy-loaded by SNXFeatureLoader on first tvPage visit)
-  'snx-tv.js',
-  'snx-tv.css',
   'snx-radio-presence.js',
   'snx-radio.css',
   'snx-audio-coordinator.js',

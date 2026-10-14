@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="snx-commit" content="SNS-2026-TV-REBUILD-001">
+<meta name="snx-commit" content="SNS-2026-TV-REMOVE-001">
 <title>Shadow Nexus Social — Stay Legendary 🌑🔥</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 
@@ -67,8 +67,6 @@
 <link rel="stylesheet" href="nexus-glass.css?v=SNS-2026-GLASS-001">
 <!-- ── Stage 11 Core Social Polish ── -->
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
-<!-- ── 24-Hour TV Network — deferred by SNXFeatureLoader on first nav to tvPage ──
-     The link tag below is intentionally absent at startup; loader injects it. ── -->
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
 <link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-STAGE2A-001">
 <!-- ── Shadow Nexus Radio — player + standalone page styles ──
@@ -6587,11 +6585,6 @@ body.arcade-fs-ios body::after { display:none !important; }
             <span class="sc-item-icon">📻</span>
             <span class="sc-item-label">Radio</span>
         </button>
-        <!-- 24-Hour TV -->
-        <button class="sc-item" id="scNavTv" onclick="realmNavTo('tvPage')" aria-label="Shadow Nexus TV" style="color:#00AEEF;">
-            <span class="sc-item-icon">📺</span>
-            <span class="sc-item-label">TV</span>
-        </button>
         <!-- Arcade -->
         <button class="sc-item" id="scNavArcade" onclick="openArcadeHub()" aria-label="Arcade">
             <span class="sc-item-icon">🕹️</span>
@@ -6695,10 +6688,6 @@ body.arcade-fs-ios body::after { display:none !important; }
         <div class="ncm-item" id="ncmRadio" onclick="realmNavTo('radioPage');mobileNavTo('_close')" style="color:#9f7aea;">
             <div class="ncm-icon-wrap">📻</div>
             <div class="ncm-label">Radio</div>
-        </div>
-        <div class="ncm-item" id="ncmTv" onclick="realmNavTo('tvPage');mobileNavTo('_close')" style="color:#00AEEF;">
-            <div class="ncm-icon-wrap">📺</div>
-            <div class="ncm-label">24-Hour TV</div>
         </div>
         <div class="ncm-item" id="ncmArcade" onclick="mobileNavTo('_arcade')">
             <div class="ncm-icon-wrap">🕹️</div>
@@ -6816,9 +6805,6 @@ body.arcade-fs-ios body::after { display:none !important; }
         </button>
         <button class="nav-item" id="navRadio" onclick="realmNavTo('radioPage')" style="color:#9f7aea;border-left:3px solid rgba(159,122,234,0.55);">
             <span class="nav-icon">📻</span> Radio
-        </button>
-        <button class="nav-item" id="navTv" onclick="realmNavTo('tvPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
-            <span class="nav-icon">📺</span> 24-Hour TV
         </button>
         <button class="nav-item" id="navArcade" onclick="openArcadeHub()">
             <span class="nav-icon">🕹️</span> Arcade
@@ -11706,11 +11692,6 @@ body.arcade-fs-ios body::after { display:none !important; }
   <!-- Inner content injected by snx-radio-page.js on first open -->
   <div id="snxRadioPageInner" style="padding:0 0 32px;"></div>
 </div><!-- end radioPage -->
-
-<!-- ████ TV PAGE — Shadow Nexus 24-Hour TV ████ -->
-<div class="page" id="tvPage">
-  <!-- Inner content injected by SNXTv.pageOpen() on first open. Empty on startup. -->
-</div><!-- end tvPage -->
 
 <!-- ── Shadow Nexus Live — CSS + Engine ──────────────────────────────────────────
      Stage 2B DEFERRED: live.css, snx-sfu.js, live.js are NOT loaded at startup.
@@ -21544,8 +21525,7 @@ function navTo(pageId) {
         communityRulesPage:'navCommunityRules',
         inboxPage:'navInbox',
         livePage:'navLive',
-        radioPage:'navRadio',
-        tvPage:'navTv'
+        radioPage:'navRadio'
     };
     const navEl = document.getElementById(map[pageId]);
     if (navEl) navEl.classList.add('active-nav');
@@ -21680,34 +21660,6 @@ function navTo(pageId) {
         // Close the song request modal if open (it lives on document.body).
         if (window.SNXRadioRequests && typeof window.SNXRadioRequests.closeModal === 'function') {
             window.SNXRadioRequests.closeModal();
-        }
-    }
-    // ── 24-Hour TV page lifecycle ──
-    // SNXFeatureLoader defers snx-tv.css + snx-tv.js until first visit.
-    if (pageId === 'tvPage') {
-        var _openTvPage = function () {
-            if (window.SNXTv && typeof window.SNXTv.pageOpen === 'function') {
-                window.SNXTv.pageOpen();
-            }
-        };
-        if (window.SNXFeatureLoader && !window.SNXFeatureLoader.isLoaded('tv')) {
-            window.SNXFeatureLoader.loadFeature('tv')
-                .then(function () { _openTvPage(); })
-                .catch(function (err) {
-                    console.warn('[navTo] TV feature load failed:', err && err.message);
-                    var tvPage = document.getElementById('tvPage');
-                    if (tvPage) tvPage.innerHTML =
-                        '<div style="padding:60px 20px;text-align:center;color:#4a7a9a;">' +
-                        '<div style="font-size:48px;margin-bottom:16px;">📺</div>' +
-                        '<div>TV is temporarily unavailable.</div></div>';
-                });
-        } else {
-            _openTvPage();
-        }
-    } else {
-        // Leaving TV page — stop all playback immediately.
-        if (window.SNXTv && typeof window.SNXTv.pageLeave === 'function') {
-            window.SNXTv.pageLeave();
         }
     }
     // Initialize 24-HOUR NEXUS when nexusPage opens (legacy)
@@ -31346,8 +31298,7 @@ function updateShadowCoreActive(pageId) {
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
         'livePage':          ['scNavLive', 'ncmLive'],
-        'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio'],
-        'tvPage':            ['navTv', 'scNavTv', 'ncmTv']
+        'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio']
     };
 
     var ids = map[pageId] || [];
@@ -31571,8 +31522,8 @@ document.addEventListener('click', function(e) {
   'use strict';
 
   /* ── Build identifier ─────────────────────────────────── */
-  var BUILD_ID = 'SNS-2026-TV-REBUILD-001';
-  var SW_VER   = 'v102';
+  var BUILD_ID = 'SNS-2026-TV-REMOVE-001';
+  var SW_VER   = 'v105';
   window.SHADOW_NEXUS_BUILD_VERSION = BUILD_ID;
   window.SHADOW_NEXUS_SW_VERSION    = SW_VER;
 
@@ -31850,10 +31801,10 @@ document.addEventListener('click', function(e) {
 
     /* ═══ BUILD ═══ */
     o += _h('BUILD');
-    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-TV-REBUILD-001' ? 'ok' : 'err');
+    o += _r('BUILD_ID (page)',       BUILD_ID,    BUILD_ID === 'SNS-2026-TV-REMOVE-001' ? 'ok' : 'err');
     o += _r('BUILD_ID (deployed)',   remoteBuild);
     o += _r('BUILD MATCH',           buildMatch,  buildMatch === 'MATCH' ? 'ok' : 'err');
-    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v102' ? 'ok' : 'warn');
+    o += _r('SW VERSION (expected)', SW_VER,      SW_VER === 'v105' ? 'ok' : 'warn');
     /* SW registration note */
     o += _r('SW VERSION (active)',   _dbgSwVer   ? _dbgSwVer + ' (build=' + _dbgSwBuild + ')' : 'querying…');
     o += _r('DISPLAY MODE',          _dbgDisplayMode);
@@ -31968,9 +31919,9 @@ document.addEventListener('click', function(e) {
 (function() {
   'use strict';
 
-  var _SNX_BUILD    = 'SNS-2026-TV-REBUILD-001';
-  var _SNX_SW_VER   = 'v102';
-  var _SNX_DEPLOY   = '2026-10-25T00:00:00Z';
+  var _SNX_BUILD    = 'SNS-2026-TV-REMOVE-001';
+  var _SNX_SW_VER   = 'v105';
+  var _SNX_DEPLOY   = '2026-10-28T00:00:00Z';
   var _SNX_PROJECT  = 'horr-a08f4';
 
   function _dRow(label, val, ok) {
@@ -35050,7 +35001,6 @@ window.snxFounderPanelCleanup = (function() {
         'notificationsPage': 'Notifications',
         'searchPage':      'Search',
         'radioPage':       'Radio',
-        'tvPage':          '24-Hour TV',
         'livePage':        'Live',
         'settingsPage':    'Settings',
         'communityPage':   'Community Hub',
