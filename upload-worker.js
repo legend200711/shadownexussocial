@@ -694,6 +694,7 @@ async function handleUploadComplete(request, env, cors, sec) {
     `radio/${verifiedUid}/`,
     `themes/${verifiedUid}/`,
     `users/${verifiedUid}/`,
+    `submissions/${verifiedUid}/`,
   ];
   if (!allowedPrefixes.some(p => finalKey.startsWith(p))) {
     return new Response(JSON.stringify({ error: 'Forbidden: key does not belong to your account' }), {

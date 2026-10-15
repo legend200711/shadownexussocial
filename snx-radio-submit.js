@@ -390,7 +390,7 @@ async function _onSubmit(e) {
   _showStatus('Saving submission…', 'info');
   try {
     const mods = await _getFirestoreMods();
-    const db   = window._snxFirestore;
+    const db   = (window._snxFirestore && window._snxFirestore.db) || window._snxFirestore;
     if (!db || !mods) throw new Error('Firestore not ready');
 
     const docData = {
@@ -447,7 +447,7 @@ async function loadMySubmissions() {
 
   try {
     const mods = await _getFirestoreMods();
-    const db   = window._snxFirestore;
+    const db   = (window._snxFirestore && window._snxFirestore.db) || window._snxFirestore;
     if (!db || !mods) throw new Error('Firestore not ready');
 
     const q = mods.query(
