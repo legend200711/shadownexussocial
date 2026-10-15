@@ -491,7 +491,15 @@ async function loadMySubmissions() {
     });
     listEl.innerHTML = html;
   } catch (err) {
-    listEl.innerHTML = `<div class="snxsub-mysubs-empty" style="color:#ff8899;">Could not load submissions: ${_esc(err.message || '')}</div>`;
+    const msg = err.message || '';
+    const isIndexErr = msg.includes('index') || msg.includes('Index') || msg.includes('FAILED_PRECONDITION');
+    const display = isIndexErr
+      ? 'The submissions index is still building (takes ~1 min on first use). Please refresh in a moment.'
+      : 'Could not load submissions: ' + msg;
+    listEl.innerHTML = `<div class="snxsub-mysubs-empty" style="color:#ff8899;">${_esc(display)}</div>` +
+      `<div style="text-align:center;padding:6px 0;"><button onclick="window.SNXRadioSubmit&&window.SNXRadioSubmit.loadMySubmissions()" ` +
+      `style="background:rgba(159,122,234,0.18);border:1px solid rgba(159,122,234,0.40);color:#b8a0f0;font-size:11px;padding:5px 14px;border-radius:6px;cursor:pointer;">` +
+      `↻ Retry</button></div>`;
   }
 }
 
