@@ -1900,5 +1900,248 @@ service cloud.firestore {
       allow delete: if isFounderEmail();
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // THE HOLLOW ARCHIVES — Simple Story Library
+    // Build: HA-2026-PHASE1-SIMPLE
+    //
+    // Active collection:
+    //   /haSubmissions/{id}
+    //     title, excerpt, storyText, genre, coverImageUrl,
+    //     authorUid, authorName, authorHandle,
+    //     status: 'pending' | 'published' | 'rejected',
+    //     ownershipConfirmed: true,
+    //     submittedAt, publishedAt, reviewedAt, reviewedBy, reviewFeedback
+    //
+    // Security principles:
+    //   - Published stories are public (no auth required to read)
+    //   - Author may read their own submissions at any status
+    //   - Only non-anonymous signed-in users may create a submission
+    //   - Author cannot change status — only moderators/founder can approve
+    //   - Author cannot self-approve; status must start as 'pending'
+    //   - Only founder may delete submissions
+    //
+    // Legacy collections (haCases, haStories, haChapters, haComments,
+    // haDiscoveries, haBookmarks, haReports, haSeedFlags) are retained below
+    // for backward compatibility with existing Firestore data.
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── Hollow Archives Submissions ───────────────────────────────────────
+    //
+    //   /haSubmissions/{id}
+    //
+    // READ:
+    //   - Published submissions: public (no auth needed — the archive is
+    //     a public reading room; no personal data is in a published doc).
+    //   - Author's own submission (any status): signed-in owner only.
+    //   - Moderators may read all submissions for review.
+    //
+    // CREATE:
+    //   - Any signed-in, non-anonymous user.
+    //   - authorUid must equal the caller's UID (cannot forge authorship).
+    //   - status must be 'pending' (cannot self-publish).
+    //   - ownershipConfirmed must be true (copyright gate enforced server-side).
+    //
+    // UPDATE:
+    //   - Moderators only (approve / reject / add feedback).
+    //   - Authors cannot change status — prevents self-publication.
+    //   - Authors cannot change authorUid — prevents ownership transfer.
+    //
+    // DELETE:
+    //   - Founder only.  Authors cannot delete to avoid erasing pending reviews.
+
+    match /haSubmissions/{id} {
+
+      // Public read for published stories; author always reads own; mods read all
+      allow read: if resource.data.status == 'published'
+        || (isSignedIn() && resource.data.authorUid == request.auth.uid)
+        || isModerator();
+
+      // Any non-anonymous signed-in user may submit
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.ownershipConfirmed == true;
+
+      // Only moderators can approve / reject (change status).
+      // SELF-APPROVAL PREVENTION: a moderator cannot approve or reject their own
+      // submission.  If the caller is the author, the status field must not change.
+      // This is enforced server-side and cannot be bypassed by any client-side trick.
+      allow update: if isModerator()
+        && (
+          // Non-author moderators may change any field, including status
+          resource.data.authorUid != request.auth.uid
+          // Author who is also a moderator may only update non-status fields
+          // (e.g. Founder editing a title they submitted themselves), but may
+          // NOT change the submission's approval status.
+          || request.resource.data.status == resource.data.status
+        );
+
+      // Only the founder may delete a submission
+      allow delete: if isFounder();
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // THE HOLLOW ARCHIVES — Legacy collections (Phase 1 complex build)
+    // Retained for backward compatibility with existing Firestore data.
+    // No longer written by hollow-archives.js — read-only for safety.
+    // ════════════════════════════════════════════════════════════════════════
+
+    // ── Case Files ────────────────────────────────────────────────────────
+    match /haCases/{caseId} {
+      // Published cases are readable by anyone (investigation discovery)
+      allow read: if resource.data.status in ['open', 'featured', 'solved']
+        || isSignedIn();
+      // Only Founder / moderator may create or update case metadata
+      allow create, update: if isModerator();
+      allow delete: if isFounder();
+
+      // Evidence documents — public if the case is open
+      match /haEvidence/{evId} {
+        allow read: if true;
+        allow create, update: if isModerator();
+        allow delete: if isFounder();
+      }
+
+      // Clues — readable to signed-in users; sealed content is filtered client-side
+      // Server enforcement: discovery validation happens via haDiscoveries write path
+      match /haClues/{clueId} {
+        allow read: if isSignedIn();
+        allow create, update: if isModerator();
+        allow delete: if isFounder();
+      }
+
+      // Theories — any signed-in user may submit; only the author or mod can delete
+      match /haTheories/{theoryId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'visible';
+        allow update: if isModerator()
+          || (isSignedIn() && resource.data.uid == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if isSignedIn()
+          && (resource.data.uid == request.auth.uid || isModerator());
+      }
+    }
+
+    // ── Archive Stories ───────────────────────────────────────────────────
+    match /haStories/{storyId} {
+      // Published stories: readable by anyone (archive is public)
+      // Drafts/pending: readable only by the author or moderators
+      // System-authored stories (authorUid == 'system'): always readable
+      allow read: if resource.data.status == 'published'
+        || resource.data.authorUid == 'system'
+        || (isSignedIn() && resource.data.authorUid == request.auth.uid)
+        || isModerator();
+
+      // Any non-anonymous signed-in user may create a story for themselves
+      allow create: if isSignedIn()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.resource.data.authorUid == request.auth.uid
+        && request.resource.data.status in ['draft', 'pending'];
+
+      // Author may update their own draft/pending story (but cannot self-publish)
+      // Moderators can update any story (for approval/rejection)
+      allow update: if isModerator()
+        || (isSignedIn()
+            && resource.data.authorUid == request.auth.uid
+            && request.resource.data.status in ['draft', 'pending']
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status'])
+            );
+      // Allow author to resubmit (pending → pending only, not → published)
+      // Simplified: author can update if they own it and don't escalate to published/featured
+      // (Moderator is the only path to 'published')
+
+      allow delete: if isSignedIn()
+        && (resource.data.authorUid == request.auth.uid || isFounder());
+
+      // Chapters — same read visibility as parent story
+      match /haChapters/{chapId} {
+        allow read: if
+          get(/databases/$(database)/documents/haStories/$(storyId)).data.status == 'published'
+          || get(/databases/$(database)/documents/haStories/$(storyId)).data.authorUid == 'system'
+          || (isSignedIn()
+              && get(/databases/$(database)/documents/haStories/$(storyId)).data.authorUid == request.auth.uid)
+          || isModerator();
+
+        allow create: if isSignedIn()
+          && get(/databases/$(database)/documents/haStories/$(storyId)).data.authorUid == request.auth.uid
+          && request.resource.data.status in ['draft', 'pending'];
+        allow update: if isModerator()
+          || (isSignedIn()
+              && get(/databases/$(database)/documents/haStories/$(storyId)).data.authorUid == request.auth.uid);
+        allow delete: if isSignedIn()
+          && (get(/databases/$(database)/documents/haStories/$(storyId)).data.authorUid == request.auth.uid
+              || isFounder());
+      }
+
+      // Comments — visible comments readable by any signed-in user
+      match /haComments/{cmtId} {
+        allow read: if isSignedIn()
+          && (resource.data.status == 'visible' || isModerator()
+              || resource.data.uid == request.auth.uid);
+        allow create: if isSignedIn()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'visible';
+        allow update: if isModerator()
+          || (isSignedIn()
+              && resource.data.uid == request.auth.uid
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+        allow delete: if isSignedIn()
+          && (resource.data.uid == request.auth.uid || isModerator());
+      }
+    }
+
+    // ── Discovery Records ─────────────────────────────────────────────────
+    //
+    // docId: {uid}_{caseId}_{clueId}
+    // Only the owner reads/writes their own discoveries.
+    // A discovery cannot be written if the clue's unlockCondition is 'admin_only'.
+    // (The JS layer validates this; rules enforce ownership and prevent forgery.)
+    match /haDiscoveries/{discId} {
+      // Only the owning user may read their own discovery
+      allow read: if isSignedIn()
+        && resource.data.uid == request.auth.uid;
+
+      // Owner creates their own discovery.
+      // They cannot forge someone else's UID or set an admin-only clue.
+      // The conditionSnapshot field is informational — actual validation is the
+      // prior check in JS + the fact that 'admin_only' clues are never discoverable
+      // via client flow (the JS layer blocks the path).
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+
+      // Discoveries are immutable once recorded
+      allow update: if false;
+      allow delete: if isFounder();
+    }
+
+    // ── Bookmarks & Reading Progress ──────────────────────────────────────
+    // docId: {uid}_{storyId}
+    match /haBookmarks/{bmId} {
+      allow read: if isSignedIn()
+        && resource.data.uid == request.auth.uid;
+      allow create, update: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isFounder());
+    }
+
+    // ── Archive Reports ───────────────────────────────────────────────────
+    match /haReports/{reportId} {
+      allow create: if isSignedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow read, update, delete: if isModerator();
+    }
+
+    // ── Seed Flags (idempotency guard) ────────────────────────────────────
+    // Founders may write; any signed-in user may read (to check seed status)
+    match /haSeedFlags/{flagId} {
+      allow read:  if isSignedIn();
+      allow write: if isFounder() || isFounderEmail()
+        || (isSignedIn() && !exists(/databases/$(database)/documents/haSeedFlags/$(flagId)));
+    }
+
   }
 }

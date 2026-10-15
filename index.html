@@ -69,6 +69,8 @@
 <link rel="stylesheet" href="snx-stage11.css?v=SNS-2026-STAGE11-001">
 <!-- ── Shadow Nexus World — Global Cinematic Background (static image, loads last) ── -->
 <link rel="stylesheet" href="snx-world-bg.css?v=SNS-2026-STAGE2A-001">
+<!-- ── The Hollow Archives — mystery and storytelling experience ── -->
+<link rel="stylesheet" href="hollow-archives.css?v=HA-2026-PHASE1-001">
 <!-- ── Shadow Nexus Radio — player + standalone page styles ──
      CSS deferred: loaded by SNXFeatureLoader when user opens the Radio page.
      The link tag below is intentionally REMOVED from startup; loader injects it.
@@ -6575,6 +6577,14 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="sc-divider"></div>
 
+        <!-- The Hollow Archives -->
+        <button class="sc-item" id="scNavArchives" onclick="realmNavTo('hollowArchivesPage')" aria-label="The Hollow Archives" style="color:#00AEEF;">
+            <span class="sc-item-icon">🗄</span>
+            <span class="sc-item-label">Hollow Archives</span>
+        </button>
+
+        <div class="sc-divider"></div>
+
         <!-- Shadow Nexus Live -->
         <button class="sc-item" id="scNavLive" onclick="realmNavTo('livePage')" aria-label="Shadow Nexus Live" style="color:#ff3355;">
             <span class="sc-item-icon">🔴</span>
@@ -6681,6 +6691,10 @@ body.arcade-fs-ios body::after { display:none !important; }
         <!-- ── CREATOR ── -->
         <span class="ncm-section-label">Creator</span>
 
+        <div class="ncm-item" id="ncmArchives" onclick="mobileNavTo('hollowArchivesPage')">
+            <div class="ncm-icon-wrap" style="color:#00AEEF;">🗄</div>
+            <div class="ncm-label">Hollow Archives</div>
+        </div>
         <div class="ncm-item" id="ncmLive" onclick="realmNavTo('livePage');mobileNavTo('_close')" style="color:#ff3355;">
             <div class="ncm-icon-wrap">🔴</div>
             <div class="ncm-label">Live</div>
@@ -6800,6 +6814,9 @@ body.arcade-fs-ios body::after { display:none !important; }
 
         <div class="sidebar-divider"></div>
 
+        <button class="nav-item" id="navArchives" onclick="realmNavTo('hollowArchivesPage')" style="color:#00AEEF;border-left:3px solid rgba(0,174,239,0.55);">
+            <span class="nav-icon">🗄</span> Hollow Archives
+        </button>
         <button class="nav-item" id="navLive" onclick="realmNavTo('livePage')" style="color:#ff3355;border-left:3px solid rgba(255,51,85,0.55);">
             <span class="nav-icon">🔴</span> Live
         </button>
@@ -11692,6 +11709,152 @@ body.arcade-fs-ios body::after { display:none !important; }
   <!-- Inner content injected by snx-radio-page.js on first open -->
   <div id="snxRadioPageInner" style="padding:0 0 32px;"></div>
 </div><!-- end radioPage -->
+
+<!-- ████ THE HOLLOW ARCHIVES — Community Horror Story Library ████
+     Build: HA-2026-SIMPLE-001
+     Never interferes with Radio, Live, or the main Feed.
+     All views rendered inside this single .page container via JS.
+     CSS: hollow-archives.css  |  JS: hollow-archives.js
+     ──────────────────────────────────────────────────────────── -->
+<div class="page" id="hollowArchivesPage">
+
+    <!-- ── HOME — published story listing ── -->
+    <div class="ha-view ha-active" id="haView_home">
+        <div class="ha-masthead">
+            <div class="ha-masthead-sigil">🩸</div>
+            <h1 class="ha-masthead-title">The Hollow Archives</h1>
+            <div class="ha-masthead-sub">Community Horror Stories</div>
+            <div class="ha-search-row">
+                <input type="text" id="haSearchInput" class="ha-search-input"
+                    placeholder="Search stories, authors…" maxlength="100" autocomplete="off"
+                    aria-label="Search the archive"
+                    onkeydown="HollowArchives._onSearchKey(event)">
+                <button class="ha-search-btn" onclick="HollowArchives._runSearch()">🔍</button>
+            </div>
+        </div>
+
+        <!-- Genre filter pills -->
+        <div class="ha-filter-bar">
+            <button class="ha-pill ha-active" data-genre="all"         onclick="HollowArchives._setGenre('all')">All</button>
+            <button class="ha-pill"           data-genre="horror"       onclick="HollowArchives._setGenre('horror')">🩸 Horror</button>
+            <button class="ha-pill"           data-genre="supernatural" onclick="HollowArchives._setGenre('supernatural')">👁 Supernatural</button>
+            <button class="ha-pill"           data-genre="thriller"     onclick="HollowArchives._setGenre('thriller')">🔦 Thriller</button>
+            <button class="ha-pill"           data-genre="mystery"      onclick="HollowArchives._setGenre('mystery')">🕵 Mystery</button>
+            <button class="ha-pill"           data-genre="paranormal"   onclick="HollowArchives._setGenre('paranormal')">👻 Paranormal</button>
+            <button class="ha-pill"           data-genre="other"        onclick="HollowArchives._setGenre('other')">📄 Other</button>
+        </div>
+
+        <!-- Story list -->
+        <div class="ha-section" style="padding-top:20px;padding-bottom:56px;">
+            <div class="ha-section-head">
+                <span class="ha-section-label">📚 Published Stories</span>
+                <button class="ha-section-link" onclick="HollowArchives.openSubmit()">✎ Submit a Story</button>
+            </div>
+            <div id="haStoryList">
+                <div class="ha-spinner-wrap"><div class="ha-spinner"></div>Loading…</div>
+            </div>
+        </div>
+
+        <!-- Action row -->
+        <div style="display:flex;gap:10px;justify-content:center;padding:0 20px 32px;flex-wrap:wrap;">
+            <button onclick="HollowArchives.openSubmit()" style="background:rgba(0,174,239,0.08);border:1px solid rgba(0,174,239,0.45);color:#00AEEF;font-size:13px;font-weight:700;padding:10px 24px;border-radius:10px;">✎ Submit Your Story</button>
+            <button onclick="HollowArchives.openMySubmissions()" style="background:rgba(0,130,210,0.05);border:1px solid rgba(0,130,210,0.28);color:#5a7a96;font-size:13px;font-weight:700;padding:10px 24px;border-radius:10px;">📋 My Submissions</button>
+            <!-- Founder/moderator only — hidden via JS after auth resolves -->
+            <button id="haOpenDashBtn" onclick="HollowArchives.openDashboard()" style="display:none;background:rgba(46,204,106,0.06);border:1px solid rgba(46,204,106,0.3);color:#2ecc6a;font-size:13px;font-weight:700;padding:10px 24px;border-radius:10px;">🗂 Review Queue</button>
+        </div>
+    </div><!-- end haView_home -->
+
+    <!-- ── STORY READER ── -->
+    <div class="ha-view" id="haView_reader">
+        <div class="ha-reader-topbar">
+            <button class="ha-back-btn" onclick="HollowArchives._backToHome()">←</button>
+            <div class="ha-topbar-title" id="haReaderTopbar">Loading…</div>
+        </div>
+        <div id="haReaderBody">
+            <div class="ha-spinner-wrap"><div class="ha-spinner"></div>Loading…</div>
+        </div>
+    </div><!-- end haView_reader -->
+
+    <!-- ── SUBMISSION FORM ── -->
+    <div class="ha-view" id="haView_submit">
+        <div class="ha-form-topbar">
+            <button class="ha-back-btn" onclick="HollowArchives._backToHome()">←</button>
+            <div class="ha-form-topbar-title">Submit a Story</div>
+            <button class="ha-submit-btn" onclick="HollowArchives._doSubmit()">Submit for Review</button>
+        </div>
+        <div class="ha-form-body">
+            <div class="ha-field">
+                <label class="ha-label" for="haSubTitle">Story Title *</label>
+                <input type="text" id="haSubTitle" class="ha-input" placeholder="Give your story a title…" maxlength="120" autocomplete="off">
+            </div>
+            <div class="ha-field">
+                <label class="ha-label" for="haSubExcerpt">Short Excerpt <span style="font-weight:400;text-transform:none;letter-spacing:0;">(shown in listings — optional)</span></label>
+                <input type="text" id="haSubExcerpt" class="ha-input" placeholder="A one-sentence teaser shown in the story card…" maxlength="200" autocomplete="off">
+                <div class="ha-hint">Leave blank to auto-generate from the first 200 characters.</div>
+            </div>
+            <div class="ha-field">
+                <label class="ha-label" for="haSubGenre">Genre *</label>
+                <select id="haSubGenre" class="ha-select">
+                    <option value="horror">Horror</option>
+                    <option value="supernatural">Supernatural</option>
+                    <option value="thriller">Thriller</option>
+                    <option value="mystery">Mystery</option>
+                    <option value="paranormal">Paranormal</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+            <div class="ha-field">
+                <label class="ha-label" for="haSubText">Story Text * <span style="font-weight:400;text-transform:none;letter-spacing:0;">(min 100 characters)</span></label>
+                <textarea id="haSubText" class="ha-textarea"
+                    placeholder="Write your story here. Blank lines create paragraph breaks."
+                    oninput="HollowArchives._updateCharCount()"></textarea>
+                <div class="ha-char-count" id="haSubCharCount">0 / 40,000</div>
+            </div>
+            <div class="ha-field">
+                <label class="ha-label" for="haSubCover">Cover Image URL <span style="font-weight:400;text-transform:none;letter-spacing:0;">(optional)</span></label>
+                <input type="url" id="haSubCover" class="ha-input" placeholder="https://…" autocomplete="off">
+                <div class="ha-hint">Must be an https:// URL to an image you own or have rights to use.</div>
+            </div>
+            <div class="ha-checkbox-row">
+                <input type="checkbox" id="haSubOwnership">
+                <label for="haSubOwnership">I confirm that this story is my own original work, or that I have the necessary permission from the copyright holder to submit it to The Hollow Archives on Shadow Nexus Social.</label>
+            </div>
+            <button onclick="HollowArchives._doSubmit()" style="width:100%;background:rgba(0,174,239,0.1);border:1px solid rgba(0,174,239,0.5);color:#00AEEF;font-size:14px;font-weight:700;padding:13px 0;border-radius:10px;letter-spacing:0.5px;">
+                Submit Story for Review
+            </button>
+            <div class="ha-hint" style="text-align:center;margin-top:12px;">Stories are reviewed by the founder before publication. You will be able to check status under "My Submissions".</div>
+        </div>
+    </div><!-- end haView_submit -->
+
+    <!-- ── MY SUBMISSIONS — author status check ── -->
+    <div class="ha-view" id="haView_mySubmissions">
+        <div class="ha-form-topbar">
+            <button class="ha-back-btn" onclick="HollowArchives._backToHome()">←</button>
+            <div class="ha-form-topbar-title">My Submissions</div>
+        </div>
+        <div style="max-width:700px;margin:0 auto;padding:20px 20px 48px;" id="haMySubBody">
+            <div class="ha-spinner-wrap"><div class="ha-spinner"></div>Loading…</div>
+        </div>
+    </div><!-- end haView_mySubmissions -->
+
+    <!-- ── FOUNDER DASHBOARD ── -->
+    <div class="ha-view" id="haView_dashboard">
+        <div class="ha-form-topbar">
+            <button class="ha-back-btn" onclick="HollowArchives._backToHome()">←</button>
+            <div class="ha-form-topbar-title">📋 Archive Dashboard</div>
+        </div>
+        <div style="max-width:800px;margin:0 auto;padding:20px 20px 48px;">
+            <div class="ha-dash-tabs">
+                <button class="ha-dash-tab ha-tab-active" data-tab="pending"  onclick="HollowArchives._loadDash('pending')">Pending Review</button>
+                <button class="ha-dash-tab"               data-tab="history"  onclick="HollowArchives._loadDash('history')">History</button>
+            </div>
+            <div id="haDashBody">
+                <div class="ha-spinner-wrap"><div class="ha-spinner"></div>Loading…</div>
+            </div>
+        </div>
+    </div><!-- end haView_dashboard -->
+
+</div><!-- end hollowArchivesPage -->
 
 <!-- ── Shadow Nexus Live — CSS + Engine ──────────────────────────────────────────
      Stage 2B DEFERRED: live.css, snx-sfu.js, live.js are NOT loaded at startup.
@@ -21525,7 +21688,8 @@ function navTo(pageId) {
         communityRulesPage:'navCommunityRules',
         inboxPage:'navInbox',
         livePage:'navLive',
-        radioPage:'navRadio'
+        radioPage:'navRadio',
+        hollowArchivesPage:'navArchives'
     };
     const navEl = document.getElementById(map[pageId]);
     if (navEl) navEl.classList.add('active-nav');
@@ -21660,6 +21824,12 @@ function navTo(pageId) {
         // Close the song request modal if open (it lives on document.body).
         if (window.SNXRadioRequests && typeof window.SNXRadioRequests.closeModal === 'function') {
             window.SNXRadioRequests.closeModal();
+        }
+    }
+    // ── The Hollow Archives — open archive when navigated to ──
+    if (pageId === 'hollowArchivesPage') {
+        if (window.HollowArchives && typeof window.HollowArchives.open === 'function') {
+            window.HollowArchives.open();
         }
     }
     // Initialize 24-HOUR NEXUS when nexusPage opens (legacy)
@@ -31298,7 +31468,8 @@ function updateShadowCoreActive(pageId) {
         'adminPage':         ['navAdmin', 'scNavFounder', 'ncmFounder'],
         'nexusPage':         ['navNexus', 'scNavNexus', 'ncmNexus'],
         'livePage':          ['scNavLive', 'ncmLive'],
-        'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio']
+        'radioPage':         ['navRadio', 'scNavRadio', 'ncmRadio'],
+        'hollowArchivesPage':['navArchives', 'scNavArchives', 'ncmArchives']
     };
 
     var ids = map[pageId] || [];
@@ -35197,6 +35368,91 @@ window.snxFounderPanelCleanup = (function() {
     if ($input) setTimeout(function () { $input.focus(); }, 80);
   };
 
+})();
+</script>
+
+<!-- ████ THE HOLLOW ARCHIVES — Scripts ████
+     Load after all Firebase globals are available.
+     Exposes: window.HollowArchives, window.HollowArchivesSeed
+     ──────────────────────────────────────────────────────── -->
+<script src="hollow-archives.js?v=HA-2026-PHASE1-002"></script>
+<script src="hollow-archives-seed.js?v=HA-2026-PHASE1-001"></script>
+<script>
+/**
+ * Wire HollowArchives to Firebase after auth resolves.
+ *
+ * The main app exposes its Firestore instance as window._snxDb (set at module
+ * load time, line ~12027) and its full Firestore function namespace as
+ * window._snxFirestore.  Auth is window._snxAuth.  Auth-resolved callbacks are
+ * registered via window._snxOnAuthReady(fn).
+ *
+ * The old bridge polled for window.db which is scoped inside the ES module and
+ * is NEVER written to window — causing the "Archive offline" error on every
+ * navigation.  This replacement uses the correct globals.
+ */
+(function () {
+    'use strict';
+
+    var _archivesBooted = false;
+
+    function _bootArchives() {
+        if (_archivesBooted) return;
+        if (!window.HollowArchives) return;
+
+        var fbDB   = window._snxDb;
+        var fbAuth = window._snxAuth;
+        var fsAPI  = window._snxFirestore;
+
+        if (!fbDB || !fsAPI) {
+            console.warn('[HA-BOOT] _snxDb or _snxFirestore not ready yet.');
+            return;
+        }
+
+        // Build the _haFS bridge from the canonical SNS globals
+        window._haFS = {
+            collection:      fsAPI.collection,
+            doc:             fsAPI.doc,
+            getDoc:          fsAPI.getDoc,
+            getDocs:         fsAPI.getDocs,
+            addDoc:          fsAPI.addDoc,
+            setDoc:          fsAPI.setDoc,
+            updateDoc:       fsAPI.updateDoc,
+            deleteDoc:       fsAPI.deleteDoc,
+            query:           fsAPI.query,
+            where:           fsAPI.where,
+            orderBy:         fsAPI.orderBy,
+            limit:           fsAPI.limit,
+            serverTimestamp: fsAPI.serverTimestamp,
+            onSnapshot:      fsAPI.onSnapshot,
+            increment:       fsAPI.increment,
+            arrayUnion:      fsAPI.arrayUnion,
+            arrayRemove:     fsAPI.arrayRemove,
+            writeBatch:      fsAPI.writeBatch
+        };
+
+        HollowArchives.init(fbDB, fbAuth);
+        _archivesBooted = true;
+
+        if (window.HollowArchivesSeed) {
+            HollowArchivesSeed.run(fbDB).catch(function(e) { console.warn('[HA-SEED]', e); });
+        }
+        console.log('[HA] Archives ready (booted via _snxOnAuthReady).');
+    }
+
+    // _snxOnAuthReady fires immediately if auth has already resolved,
+    // or queues the callback until onAuthStateChanged completes — whichever
+    // comes first.  This is the canonical SNS hook for post-auth init work.
+    if (typeof window._snxOnAuthReady === 'function') {
+        window._snxOnAuthReady(_bootArchives);
+    } else {
+        // _snxOnAuthReady is defined in the module script which runs before this
+        // non-module script, but guard just in case the parse order shifts.
+        window._snxAuthReadyQueue = window._snxAuthReadyQueue || [];
+        window._snxAuthReadyQueue.push(_bootArchives);
+    }
+
+    // Expose for manual re-boot from the Founder console if needed
+    window._bootHollowArchives = _bootArchives;
 })();
 </script>
 

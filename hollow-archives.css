@@ -1,0 +1,357 @@
+/**
+ * hollow-archives.css
+ * The Hollow Archives — Shadow Nexus Social
+ * Build: HA-2026-SIMPLE-001
+ *
+ * Simple horror-story library.
+ * Scoped under #hollowArchivesPage so nothing leaks to the rest of SNS.
+ */
+
+/* ── Design tokens ── */
+#hollowArchivesPage {
+    --ha-void:        #020408;
+    --ha-deep:        #050b14;
+    --ha-surface:     #080f1c;
+    --ha-card:        #0b1525;
+    --ha-lift:        #0e1c30;
+    --ha-border:      rgba(0,130,210,0.18);
+    --ha-border-hi:   rgba(0,174,239,0.45);
+    --ha-blue:        #00AEEF;
+    --ha-blue-dim:    #007fbb;
+    --ha-blue-glow:   rgba(0,174,239,0.22);
+    --ha-amber:       #d4a031;
+    --ha-red:         #cc3344;
+    --ha-green:       #2ecc6a;
+    --ha-t1:          #e8eef5;
+    --ha-t2:          #96b0c8;
+    --ha-t3:          #5a7a96;
+    --ha-muted:       #304558;
+    --ha-scan:        rgba(0,174,239,0.035);
+    --ha-r:           10px;
+    --ha-rsm:         6px;
+    --ha-tr:          0.18s ease;
+}
+
+/* ── Page wrapper ── */
+#hollowArchivesPage {
+    padding: 0 0 56px;
+    min-height: 100vh;
+}
+
+/* ── Sub-views ── */
+.ha-view { display: none; }
+.ha-view.ha-active { display: block; }
+
+/* ────────────────────────────────────────────────
+   MASTHEAD / HERO
+──────────────────────────────────────────────── */
+.ha-masthead {
+    position: relative;
+    padding: 36px 20px 28px;
+    text-align: center;
+    border-bottom: 1px solid var(--ha-border);
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(0,174,239,0.04) 0%, transparent 100%);
+}
+.ha-masthead::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        0deg,
+        transparent, transparent 3px,
+        var(--ha-scan) 3px, var(--ha-scan) 4px
+    );
+}
+.ha-masthead-sigil   { font-size: 44px; margin-bottom: 10px; filter: drop-shadow(0 0 18px rgba(0,174,239,0.5)); }
+.ha-masthead-title   { font-size: 22px; font-weight: 800; letter-spacing: 3px; text-transform: uppercase;
+                       color: var(--ha-t1); text-shadow: 0 0 28px rgba(0,174,239,0.4); margin: 0 0 4px; }
+.ha-masthead-sub     { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--ha-blue-dim); margin-bottom: 20px; }
+
+/* Search row */
+.ha-search-row { display: flex; gap: 8px; max-width: 460px; margin: 0 auto; }
+.ha-search-input {
+    flex: 1; background: var(--ha-card) !important; border: 1px solid var(--ha-border) !important;
+    color: var(--ha-t1) !important; font-size: 13px !important;
+    padding: 9px 14px !important; border-radius: var(--ha-r) !important; margin: 0 !important;
+}
+.ha-search-input:focus { border-color: var(--ha-border-hi) !important; box-shadow: 0 0 10px var(--ha-blue-glow) !important; }
+.ha-search-btn {
+    background: var(--ha-card) !important; border: 1px solid var(--ha-border-hi) !important;
+    color: var(--ha-blue) !important; padding: 9px 16px !important;
+    border-radius: var(--ha-r) !important; font-size: 13px !important; font-weight: 700 !important;
+    white-space: nowrap;
+}
+.ha-search-btn:hover { background: rgba(0,174,239,0.12) !important; }
+
+/* Genre filter pills */
+.ha-filter-bar { display: flex; gap: 8px; padding: 16px 20px 0; flex-wrap: wrap; justify-content: center; }
+.ha-pill {
+    background: var(--ha-card); border: 1px solid var(--ha-border);
+    color: var(--ha-t3); font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 5px 14px; border-radius: 20px;
+    cursor: pointer; transition: all var(--ha-tr);
+}
+.ha-pill:hover, .ha-pill.ha-active {
+    background: rgba(0,174,239,0.1); border-color: var(--ha-border-hi); color: var(--ha-blue);
+}
+
+/* ────────────────────────────────────────────────
+   SECTION HEADERS
+──────────────────────────────────────────────── */
+.ha-section { padding: 20px 20px 0; max-width: 800px; margin: 0 auto; }
+.ha-section-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px; padding-bottom: 8px; border-bottom: 1px solid var(--ha-border);
+}
+.ha-section-label { font-size: 10px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: var(--ha-blue-dim); }
+.ha-section-link  { font-size: 11px; color: var(--ha-t3); cursor: pointer; background: none; border: none; padding: 0; }
+.ha-section-link:hover { color: var(--ha-blue); }
+
+/* ────────────────────────────────────────────────
+   STORY CARD (listing)
+──────────────────────────────────────────────── */
+.ha-story-list { display: flex; flex-direction: column; gap: 10px; }
+.ha-story-card {
+    background: var(--ha-card); border: 1px solid var(--ha-border);
+    border-radius: var(--ha-r); padding: 14px 16px; cursor: pointer;
+    display: flex; gap: 14px; align-items: flex-start;
+    transition: border-color var(--ha-tr), box-shadow var(--ha-tr);
+    position: relative; overflow: hidden;
+}
+.ha-story-card::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent, transparent 4px, var(--ha-scan) 4px, var(--ha-scan) 5px);
+    opacity: 0.5;
+}
+.ha-story-card:hover { border-color: var(--ha-border-hi); box-shadow: 0 0 20px var(--ha-blue-glow); }
+.ha-story-cover {
+    width: 48px; height: 62px; flex-shrink: 0;
+    background: var(--ha-deep); border: 1px solid var(--ha-border); border-radius: 5px;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    overflow: hidden;
+}
+.ha-story-cover img { width: 100%; height: 100%; object-fit: cover; border-radius: 4px; }
+.ha-story-info { flex: 1; min-width: 0; }
+.ha-story-title {
+    font-size: 14px; font-weight: 700; color: var(--ha-t1);
+    margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ha-story-meta { font-size: 11px; color: var(--ha-t3); margin-bottom: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
+.ha-story-excerpt {
+    font-size: 12px; color: var(--ha-t2); line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* Genre tag */
+.ha-genre-tag {
+    display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 20px;
+    background: var(--ha-surface); border: 1px solid var(--ha-border);
+    color: var(--ha-t3);
+}
+.ha-genre-tag.horror     { border-color: rgba(204,51,68,0.4);   color: #cc5566; }
+.ha-genre-tag.supernatural { border-color: rgba(140,80,220,0.4); color: #aa77ee; }
+.ha-genre-tag.thriller   { border-color: rgba(0,174,239,0.35);  color: var(--ha-blue-dim); }
+.ha-genre-tag.mystery    { border-color: rgba(212,160,49,0.4);  color: var(--ha-amber); }
+.ha-genre-tag.paranormal { border-color: rgba(80,200,120,0.4);  color: #55bb88; }
+.ha-genre-tag.other      { border-color: var(--ha-border);      color: var(--ha-t3); }
+
+/* ────────────────────────────────────────────────
+   STORY READER
+──────────────────────────────────────────────── */
+.ha-reader-topbar {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(5,11,20,0.97); border-bottom: 1px solid var(--ha-border);
+    backdrop-filter: blur(10px); padding: 10px 16px;
+    display: flex; align-items: center; gap: 12px;
+}
+.ha-back-btn {
+    background: none !important; border: none !important; color: var(--ha-t3) !important;
+    font-size: 20px !important; padding: 4px 8px !important; cursor: pointer;
+    border-radius: var(--ha-rsm) !important; transition: color var(--ha-tr) !important; flex-shrink: 0;
+}
+.ha-back-btn:hover { color: var(--ha-blue) !important; background: rgba(0,174,239,0.08) !important; }
+.ha-topbar-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; color: var(--ha-t1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Reading progress bar */
+.ha-progress-bar { height: 2px; background: transparent; }
+.ha-progress-fill { height: 100%; background: linear-gradient(90deg, var(--ha-blue-dim), var(--ha-blue)); width: 0%; transition: width 0.1s linear; }
+
+.ha-reader-body { max-width: 680px; margin: 0 auto; padding: 28px 20px 48px; }
+.ha-reader-label {
+    display: inline-block; font-size: 9px; font-weight: 800; letter-spacing: 2px;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 4px;
+    background: rgba(204,51,68,0.1); border: 1px solid rgba(204,51,68,0.35); color: #cc5566;
+    margin-bottom: 14px;
+}
+.ha-reader-title  { font-size: 24px; font-weight: 800; color: var(--ha-t1); line-height: 1.25; margin: 0 0 8px; text-shadow: 0 0 30px rgba(0,174,239,0.15); }
+.ha-reader-byline { font-size: 12px; color: var(--ha-t3); margin-bottom: 22px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ha-reader-divider { height: 1px; background: linear-gradient(90deg, transparent, var(--ha-border), transparent); margin: 20px 0; }
+.ha-reader-text   { font-size: 15px; color: var(--ha-t2); line-height: 1.8; }
+.ha-reader-text p { margin: 0 0 1.3em; }
+.ha-reader-text p:last-child { margin: 0; }
+
+/* ────────────────────────────────────────────────
+   SUBMISSION FORM
+──────────────────────────────────────────────── */
+.ha-form-topbar {
+    display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+    border-bottom: 1px solid var(--ha-border);
+    background: rgba(5,11,20,0.5); position: sticky; top: 0; z-index: 90;
+}
+.ha-form-topbar-title { font-size: 13px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--ha-t1); flex: 1; }
+.ha-submit-btn {
+    font-size: 12px !important; font-weight: 700 !important; padding: 8px 20px !important;
+    border-radius: var(--ha-rsm) !important;
+    background: rgba(0,174,239,0.1) !important; border: 1px solid var(--ha-border-hi) !important;
+    color: var(--ha-blue) !important; white-space: nowrap;
+}
+.ha-submit-btn:hover { background: rgba(0,174,239,0.2) !important; }
+.ha-form-body { max-width: 700px; margin: 0 auto; padding: 24px 20px 48px; }
+.ha-field      { margin-bottom: 20px; }
+.ha-label      { display: block; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--ha-t3); margin-bottom: 7px; }
+.ha-input {
+    width: 100%; background: var(--ha-card) !important; border: 1px solid var(--ha-border) !important;
+    color: var(--ha-t1) !important; font-size: 14px !important;
+    padding: 10px 14px !important; border-radius: var(--ha-r) !important;
+    margin: 0 !important; box-sizing: border-box;
+}
+.ha-input:focus { border-color: var(--ha-border-hi) !important; box-shadow: 0 0 10px var(--ha-blue-glow) !important; }
+.ha-textarea {
+    width: 100%; background: var(--ha-card) !important; border: 1px solid var(--ha-border) !important;
+    color: var(--ha-t1) !important; font-size: 14px !important;
+    padding: 10px 14px !important; border-radius: var(--ha-r) !important;
+    margin: 0 !important; min-height: 300px; resize: vertical; line-height: 1.7;
+    font-family: inherit; box-sizing: border-box;
+}
+.ha-textarea:focus { border-color: var(--ha-border-hi) !important; box-shadow: 0 0 10px var(--ha-blue-glow) !important; }
+.ha-select {
+    width: 100%; background: var(--ha-card) !important; border: 1px solid var(--ha-border) !important;
+    color: var(--ha-t1) !important; font-size: 13px !important;
+    padding: 10px 14px !important; border-radius: var(--ha-r) !important;
+    margin: 0 !important; box-sizing: border-box;
+}
+.ha-hint  { font-size: 11px; color: var(--ha-muted); margin-top: 5px; line-height: 1.5; }
+.ha-char-count { font-size: 11px; color: var(--ha-muted); text-align: right; margin-top: 3px; }
+.ha-char-count.warn  { color: var(--ha-amber); }
+.ha-char-count.over  { color: var(--ha-red); }
+
+/* Ownership checkbox */
+.ha-checkbox-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; }
+.ha-checkbox-row input[type=checkbox] { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; accent-color: var(--ha-blue); cursor: pointer; }
+.ha-checkbox-row label { font-size: 13px; color: var(--ha-t2); line-height: 1.5; cursor: pointer; }
+
+/* ────────────────────────────────────────────────
+   MY SUBMISSIONS STATUS
+──────────────────────────────────────────────── */
+.ha-status-card {
+    background: var(--ha-card); border: 1px solid var(--ha-border); border-radius: var(--ha-r);
+    padding: 14px 16px; margin-bottom: 10px;
+}
+.ha-status-card.pending  { border-color: rgba(212,160,49,0.3); }
+.ha-status-card.published { border-color: rgba(46,204,106,0.3); }
+.ha-status-card.rejected { border-color: rgba(204,51,68,0.25); }
+.ha-status-title { font-size: 14px; font-weight: 700; color: var(--ha-t1); margin-bottom: 4px; }
+.ha-status-meta  { font-size: 11px; color: var(--ha-t3); margin-bottom: 6px; display: flex; gap: 8px; flex-wrap: wrap; }
+.ha-status-badge { font-size: 9px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+                   padding: 2px 8px; border-radius: 20px; }
+.ha-status-badge.pending   { background: rgba(212,160,49,0.12);  border: 1px solid rgba(212,160,49,0.4);  color: var(--ha-amber); }
+.ha-status-badge.published { background: rgba(46,204,106,0.10);  border: 1px solid rgba(46,204,106,0.4);  color: var(--ha-green); }
+.ha-status-badge.rejected  { background: rgba(204,51,68,0.10);   border: 1px solid rgba(204,51,68,0.35);  color: #cc5566; }
+.ha-status-feedback { font-size: 12px; color: var(--ha-t2); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--ha-border); font-style: italic; }
+
+/* ────────────────────────────────────────────────
+   FOUNDER DASHBOARD
+──────────────────────────────────────────────── */
+.ha-dash-tabs { display: flex; gap: 6px; margin-bottom: 20px; flex-wrap: wrap; }
+.ha-dash-tab {
+    font-size: 11px !important; font-weight: 700 !important; padding: 7px 16px !important;
+    border-radius: var(--ha-rsm) !important; background: var(--ha-lift) !important;
+    border: 1px solid var(--ha-border) !important; color: var(--ha-t3) !important; cursor: pointer;
+    transition: all var(--ha-tr) !important;
+}
+.ha-dash-tab.ha-tab-active, .ha-dash-tab:hover {
+    background: rgba(0,174,239,0.08) !important; border-color: var(--ha-border-hi) !important; color: var(--ha-blue) !important;
+}
+.ha-dash-card {
+    background: var(--ha-card); border: 1px solid var(--ha-border);
+    border-radius: var(--ha-r); padding: 16px; margin-bottom: 12px;
+}
+.ha-dash-card-title { font-size: 14px; font-weight: 700; color: var(--ha-t1); margin-bottom: 4px; }
+.ha-dash-card-meta  { font-size: 11px; color: var(--ha-t3); margin-bottom: 8px; display: flex; gap: 8px; flex-wrap: wrap; }
+.ha-dash-card-preview {
+    font-size: 13px; color: var(--ha-t2); line-height: 1.6; margin-bottom: 12px;
+    max-height: 120px; overflow: hidden; position: relative;
+}
+.ha-dash-card-preview.ha-expanded { max-height: none; }
+.ha-expand-btn {
+    font-size: 11px !important; background: none !important; border: none !important;
+    color: var(--ha-blue-dim) !important; padding: 2px 0 !important; cursor: pointer;
+    margin-bottom: 10px;
+}
+.ha-expand-btn:hover { color: var(--ha-blue) !important; }
+.ha-dash-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ha-btn-approve {
+    font-size: 11px !important; font-weight: 700 !important; padding: 7px 16px !important;
+    border-radius: var(--ha-rsm) !important;
+    background: rgba(46,204,106,0.1) !important; border: 1px solid rgba(46,204,106,0.4) !important;
+    color: var(--ha-green) !important;
+}
+.ha-btn-approve:hover { background: rgba(46,204,106,0.2) !important; }
+.ha-btn-reject {
+    font-size: 11px !important; font-weight: 700 !important; padding: 7px 16px !important;
+    border-radius: var(--ha-rsm) !important;
+    background: rgba(204,51,68,0.1) !important; border: 1px solid rgba(204,51,68,0.35) !important;
+    color: #cc5566 !important;
+}
+.ha-btn-reject:hover { background: rgba(204,51,68,0.2) !important; }
+.ha-feedback-input {
+    flex: 1; min-width: 150px;
+    background: var(--ha-lift) !important; border: 1px solid var(--ha-border) !important;
+    color: var(--ha-t1) !important; font-size: 12px !important;
+    padding: 7px 12px !important; border-radius: var(--ha-rsm) !important; margin: 0 !important;
+}
+.ha-feedback-input:focus { border-color: var(--ha-border-hi) !important; }
+
+/* ────────────────────────────────────────────────
+   LOADING / EMPTY / STATES
+──────────────────────────────────────────────── */
+.ha-spinner-wrap { text-align: center; padding: 40px 20px; color: var(--ha-muted); font-size: 13px; }
+.ha-spinner {
+    width: 26px; height: 26px; border: 2px solid rgba(0,174,239,0.14);
+    border-top-color: var(--ha-blue); border-radius: 50%;
+    animation: ha-spin 0.8s linear infinite; margin: 0 auto 12px;
+}
+@keyframes ha-spin { to { transform: rotate(360deg); } }
+.ha-empty { text-align: center; padding: 48px 20px; }
+.ha-empty-icon { font-size: 32px; opacity: 0.4; margin-bottom: 12px; }
+.ha-empty-text { font-size: 14px; color: var(--ha-t3); }
+.ha-error-text { text-align: center; padding: 28px 20px; font-size: 13px; color: #cc5566; }
+
+/* ────────────────────────────────────────────────
+   TOAST
+──────────────────────────────────────────────── */
+#haToast {
+    position: fixed; bottom: 72px; left: 50%; transform: translateX(-50%) translateY(10px);
+    z-index: 9200; background: rgba(5,11,20,0.97); border: 1px solid var(--ha-border-hi);
+    color: var(--ha-t1); font-size: 13px; font-weight: 600;
+    padding: 10px 22px; border-radius: 20px;
+    box-shadow: 0 4px 24px var(--ha-blue-glow);
+    pointer-events: none; opacity: 0; white-space: nowrap;
+    max-width: calc(100vw - 40px); text-align: center;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+#haToast.ha-show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ────────────────────────────────────────────────
+   RESPONSIVE
+──────────────────────────────────────────────── */
+@media (max-width: 499px) {
+    .ha-masthead-title  { font-size: 18px; }
+    .ha-reader-title    { font-size: 19px; }
+    .ha-reader-text     { font-size: 14px; }
+    .ha-section         { padding: 16px 12px 0; }
+    .ha-form-body       { padding: 18px 14px 40px; }
+}
