@@ -482,7 +482,7 @@
             } else {
                 _toast('Action failed. Please try again.');
             }
-            console.error('[HA] _review', e);
+            console.error('[HA] _review error code=' + (e.code || 'unknown') + ' msg=' + (e.message || e), e);
         }
     }
 

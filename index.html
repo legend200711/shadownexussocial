@@ -13109,15 +13109,16 @@ body.arcade-fs-ios body::after { display:none !important; }
           // Save email to Firestore — fire-and-forget
           if (user.email) updateDoc(doc(db, "users", user.uid), { email: user.email.toLowerCase() }).catch(() => {});
 
-          // Best-effort: keep Founder doc in sync — fire-and-forget (never blocks startup)
+          // Best-effort: keep Founder doc in sync — fire-and-forget (never blocks startup).
+          // Uses setDoc with merge:true so it succeeds even if the users/{uid} doc is
+          // missing or lacks the role field (updateDoc throws on a missing doc and the
+          // silenced .catch would leave isModerator() failing server-side, blocking
+          // haSubmissions approval).
           if (_isFounder) {
-              getDoc(doc(db, 'users', user.uid)).then(founderSnap => {
-                  const currentBadges = founderSnap.exists() ? (founderSnap.data().badges || []) : [];
-                  return updateDoc(doc(db, 'users', user.uid), {
-                      role: 'founder',
-                      badges: Array.from(new Set(['Founder', ...currentBadges]))
-                  });
-              }).catch(() => {});
+              setDoc(doc(db, 'users', user.uid), {
+                  role:   'founder',
+                  badges: arrayUnion('Founder')
+              }, { merge: true }).catch(e => { console.warn('[SNX] Founder role sync failed:', e); });
           }
           // Flush any auth-ready callbacks registered before auth resolved
           if (Array.isArray(window._snxAuthReadyQueue)) {
