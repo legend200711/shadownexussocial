@@ -436,19 +436,23 @@
     async function _review(id, newStatus) {
         var uid  = _auth && _auth.currentUser && _auth.currentUser.uid;
         var role = global._snxRole || '';
-        var isMod = role === 'founder' || role === 'moderator' || role === 'admin';
+        var isFounderRole = role === 'founder';
+        var isMod = isFounderRole || role === 'moderator' || role === 'admin';
         if (!uid || !isMod) { _toast('Not authorised.'); return; }
 
-        /* Client-side self-approval guard.
-           The Firestore rule enforces this server-side too, but we check here to
-           give a clear message rather than a raw permission-denied error. */
-        try {
-            var ownSnap = await _getDoc(_doc(_db, 'haSubmissions', id));
-            if (ownSnap.exists() && ownSnap.data().authorUid === uid) {
-                _toast('⛔ You cannot approve or reject your own submission.');
-                return;
-            }
-        } catch (_) { /* if fetch fails, let the server rule block it */ }
+        /* Self-approval guard: ordinary authors (non-founder moderators) cannot
+           approve or reject their own story.  The founder is the authorised
+           moderator of The Hollow Archives and may review any submission,
+           including their own.  The Firestore rule mirrors this policy. */
+        if (!isFounderRole) {
+            try {
+                var ownSnap = await _getDoc(_doc(_db, 'haSubmissions', id));
+                if (ownSnap.exists() && ownSnap.data().authorUid === uid) {
+                    _toast('⛔ You cannot approve or reject your own submission.');
+                    return;
+                }
+            } catch (_) { /* if fetch fails, let the server rule block it */ }
+        }
 
         var feedbackEl = document.getElementById('haFeedback_' + id);
         var feedback   = (feedbackEl ? feedbackEl.value : '').trim().slice(0, 300);

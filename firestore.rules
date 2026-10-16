@@ -1964,16 +1964,23 @@ service cloud.firestore {
         && request.resource.data.ownershipConfirmed == true;
 
       // Only moderators can approve / reject (change status).
-      // SELF-APPROVAL PREVENTION: a moderator cannot approve or reject their own
-      // submission.  If the caller is the author, the status field must not change.
-      // This is enforced server-side and cannot be bypassed by any client-side trick.
+      //
+      // Policy:
+      //   - The Founder is the authorised moderator of The Hollow Archives and
+      //     may approve or reject any submission, including their own.
+      //   - Non-founder moderators (role == 'moderator' | 'admin') cannot change
+      //     the status of a submission they authored — they may only update
+      //     non-status fields (e.g. adding feedback to their own pending draft).
+      //
+      // Server-side enforcement via isFounder() (reads users/{uid}.role == 'founder').
+      // Cannot be bypassed by any client-side trick.
       allow update: if isModerator()
         && (
+          // Founder may update any submission, including their own
+          isFounder()
           // Non-author moderators may change any field, including status
-          resource.data.authorUid != request.auth.uid
-          // Author who is also a moderator may only update non-status fields
-          // (e.g. Founder editing a title they submitted themselves), but may
-          // NOT change the submission's approval status.
+          || resource.data.authorUid != request.auth.uid
+          // Non-founder moderator who is the author: status must not change
           || request.resource.data.status == resource.data.status
         );
 
