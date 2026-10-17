@@ -54,13 +54,15 @@
   pointer-events: none !important;
   display: block !important;
 
-  /* Stage 2A.1: No hardcoded image here — the cold-start bootstrap script
-     injects the correct derivative via JS before this CSS is painted,
-     and snx-adaptive-performance.js applies the definitive value shortly after.
-     background-color provides an immediate dark shell.
-     The inline _snxBootstrapStyle overrides html{} with the chosen derivative;
-     _setBgSrc() from snx-adaptive-performance.js overrides this div directly. */
-  background-image: none !important;
+  /* The cold-start bootstrap script (_snxBootstrapStyle) and
+     snx-adaptive-performance.js both call _setBgSrc() which writes to
+     the dynamic _snxAdaptiveBgStyle <style> tag with !important, setting
+     this div's background-image correctly regardless of specificity order.
+     Do NOT use !important here — that would block the !important dynamic
+     style from a later-cascade stylesheet from taking effect in the same
+     layer. Instead, set a transparent fallback so the div shows only
+     after the image is applied. */
+  background-image: none;
 
   background-color: #02040a;
   background-size: cover !important;
@@ -115,6 +117,21 @@ html::before {
 /* nexus-glass.css and realm.css both set body { background: … !important }.   */
 /* We override body here to be transparent so html::before world shines through. */
 body {
+  background: transparent !important;
+  background-attachment: unset !important;
+}
+
+/* ── Quality-mode body override: nexus-glass.css sets:
+      .snx-quality-lite body    { background: #03080f !important }   (spec 0,1,1)
+      .snx-quality-minimal body { background: #03080f !important }   (spec 0,1,1)
+   These have higher specificity than plain `body` (spec 0,0,1) and would make
+   body solid, covering the world background completely.
+   We defeat them here with matching specificity + later cascade position.
+   snx-world-bg.css loads after nexus-glass.css, so same-specificity rules here win. */
+.snx-quality-lite body,
+.snx-quality-minimal body,
+.snx-live-active body,
+.snx-camera-active body {
   background: transparent !important;
   background-attachment: unset !important;
 }
@@ -352,8 +369,9 @@ html, body {
 }
 
 /* LITE: reduce decorative visual cost on content surfaces */
-.snx-quality-lite body::before {
-  /* Minimal vignette on LITE — reduce compositing work */
+.snx-quality-lite body::before,
+.snx-quality-minimal body::before {
+  /* Minimal vignette on LITE/minimal — reduce compositing work */
   background:
     radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.12) 100%) !important;
 }
@@ -369,7 +387,9 @@ html, body {
 
 /* LITE + MINIMAL: disable fog animation entirely */
 .snx-quality-lite body::after,
-.snx-quality-minimal body::after {
+.snx-quality-minimal body::after,
+.snx-live-active body::after,
+.snx-camera-active body::after {
   animation: none !important;
   background: none !important;
   opacity: 0 !important;

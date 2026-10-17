@@ -262,13 +262,18 @@
   function _setBgSrc(src) {
     var bgVal = _cssGrad + ', url("' + src + '")';
 
-    // Primary: #snx-global-world-bg div
+    // Also set the inline style as a fast-path (may be overridden by CSS !important
+    // in some cascade configurations, but serves as a belt-and-suspenders fallback)
     var div = document.getElementById('snx-global-world-bg');
     if (div) {
       div.style.backgroundImage = bgVal;
     }
 
-    // Secondary: html::before cannot be set via JS; we use a dynamic <style>
+    // Canonical: use a dynamic <style> with !important so the background-image
+    // on #snx-global-world-bg is set at stylesheet cascade level, winning over
+    // any !important rule from earlier stylesheets (snx-world-bg.css previously
+    // had `background-image: none !important` which blocked the inline style).
+    // Also sets html::before for the pseudo-element fallback layer.
     var styleId = '_snxAdaptiveBgStyle';
     var el = document.getElementById(styleId);
     if (!el) {
@@ -279,6 +284,7 @@
     // Escape the URL for CSS
     var escaped = src.replace(/"/g, '\\"');
     el.textContent =
+      '#snx-global-world-bg { background-image: ' + _cssGrad + ', url("' + escaped + '") !important; }' +
       'html::before { background-image: ' + _cssGrad + ', url("' + escaped + '") !important; }';
   }
 
