@@ -21,6 +21,13 @@
 (function (global) {
     'use strict';
 
+    /* ── Founder email — mirrors FOUNDER_EMAIL in index.html.
+       The Firebase Auth token email claim is set server-side and cannot be
+       spoofed.  Used as a secondary founder check alongside _snxRole so that
+       the founder can always moderate even if the Firestore role-sync write
+       has not yet completed (fire-and-forget race). ── */
+    var FOUNDER_EMAIL = 'christijerina46@gmail.com';
+
     /* ── Firebase lazy accessors ── */
     function _f(name) {
         var fs = global._haFS;
@@ -58,6 +65,19 @@
         _auth = auth;
     }
 
+    /* ── Determine whether the current user has founder/moderator privileges.
+       Uses a dual check:
+       1. window._snxRole — set synchronously at login; may lag behind Firestore sync.
+       2. Firebase Auth token email — always accurate, cannot be spoofed.
+       Either check granting founder status is sufficient. ── */
+    function _isFounderOrMod() {
+        var role      = global._snxRole || '';
+        var authEmail = (_auth && _auth.currentUser && _auth.currentUser.email) || '';
+        var isFndr    = role === 'founder'
+            || authEmail.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
+        return isFndr || role === 'moderator' || role === 'admin';
+    }
+
     function open() {
         if (!_db) {
             var fbDB   = global._snxDb   || null;
@@ -70,9 +90,7 @@
         /* Show the Review Queue button only to moderators/founder */
         var dashBtn = document.getElementById('haOpenDashBtn');
         if (dashBtn) {
-            var role = global._snxRole || '';
-            var isMod = role === 'founder' || role === 'moderator' || role === 'admin';
-            dashBtn.style.display = isMod ? '' : 'none';
+            dashBtn.style.display = _isFounderOrMod() ? '' : 'none';
         }
     }
 
@@ -346,9 +364,7 @@
     ═══════════════════════════════════════════════════════ */
 
     function openDashboard() {
-        var role = global._snxRole || '';
-        var isMod = role === 'founder' || role === 'moderator' || role === 'admin';
-        if (!isMod) {
+        if (!_isFounderOrMod()) {
             _toast('Founder access required.');
             return;
         }
@@ -434,11 +450,15 @@
     }
 
     async function _review(id, newStatus) {
-        var uid  = _auth && _auth.currentUser && _auth.currentUser.uid;
-        var role = global._snxRole || '';
-        var isFounderRole = role === 'founder';
-        var isMod = isFounderRole || role === 'moderator' || role === 'admin';
-        if (!uid || !isMod) { _toast('Not authorised.'); return; }
+        var uid           = _auth && _auth.currentUser && _auth.currentUser.uid;
+        var role          = global._snxRole || '';
+        var authEmail     = (_auth && _auth.currentUser && _auth.currentUser.email) || '';
+
+        /* Dual founder check — mirrors _isFounderOrMod() but captured here so
+           the self-approval guard below can use isFounderRole directly. */
+        var isFounderRole = role === 'founder'
+            || authEmail.toLowerCase() === FOUNDER_EMAIL.toLowerCase();
+        if (!uid || !_isFounderOrMod()) { _toast('Not authorised.'); return; }
 
         /* Self-approval guard: ordinary authors (non-founder moderators) cannot
            approve or reject their own story.  The founder is the authorised

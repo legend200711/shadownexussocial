@@ -1972,20 +1972,36 @@ service cloud.firestore {
       //     the status of a submission they authored — they may only update
       //     non-status fields (e.g. adding feedback to their own pending draft).
       //
-      // Server-side enforcement via isFounder() (reads users/{uid}.role == 'founder').
-      // Cannot be bypassed by any client-side trick.
-      allow update: if isModerator()
-        && (
-          // Founder may update any submission, including their own
-          isFounder()
-          // Non-author moderators may change any field, including status
-          || resource.data.authorUid != request.auth.uid
-          // Non-founder moderator who is the author: status must not change
-          || request.resource.data.status == resource.data.status
-        );
+      // Authorization is checked in two independent paths:
+      //
+      // PATH A — Founder via Firebase Auth token email (isFounderEmail).
+      //   The email claim in the JWT token is set by Firebase Auth server-side and
+      //   cannot be spoofed by any client-side trick.  This path works even if the
+      //   Firestore users/{uid} role-sync write has not yet completed (race condition
+      //   when the founder logs in for the first time or after a failed sync).
+      //   Founder may update any submission, including their own.
+      //
+      // PATH B — Moderators via Firestore role field (isModerator).
+      //   Applies to non-founder moderators and admins.
+      //   Non-founder moderator who is the author of the submission: they may only
+      //   update non-status fields (e.g. adding feedback to their own pending draft).
+      //   Non-author moderators: may change any field, including status.
+      allow update: if
+        // PATH A: Founder — email token claim, no Firestore doc read needed
+        isFounderEmail()
+        // PATH B: Other moderators — Firestore role gate
+        || (isModerator()
+            && (
+              // Founder via role field may also update their own submissions
+              isFounder()
+              // Non-author moderators may change any field, including status
+              || resource.data.authorUid != request.auth.uid
+              // Non-founder moderator who is the author: status must not change
+              || request.resource.data.status == resource.data.status
+            ));
 
       // Only the founder may delete a submission
-      allow delete: if isFounder();
+      allow delete: if isFounder() || isFounderEmail();
     }
 
     // ════════════════════════════════════════════════════════════════════════
